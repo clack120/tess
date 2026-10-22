@@ -367,24 +367,25 @@ export class Codegen {
     // what the caller sees from entry once its stack has run out.
     const returnsValue = define.type === 'function_create_value';
     const result = returnsValue ? this.value(define.params[3]).code : '';
+    // On pause, entry hands a value call its result at once: `th.finish` thrown
+    // into the frame skips the rest of the body to the return expression.
     let source =
       `function* (e, th, P) {\n` +
       `  if (th.depth >= ${CALL_DEPTH_LIMIT}) return;\n` +
       `  th.depth += 1;\n` +
       `  try {\n` +
-      `  const L = {${locals}};\n` +
-      (returnsValue ? `  frame.onPause = function* () { return ${result}; };\n` : '') +
-      `  fn: {\n${body}  }\n`;
-    if (returnsValue) {
-      source += `  frame.onPause = undefined;\n  return ${result};\n`;
-    }
+      `  const L = {${locals}};\n`;
+    source += returnsValue
+      ? `  try {\n  fn: {\n${body}  }\n  } catch (x) { if (x !== th.finish) throw x; }\n  return ${result};\n`
+      : `  fn: {\n${body}  }\n`;
     source += '  } finally { th.depth -= 1; }\n}';
 
     this.paramSlots = null;
     this.funcLocals = null;
     this.loopDepth = previousLoopDepth;
+    // Marked once on the prototype, so a call costs nothing extra.
     return returnsValue
-      ? `function (e, th, P) { const frame = (${source})(e, th, P); return frame; }`
+      ? `((g) => { g.prototype.finishes = true; return g; })(${source})`
       : source;
   }
 

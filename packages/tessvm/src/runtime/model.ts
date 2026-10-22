@@ -763,7 +763,10 @@ export interface CompiledScript {
 export type Yielded = number | CallFrame;
 
 /** One function call in progress on a thread's call stack. */
-export type CallFrame = Generator<Yielded, unknown, unknown> & { onPause?: () => CallFrame };
+export type CallFrame = Generator<Yielded, unknown, unknown> & { finishes?: boolean };
+
+/** Thrown into a value call to end it with its return expression. */
+const FINISH = Symbol('finish');
 
 export type ScriptBody = (entity: Entity, thread: Thread) => Generator<Yielded, void, unknown>;
 
@@ -779,6 +782,10 @@ export class Thread {
   /** The body and the calls nested in it, innermost last. Kept off the JS stack. */
   private frames: CallFrame[];
   private waitingAsync = false;
+  /** What compiled value calls catch to end early. */
+  get finish(): symbol {
+    return FINISH;
+  }
   done = false;
   /** True while this thread's generator is on the stack. */
   running = false;
@@ -809,7 +816,7 @@ export class Thread {
 
   /** Entry completes a frame-waiting value call on pause, but keeps promise waits. */
   finishValueCalls(): void {
-    if (this.done || this.running || this.waitingAsync || !this.frames.some((frame) => frame.onPause)) return;
+    if (this.done || this.running || this.waitingAsync || !this.frames.some((frame) => frame.finishes)) return;
     this.running = true;
     try {
       this.resume(true);
@@ -824,13 +831,18 @@ export class Thread {
     let input: unknown;
     let thrown = false;
     let error: unknown;
+    // A call not started yet cannot catch what is thrown into it, and one
+    // already told is evaluating its return expression.
+    let fresh = false;
+    const told = finishingValues ? new Set<CallFrame>() : null;
     for (;;) {
-      if (finishingValues) {
-        const at = frames.findLastIndex((frame) => frame.onPause);
-        if (at !== -1) {
-          const finish = frames[at]!.onPause!;
-          while (frames.length > at) frames.pop()!.return(undefined);
-          frames.push(finish());
+      if (told && !thrown) {
+        const at = frames.findLastIndex((frame) => frame.finishes && !told.has(frame));
+        if (at !== -1 && !(fresh && at === frames.length - 1)) {
+          while (frames.length > at + 1) frames.pop()!.return(undefined);
+          told.add(frames[at]!);
+          thrown = true;
+          error = FINISH;
         }
       }
       const frame = frames[frames.length - 1]!;
@@ -838,7 +850,9 @@ export class Thread {
       try {
         result = thrown ? frame.throw(error) : frame.next(input);
         thrown = false;
+        fresh = false;
       } catch (caught) {
+        fresh = false;
         frames.pop();
         if (!frames.length) {
           this.done = true;
@@ -860,10 +874,11 @@ export class Thread {
       const value = result.value;
       if (typeof value === 'number') {
         this.waitingAsync = value === 1;
-        if (finishingValues && !this.waitingAsync && frames.some((frame) => frame.onPause)) continue;
+        if (told && !this.waitingAsync && frames.some((frame) => frame.finishes && !told.has(frame))) continue;
         return;
       }
       frames.push(value);
+      fresh = true;
       input = undefined;
     }
   }
