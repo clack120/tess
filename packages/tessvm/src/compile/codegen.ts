@@ -47,6 +47,8 @@ export interface CompiledProgram {
   plans: ScriptPlan[];
   /** Block types the compiler did not know, with how often they appeared. */
   unknown: Map<string, number>;
+  /** Key codes the work reacts to or reads, or null when it may read any key. */
+  keys: Set<number> | null;
 }
 
 /** Hat blocks and the runtime event each one waits for. */
@@ -234,6 +236,7 @@ export class Codegen {
   private readonly bodies: string[] = [];
   private readonly functionSources: string[] = [];
   readonly unknown = new Map<string, number>();
+  private keys: Set<number> | null = new Set();
 
   /** Names bound inside the function body currently being compiled. */
   private paramSlots: Map<string, number> | null = null;
@@ -285,6 +288,7 @@ export class Codegen {
         const filterIndex = pick(HAT_FILTER, hat.type);
         const filter =
           filterIndex === undefined ? null : text(hat.params[filterIndex]);
+        if (event === 'keyPress') this.keys?.add(Number(filter));
         const body = this.compileStack(stack.slice(1));
         this.plans.push({
           targetIndex,
@@ -296,7 +300,7 @@ export class Codegen {
         this.bodies.push(`function* (e, th) {\n${body}}`);
       }
     });
-    return { source: this.emitModule(), plans: this.plans, unknown: this.unknown };
+    return { source: this.emitModule(), plans: this.plans, unknown: this.unknown, keys: this.keys };
   }
 
   /**
@@ -1059,6 +1063,9 @@ export class Codegen {
       case 'is_object_clicked':
         return { code: 'O.isObjectClicked(e)', kind: 'bool' };
       case 'is_press_some_key':
+        // A key worked out at run time could be any key.
+        if (isBlock(p[0])) this.keys = null;
+        else this.keys?.add(Number(text(p[0])));
         return { code: `O.isKeyPressed(${this.field(p[0])})`, kind: 'bool' };
       case 'reach_something':
         return { code: `O.touching(e, ${this.field(p[1])})`, kind: 'bool' };

@@ -533,6 +533,8 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
 
 /** Keys that are a modifier themselves, so holding one down is not a chord. */
 const MODIFIER_KEY_CODES = new Set([16, 17, 18]);
+/** `Escape` — never taken from the page. */
+const ESCAPE = 27;
 
 /** Controls that read keys of their own — the answer field, the player's bar. */
 const CONTROL_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A']);
@@ -548,10 +550,14 @@ const CONTROL_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A']);
 function worksKey(vm: Vm, event: KeyboardEvent, code: number): boolean {
   // The work is only told about keys while it runs (`Vm.fireEvent`), so the page
   // keeps them whenever it is stopped or held.
-  if (code === 0 || vm.state !== 'run') {
+  // Escape always leaves fullscreen and the page's own dialogs; the work still hears it.
+  if (code === 0 || code === ESCAPE || vm.state !== 'run') {
     return false;
   }
-  if ((event.ctrlKey || event.altKey || event.metaKey) && !MODIFIER_KEY_CODES.has(code)) {
+  // A shortcut stays the browser's unless the work reacts to that key, which
+  // entry takes for the work while it runs.
+  if ((event.ctrlKey || event.altKey || event.metaKey) && !MODIFIER_KEY_CODES.has(code) &&
+    vm.usedKeys !== null && !vm.usedKeys.has(code)) {
     return false;
   }
   const target = event.target as HTMLElement | null;

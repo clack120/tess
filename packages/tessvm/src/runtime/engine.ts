@@ -300,6 +300,8 @@ export class Vm implements Project {
   private readonly written = new Map<string, string>();
   private lastStoreFlush = 0;
   unknownBlocks = new Map<string, number>();
+  /** Key codes the work reacts to or reads; null when it may read any key. */
+  usedKeys: Set<number> | null = new Set();
   /** What the loaded work was compiled from; `evaluate` compiles against the same records. */
   private compileInput: CompileInput | null = null;
 
@@ -499,6 +501,7 @@ export class Vm implements Project {
     const codegen = new Codegen(input);
     const program = codegen.compile();
     this.unknownBlocks = program.unknown;
+    this.usedKeys = program.keys;
     const factory = new Function('R', program.source) as (
       runtime: Vm,
     ) => { scripts: CompiledScript['body'][]; functions: CompiledFunction[] };
