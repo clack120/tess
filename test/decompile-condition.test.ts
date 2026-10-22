@@ -53,7 +53,7 @@ test('round-trip preserves numeric condition conversion and evaluates a value ca
   const cases: Array<[unknown, boolean]> = [
     [0, false], [1, true], [-2, true], ['', false], [' ', false],
     ['0', false], ['0.00', false], ['0e2', false], ['0x0', false],
-    ['FALSE', true], ['false', true], ['undefined', true], [false, false], [true, true],
+    ['false', true], ['undefined', true], [false, false], [true, true],
   ];
   for (const negate of [false, true]) {
     const { project, stacks, condition, call } = fixture();
@@ -65,6 +65,10 @@ test('round-trip preserves numeric condition conversion and evaluates a value ca
       assert.deepEqual(run(project, input), expected, `original ${JSON.stringify({ input, negate })}`);
       assert.deepEqual(run(converted, input), expected, `roundtrip ${JSON.stringify({ input, negate })}`);
     }
+    // Tess writes a stored judgement as "FALSE", so that text can no longer be
+    // told apart from entry's false; the round-trip reads it as false.
+    assert.deepEqual(run(project, 'FALSE'), { out: Number(!negate), hits: 1 });
+    assert.deepEqual(run(converted, 'FALSE'), { out: Number(negate), hits: 1 });
   }
 });
 
@@ -161,5 +165,31 @@ test('legacy and/or keep numeric condition conversion for value calls', () => {
     project.objects[0]!.script = JSON.stringify(stacks);
     const converted = roundtrip(project);
     for (const input of [0, 1]) assert.deepEqual(run(converted, input), run(project, input), `${type}: ${input}`);
+  }
+});
+
+test('a judgement stored in a variable keeps its truth after round-trip', () => {
+  for (const [left, truth] of [['1', true], ['2', false]] as const) {
+    const { project, stacks, condition } = fixture();
+    const inputId = project.variables.find((v) => v.name === 'input')!.id;
+    const set = {
+      type: 'set_variable',
+      params: [inputId, {
+        type: 'boolean_basic_operator',
+        params: [{ type: 'number', params: [left] }, 'EQUAL', { type: 'number', params: ['1'] }],
+      }, null],
+    };
+    stacks[0].splice(1, 0, set);
+    condition.params[0] = { type: 'get_variable', params: [inputId, null] };
+    project.objects[0]!.script = JSON.stringify(stacks);
+    const expected = { out: Number(truth), hits: 0 };
+    for (const proj of [project, roundtrip(project)]) {
+      const vm = new Vm({ renderer: null, audio: null });
+      vm.load(proj as never);
+      vm.start();
+      vm.tick();
+      const value = (name: string) => Number(vm.variables.find((v) => v.name === name)!.getValue());
+      assert.deepEqual({ out: value('out'), hits: value('hits') }, expected, `${left}`);
+    }
   }
 });
