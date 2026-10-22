@@ -92,7 +92,7 @@ export class TessParser extends CstParser {
   declare readonly goStatement: Rule;
   declare readonly identifier: Rule;
   declare readonly ifStatement: Rule;
-  declare readonly indexExpr: Rule;
+  declare readonly indexSuffix: Rule;
   declare readonly jumpStatement: Rule;
   declare readonly listAddStatement: Rule;
   declare readonly listDecl: Rule;
@@ -113,6 +113,7 @@ export class TessParser extends CstParser {
   declare readonly posExpr: Rule;
   declare readonly powExpr: Rule;
   declare readonly primaryExpr: Rule;
+  declare readonly primaryAtom: Rule;
   declare readonly program: Rule;
   declare readonly projectDecl: Rule;
   declare readonly projectField: Rule;
@@ -161,6 +162,7 @@ export class TessParser extends CstParser {
       nodeLocationTracking: 'full',
       maxLookahead: 2,
       errorMessageProvider,
+      recoveryEnabled: true,
     });
     const $ = this;
 
@@ -1261,6 +1263,11 @@ export class TessParser extends CstParser {
     $.RULE('posExpr', () => $.SUBRULE($.unaryExpr));
 
     $.RULE('primaryExpr', () => {
+      $.SUBRULE($.primaryAtom, { LABEL: 'operand' });
+      $.MANY(() => $.SUBRULE($.indexSuffix, { LABEL: 'suffix' }));
+    });
+
+    $.RULE('primaryAtom', () => {
       $.OR({
         IGNORE_AMBIGUITIES: true,
         DEF: [
@@ -1274,10 +1281,6 @@ export class TessParser extends CstParser {
           {
             GATE: () => $.LA(2).tokenTypeIdx === idx(LParen),
             ALT: () => $.SUBRULE($.callExpr, { LABEL: 'call' }),
-          },
-          {
-            GATE: () => $.LA(2).tokenTypeIdx === idx(LSquare),
-            ALT: () => $.SUBRULE($.indexExpr, { LABEL: 'index' }),
           },
           { ALT: () => $.CONSUME(NumberLiteral, { LABEL: 'number' }) },
           { ALT: () => $.CONSUME(StringLiteral, { LABEL: 'string' }) },
@@ -1300,8 +1303,7 @@ export class TessParser extends CstParser {
 
     // `표[2, "점수"]` reads a table cell; one index reads a list item or, on a
     // table, a spreadsheet cell reference such as `표["B2"]`.
-    $.RULE('indexExpr', () => {
-      $.SUBRULE($.identifier, { LABEL: 'target' });
+    $.RULE('indexSuffix', () => {
       $.CONSUME(LSquare);
       $.SUBRULE($.expr, { LABEL: 'index' });
       $.OPTION(() => {

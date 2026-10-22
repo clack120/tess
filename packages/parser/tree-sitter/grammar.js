@@ -492,10 +492,11 @@ module.exports = grammar({
     _unary: ($) => choice($.primary_expr, $.unary_expr),
     unary_expr: ($) => seq(repeat1(field('operators', '-')), field('operand', $.primary_expr)),
 
-    primary_expr: ($) => choice(
+    primary_expr: ($) => seq(field('operand', $.primary_atom), repeat(field('suffix', $.index_suffix))),
+
+    primary_atom: ($) => choice(
       seq('(', field('inner', $._expr), ')'),
       field('call', $.call_expr),
-      field('index', $.index_expr),
       field('number', $.number),
       field('string', $.string),
       field('boolean', $.boolean),
@@ -506,8 +507,7 @@ module.exports = grammar({
 
     call_expr: ($) => seq(field('callee', $.identifier), $._call_open, commaSep(field('args', $._expr)), ')'),
 
-    index_expr: ($) => seq(
-      field('target', $.identifier),
+    index_suffix: ($) => seq(
       $._index_open,
       field('index', $._expr),
       optional(seq(',', field('column', $._expr))),

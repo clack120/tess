@@ -860,9 +860,17 @@ export class TessAstVisitor extends BaseVisitor {
   }
 
   primaryExpr(ctx: Ctx, node: CstNode): Expr {
+    let target = this.visit(ctx.operand) as Expr;
+    for (const suffix of (ctx.suffix ?? []) as CstNode[]) {
+      const { index, column, loc } = this.visit(suffix);
+      target = { type: 'Index', target, index, column, loc: { start: nodeLoc(node).start, end: loc.end } };
+    }
+    return target;
+  }
+
+  primaryAtom(ctx: Ctx, node: CstNode): Expr {
     if (ctx.inner) return this.visit(ctx.inner);
     if (ctx.call) return this.visit(ctx.call);
-    if (ctx.index) return this.visit(ctx.index);
     if (ctx.number) return numberNode(ctx.number[0]);
     if (ctx.string) return stringNode(ctx.string[0]);
     if (ctx.boolean) return this.visit(ctx.boolean);
@@ -888,10 +896,8 @@ export class TessAstVisitor extends BaseVisitor {
     };
   }
 
-  indexExpr(ctx: Ctx, node: CstNode): IndexNode {
+  indexSuffix(ctx: Ctx, node: CstNode): { index: Expr; column: Expr | null; loc: Loc } {
     return {
-      type: 'Index',
-      target: this.visit(ctx.target),
       index: this.visit(ctx.index),
       column: ctx.column ? this.visit(ctx.column) : null,
       loc: nodeLoc(node),

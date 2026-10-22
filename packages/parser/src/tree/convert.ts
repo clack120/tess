@@ -610,20 +610,22 @@ function foldPrefix(operators: SyntaxNode[], operand: SyntaxNode, name: 'not' | 
 }
 
 function primary(node: SyntaxNode): Expr {
+  let target = primaryAtom(field(node, 'operand')!);
+  for (const suffix of fields(node, 'suffix')) {
+    target = {
+      type: 'Index', target, index: expr(field(suffix, 'index')!),
+      column: has(suffix, 'column') ? expr(field(suffix, 'column')!) : null,
+      loc: { start: loc(node).start, end: loc(suffix).end },
+    } as Expr;
+  }
+  return target;
+}
+
+function primaryAtom(node: SyntaxNode): Expr {
   const inner = field(node, 'inner');
   if (inner) return expr(inner);
   const call = field(node, 'call');
   if (call) return callExpr(call);
-  const index = field(node, 'index');
-  if (index) {
-    return {
-      type: 'Index',
-      target: identifier(field(index, 'target')!),
-      index: expr(field(index, 'index')!),
-      column: has(index, 'column') ? expr(field(index, 'column')!) : null,
-      loc: loc(index),
-    } as Expr;
-  }
   const number = field(node, 'number');
   if (number) return numberNode(number);
   const string = field(node, 'string');

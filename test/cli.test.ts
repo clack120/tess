@@ -115,6 +115,16 @@ test('진단은 오류 번호와 도움말, 처음 선언한 파일을 함께 �
   assert.match(result.output, /도움말:.*대입/);
 });
 
+test('여덟 개를 넘는 오류도 위치와 코드를 모두 보여준다', (t) => {
+  const names = Array.from({ length: 10 }, (_, at) => `missing_${at}`);
+  const dir = project(t, { 'main.tess': `object "o":\n  when start do\n${names.map(name => `    say ${name}`).join('\n')}\n  end\nend` });
+  const result = cli('check', path.join(dir, 'main.tess'));
+  assert.equal(result.code, 1);
+  assert.match(result.output, /에러 10개/);
+  for (const name of names) assert.ok(result.output.includes(`'${name}'`));
+  assert.doesNotMatch(result.output, /… 외/);
+});
+
 // --- 느슨한 실행 -------------------------------------------------------------
 const LOOSE_PROJECT = `scene "s":
   object "주인공":

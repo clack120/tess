@@ -158,8 +158,6 @@ function diagnostic(label: string, item: CompileDiagnostic, muted = false): stri
   ].join('\n');
 }
 
-const MAX_SHOWN = 8;
-
 /** 진단 등급별 색과 출력 방식. 주의는 흐리게 깔려서 경고와 한눈에 갈린다. */
 const REPORT_STYLES = {
   '에러': { paint: red, muted: false, write: (text: string) => log.error(text) },
@@ -175,7 +173,7 @@ export type ReportKind = keyof typeof REPORT_STYLES;
 
 /**
  * 에러 · 경고 · 주의 목록을 그룹지어 출력합니다.
- * 최대 출력 수치를 넘어서면 요약된 건수로 표기합니다.
+ * 모든 진단을 보여 주어 뒤쪽 오류도 한 번에 고칠 수 있게 합니다.
  *
  * @param label - 대상 파일 이름 또는 식별자
  * @param diagnostics - 진단 메시지 배열
@@ -188,14 +186,10 @@ export function report(label: string, diagnostics: CompileDiagnostic[], kind: Re
   if (diagnostics.length === 0) return;
 
   const style = REPORT_STYLES[kind];
-  const shown = diagnostics.slice(0, MAX_SHOWN);
   const lines = [
     style.paint(`${kind} ${diagnostics.length}개`),
-    ...shown.map((item) => diagnostic(label, item, style.muted)),
+    ...diagnostics.map((item) => diagnostic(label, item, style.muted)),
   ];
-  if (diagnostics.length > shown.length) {
-    lines.push(dim(`… 외 ${diagnostics.length - shown.length}개`));
-  }
   style.write(lines.join('\n'));
 }
 
