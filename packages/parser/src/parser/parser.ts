@@ -86,13 +86,16 @@ export class TessParser extends CstParser {
   declare readonly flowStatement: Rule;
   declare readonly forceId: Rule;
   declare readonly foreverStatement: Rule;
+  declare readonly forStatement: Rule;
   declare readonly forwardStatement: Rule;
   declare readonly functionDecl: Rule;
   declare readonly functionParam: Rule;
   declare readonly goStatement: Rule;
   declare readonly identifier: Rule;
   declare readonly ifStatement: Rule;
-  declare readonly indexExpr: Rule;
+  declare readonly switchStatement: Rule;
+  declare readonly caseClause: Rule;
+  declare readonly indexSuffix: Rule;
   declare readonly jumpStatement: Rule;
   declare readonly listAddStatement: Rule;
   declare readonly listDecl: Rule;
@@ -113,6 +116,7 @@ export class TessParser extends CstParser {
   declare readonly posExpr: Rule;
   declare readonly powExpr: Rule;
   declare readonly primaryExpr: Rule;
+  declare readonly primaryAtom: Rule;
   declare readonly program: Rule;
   declare readonly projectDecl: Rule;
   declare readonly projectField: Rule;
@@ -161,6 +165,7 @@ export class TessParser extends CstParser {
       nodeLocationTracking: 'full',
       maxLookahead: 2,
       errorMessageProvider,
+      recoveryEnabled: true,
     });
     const $ = this;
 
@@ -614,7 +619,9 @@ export class TessParser extends CstParser {
         IGNORE_AMBIGUITIES: true,
         DEF: [
           { GATE: () => $.leads(kw.if), ALT: () => $.SUBRULE($.ifStatement) },
+          { GATE: () => $.leads(kw.switch), ALT: () => $.SUBRULE($.switchStatement) },
           { GATE: () => $.leads(kw.repeat), ALT: () => $.SUBRULE($.repeatStatement) },
+          { GATE: () => $.leads(kw.for), ALT: () => $.SUBRULE($.forStatement) },
           { GATE: () => $.leads(kw.while), ALT: () => $.SUBRULE($.whileStatement) },
           { GATE: () => $.leads(kw.until), ALT: () => $.SUBRULE($.untilStatement) },
           { GATE: () => $.leads(kw.forever), ALT: () => $.SUBRULE($.foreverStatement) },
@@ -676,9 +683,43 @@ export class TessParser extends CstParser {
       $.SUBRULE($.block, { LABEL: 'body' });
       $.CONSUME(kw.end);
     });
+    $.RULE('switchStatement', () => {
+      $.CONSUME(kw.switch);
+      $.SUBRULE($.expr, { LABEL: 'value' });
+      $.SUBRULE($.blockOpen);
+      $.MANY(() => $.SUBRULE($.caseClause, { LABEL: 'cases' }));
+      $.OPTION(() => {
+        $.CONSUME(kw.default);
+        $.SUBRULE2($.blockOpen);
+        $.SUBRULE($.block, { LABEL: 'alternate' });
+      });
+      $.CONSUME(kw.end);
+    });
+    $.RULE('caseClause', () => {
+      $.CONSUME(kw.case);
+      $.AT_LEAST_ONE_SEP({ SEP: Comma, DEF: () => $.SUBRULE($.expr, { LABEL: 'values' }) });
+      $.SUBRULE($.blockOpen);
+      $.SUBRULE($.block, { LABEL: 'body' });
+    });
     loopRule('repeatStatement', kw.repeat);
     loopRule('whileStatement', kw.while);
     loopRule('untilStatement', kw.until);
+
+    $.RULE('forStatement', () => {
+      $.CONSUME(kw.for);
+      $.SUBRULE($.identifier, { LABEL: 'name' });
+      $.CONSUME(kw.from);
+      $.SUBRULE($.expr, { LABEL: 'from' });
+      $.CONSUME(kw.to);
+      $.SUBRULE2($.expr, { LABEL: 'to' });
+      $.OPTION(() => {
+        $.CONSUME(kw.step);
+        $.SUBRULE($.signedNumber, { LABEL: 'step' });
+      });
+      $.SUBRULE($.blockOpen);
+      $.SUBRULE($.block, { LABEL: 'body' });
+      $.CONSUME(kw.end);
+    });
 
     $.RULE('foreverStatement', () => {
       $.CONSUME(kw.forever);
@@ -704,7 +745,10 @@ export class TessParser extends CstParser {
 
     $.RULE('returnStatement', () => {
       $.CONSUME(kw.return);
-      $.SUBRULE($.expr, { LABEL: 'value' });
+      $.OPTION({
+        GATE: () => $.sameLine() && $.startsExpr(),
+        DEF: () => $.SUBRULE($.expr, { LABEL: 'value' }),
+      });
     });
 
     // `stop` changes meaning entirely with what follows it.
@@ -1258,6 +1302,11 @@ export class TessParser extends CstParser {
     $.RULE('posExpr', () => $.SUBRULE($.unaryExpr));
 
     $.RULE('primaryExpr', () => {
+      $.SUBRULE($.primaryAtom, { LABEL: 'operand' });
+      $.MANY(() => $.SUBRULE($.indexSuffix, { LABEL: 'suffix' }));
+    });
+
+    $.RULE('primaryAtom', () => {
       $.OR({
         IGNORE_AMBIGUITIES: true,
         DEF: [
@@ -1271,10 +1320,6 @@ export class TessParser extends CstParser {
           {
             GATE: () => $.LA(2).tokenTypeIdx === idx(LParen),
             ALT: () => $.SUBRULE($.callExpr, { LABEL: 'call' }),
-          },
-          {
-            GATE: () => $.LA(2).tokenTypeIdx === idx(LSquare),
-            ALT: () => $.SUBRULE($.indexExpr, { LABEL: 'index' }),
           },
           { ALT: () => $.CONSUME(NumberLiteral, { LABEL: 'number' }) },
           { ALT: () => $.CONSUME(StringLiteral, { LABEL: 'string' }) },
@@ -1297,8 +1342,7 @@ export class TessParser extends CstParser {
 
     // `표[2, "점수"]` reads a table cell; one index reads a list item or, on a
     // table, a spreadsheet cell reference such as `표["B2"]`.
-    $.RULE('indexExpr', () => {
-      $.SUBRULE($.identifier, { LABEL: 'target' });
+    $.RULE('indexSuffix', () => {
       $.CONSUME(LSquare);
       $.SUBRULE($.expr, { LABEL: 'index' });
       $.OPTION(() => {

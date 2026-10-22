@@ -13,14 +13,14 @@ export { decodeString };
 import type {
   AskNode, AssignNode, BooleanNode, CallNode, CenterNode, ClearNode, CloneNode,
   CostumeNode, CostumeStepNode, EventNode, Expr, ExpressionStatementNode,
-  FlipNode, ForeverNode, ForwardNode, FunctionDeclNode, GoNode, Identifier,
+  FlipNode, ForNode, ForeverNode, ForwardNode, FunctionDeclNode, GoNode, Identifier,
   IfNode, IndexNode, JumpNode, ListAddNode, ListDeclNode, ListInsertNode,
   ListLiteralNode, ListRemoveNode, Loc, LookNode, LValue, MoveNode,
   NullaryNode, NullaryStatementType, NumberNode, ObjectMember, ObjectNode,
   OrderNode, ParseRoot, PlayBgmNode, PlaySoundNode, ProgramNode, ProjectFieldNode,
   ProjectNode, PropertyNode, ReadNode, RepeatNode, ReturnNode, SayNode,
   SceneMember, SceneNode, SendNode, ShowHideNode, SoundNode, StopNode,
-  StopSoundNode, StorageScope, StringNode, Stmt, TableAddLineNode, TableDeclNode,
+  StopSoundNode, StorageScope, StringNode, Stmt, SwitchCase, SwitchNode, TableAddLineNode, TableDeclNode,
   StoreSaveNode, TableLine, TableRemoveLineNode, TableSaveNode, TextWriteNode, TopLevelItem,
   TtsSettingNode, TurnNode, UntilNode, UseNode, UseObjectNode, VarDeclNode,
   WaitNode, WhileNode,
@@ -503,7 +503,25 @@ export class TessAstVisitor extends BaseVisitor {
   }
 
   returnStatement(ctx: Ctx, node: CstNode): ReturnNode {
-    return { type: 'Return', value: this.visit(ctx.value), loc: nodeLoc(node) };
+    return { type: 'Return', value: ctx.value ? this.visit(ctx.value) : null, loc: nodeLoc(node) };
+  }
+
+  forStatement(ctx: Ctx, node: CstNode): ForNode {
+    return { type: 'For', name: this.visit(ctx.name).name,
+      from: this.visit(ctx.from), to: this.visit(ctx.to),
+      step: ctx.step ? this.visit(ctx.step).value : 1,
+      body: this.visit(ctx.body), loc: nodeLoc(node) };
+  }
+
+  switchStatement(ctx: Ctx, node: CstNode): SwitchNode {
+    return { type: 'Switch', value: this.visit(ctx.value),
+      cases: (ctx.cases ?? []).map((clause: CstNode) => this.visit(clause)),
+      alternate: ctx.alternate ? this.visit(ctx.alternate) : null, loc: nodeLoc(node) };
+  }
+
+  caseClause(ctx: Ctx, node: CstNode): SwitchCase {
+    return { values: ctx.values.map((value: CstNode) => this.visit(value)),
+      body: this.visit(ctx.body), loc: nodeLoc(node) };
   }
 
   stopStatement(ctx: Ctx, node: CstNode): StopSoundNode | NullaryNode | StopNode {
@@ -860,9 +878,17 @@ export class TessAstVisitor extends BaseVisitor {
   }
 
   primaryExpr(ctx: Ctx, node: CstNode): Expr {
+    let target = this.visit(ctx.operand) as Expr;
+    for (const suffix of (ctx.suffix ?? []) as CstNode[]) {
+      const { index, column, loc } = this.visit(suffix);
+      target = { type: 'Index', target, index, column, loc: { start: nodeLoc(node).start, end: loc.end } };
+    }
+    return target;
+  }
+
+  primaryAtom(ctx: Ctx, node: CstNode): Expr {
     if (ctx.inner) return this.visit(ctx.inner);
     if (ctx.call) return this.visit(ctx.call);
-    if (ctx.index) return this.visit(ctx.index);
     if (ctx.number) return numberNode(ctx.number[0]);
     if (ctx.string) return stringNode(ctx.string[0]);
     if (ctx.boolean) return this.visit(ctx.boolean);
@@ -888,10 +914,8 @@ export class TessAstVisitor extends BaseVisitor {
     };
   }
 
-  indexExpr(ctx: Ctx, node: CstNode): IndexNode {
+  indexSuffix(ctx: Ctx, node: CstNode): { index: Expr; column: Expr | null; loc: Loc } {
     return {
-      type: 'Index',
-      target: this.visit(ctx.target),
       index: this.visit(ctx.index),
       column: ctx.column ? this.visit(ctx.column) : null,
       loc: nodeLoc(node),

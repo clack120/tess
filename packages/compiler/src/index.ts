@@ -17,7 +17,7 @@ import { compileStatements, compileStatement } from './statement.ts';
 import { compileValue } from './expression.ts';
 import { KEY_CODES, STORE_PREFIX, keyCodeOf } from '@tess/core';
 import { didYouMean } from '@tess/core';
-import { validate } from '@tess/parser';
+import { codeFrame, validate } from '@tess/parser';
 import { isAutoParamName } from '@tess/core';
 import type {
   AssignNode, CostumeNode, EventNode, FunctionDeclNode, Expr, ListDeclNode, Node, ObjectNode,
@@ -27,7 +27,7 @@ import type {
 import type {
   CompiledFunction, CompiledObject, CompileDiagnostic, CompileOptions,
   CompileResult, EntryBlock, EntryEntity, EntryObject, EntryParam, EntryProject,
-  EntryScene, EntryTable, EntryVariable, FunctionScope, PhaseTiming,
+  EntryScene, EntryTable, EntryVariable, PhaseTiming,
 } from './types.ts';
 
 /** A node reached by the generic walk, which reads fields it cannot name ahead. */
@@ -62,13 +62,22 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   const loaded = loadProgram({
     source, path: filePath, readFile: options.readFile, cache: options.cache, host,
   });
+  const withFrames = (items: CompileDiagnostic[]): CompileDiagnostic[] => items.map(item => {
+    const text = loaded.sources.get(item.file ?? filePath) ?? source;
+    const length = Math.max(1, (item.endOffset ?? item.offset + 1) - item.offset);
+    return {
+      ...item,
+      detail: item.detail ?? codeFrame(text, item.line, item.column, '', item.column + length),
+      ...(item.related ? { related: withFrames(item.related) } : {}),
+    };
+  });
   timer.mark('불러오기 · 파싱');
   if (!loaded.ast) {
     return {
       ok: false,
       project: null,
-      errors: loaded.errors,
-      warnings: loaded.warnings,
+      errors: withFrames(loaded.errors),
+      warnings: withFrames(loaded.warnings),
       notices: [],
       assets: [],
       timings: timer.timings,
@@ -119,9 +128,9 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   return {
     ok,
     project: ok || !strict ? project : null,
-    errors: ctx.errors,
-    warnings: withoutDuplicates(warnings, ctx.errors),
-    notices: strict ? [] : withoutDuplicates(ctx.notices, ctx.errors),
+    errors: withFrames(ctx.errors),
+    warnings: withFrames(withoutDuplicates(warnings, ctx.errors)),
+    notices: strict ? [] : withFrames(withoutDuplicates(ctx.notices, ctx.errors)),
     assets: ctx.assetFiles,
     sourceMap: ctx.sourceMap,
     timings: timer.timings,
@@ -211,6 +220,7 @@ function sceneDisplayName(item: { body: SceneMember[] }, ctx: Context): string |
 function collectGlobals(program: ProgramNode, ctx: Context) {
   for (const item of program.body) {
     if (item.type === 'VarDecl' || item.type === 'ListDecl') {
+      if (ctx.globals.has(item.name)) continue;
       const entry = makeVariable(item, ctx, null);
       if (entry) {
         ctx.variables.push(entry);
@@ -482,6 +492,7 @@ function collectObjectMembers(object: CompiledObject, ctx: Context) {
         object.center = member;
         break;
       case 'VarDecl': case 'ListDecl': {
+        if (object.locals.has(member.name)) break;
         const entry = makeVariable(member, ctx, object.id);
         if (entry) {
           ctx.variables.push(entry);
@@ -512,6 +523,7 @@ function collectObjectMembers(object: CompiledObject, ctx: Context) {
 
 function collectHandlerVariables(statements: Stmt[], object: CompiledObject, ctx: Context) {
   for (const statement of statements) {
+    if (statement.type === 'Switch') for (const clause of statement.cases) collectHandlerVariables(clause.body, object, ctx);
     if (statement.type === 'VarDecl' || statement.type === 'ListDecl') {
       if (!object.locals.has(statement.name) && !ctx.globals.has(statement.name)) {
         const entry = makeVariable(
@@ -545,12 +557,6 @@ function collectFunctions(program: ProgramNode, ctx: Context) {
       return;
     }
     const returns = findReturns(node.body);
-    const tail = node.body[node.body.length - 1];
-    const isTailReturn = tail?.type === 'Return' && returns.length === 1;
-
-    if (returns.length > 0 && !isTailReturn) {
-      ctx.error(returns[0], '엔트리 함수는 중간에서 값을 돌려줄 수 없습니다. return 은 함수의 마지막 문장에만 쓸 수 있습니다.');
-    }
 
     // `이름?` 으로 적은 매개변수는 엔트리에서도 판단 칸이 된다 (SPEC-ADDENDUM.md 4.6)
     const booleanParams = new Set(node.booleanParams ?? []);
@@ -565,7 +571,7 @@ function collectFunctions(program: ProgramNode, ctx: Context) {
         param,
         `${booleanParams.has(param) ? 'booleanParam' : 'stringParam'}_${ctx.newId()}`,
       ])),
-      isValue: isTailReturn,
+      isValue: returns.some(node => node.value !== null),
       localVariables: [],
     };
     ctx.functions.push(fn);
@@ -588,6 +594,7 @@ function collectFunctions(program: ProgramNode, ctx: Context) {
 
 function findReturns(statements: Stmt[], found: ReturnNode[] = []): ReturnNode[] {
   for (const statement of statements) {
+    if (statement.type === 'Switch') for (const clause of statement.cases) findReturns(clause.body, found);
     if (statement.type === 'Return') found.push(statement);
     const fields = statement as unknown as AnyNode;
     for (const key of ['consequent', 'alternate', 'body']) {
@@ -626,19 +633,30 @@ function compileFunctions(ctx: Context) {
     ctx.object = (fn.owner ? ctx.objectByName.get(fn.owner) : null) ?? null;
     ctx.locals = ctx.object?.locals ?? new Map();
     ctx.funcScope = {
+      id: fn.id,
       name: fn.name,
       params: fn.paramTypes,
       localVars: new Map(),
+      bindings: new Map(),
     };
 
-    // 함수 안에서 선언한 var 는 엔트리 함수의 지역 변수로
     const declared = fn.node!;
-    collectFunctionLocals(declared.body, ctx.funcScope, ctx, fn);
-
-    const body = fn.isValue ? declared.body.slice(0, -1) : declared.body;
-    const statements = compileStatements(body, ctx);
     const tail = declared.body[declared.body.length - 1] as ReturnNode | undefined;
-    const returnValue = fn.isValue && tail ? compileValue(tail.value, ctx) : null;
+    const simpleReturn = tail?.type === 'Return' && tail.value !== null && findReturns(declared.body).length === 1;
+    if (fn.isValue && !simpleReturn) {
+      const id = ctx.newId();
+      ctx.funcScope.returnId = id;
+      // Entry's function-local reads turn empty strings and false into 0.
+      ctx.variables.push({ id, name: `[Tess] ${fn.name} return`, value: 0, visible: false,
+        variableType: 'variable', isCloud: false, isRealTime: false, cloudDate: false,
+        object: null, x: 0, y: 0 });
+    }
+    const body = simpleReturn ? declared.body.slice(0, -1) : declared.body;
+    const statements = compileStatements(body, ctx, false);
+    const returnId = ctx.funcScope.returnId;
+    if (returnId) statements.push(ctx.block('set_variable', [returnId, ctx.number(0), null]));
+    const returnValue = returnId ? ctx.block('get_variable', [returnId, null])
+      : fn.isValue && tail ? compileValue(tail.value, ctx) : null;
 
     const field = buildFunctionFields(fn, ctx);
     const params = fn.isValue ? [field, null, null, returnValue] : [field, null];
@@ -655,30 +673,6 @@ function compileFunctions(ctx: Context) {
     ctx.funcScope = null;
     ctx.locals = new Map();
     ctx.object = null;
-  }
-}
-
-function collectFunctionLocals(
-  statements: Stmt[],
-  scope: FunctionScope,
-  ctx: Context,
-  fn: CompiledFunction,
-) {
-  for (const statement of statements) {
-    if (statement.type === 'VarDecl' && !scope.localVars.has(statement.name)) {
-      scope.localVars.set(statement.name, {
-        id: `${fn.id}_${ctx.newId()}`,
-        displayName: statement.displayName ?? statement.name,
-      });
-    }
-    if (statement.type === 'ListDecl') {
-      ctx.error(statement, '함수 안에서는 리스트를 선언할 수 없습니다. 전역 리스트를 쓰세요.');
-    }
-    const fields = statement as unknown as AnyNode;
-    for (const key of ['consequent', 'alternate', 'body']) {
-      const block = fields[key];
-      if (Array.isArray(block)) collectFunctionLocals(block as Stmt[], scope, ctx, fn);
-    }
   }
 }
 

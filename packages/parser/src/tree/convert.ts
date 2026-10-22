@@ -413,6 +413,13 @@ function statement(wrapper: SyntaxNode): Stmt {
       loc: at,
     } as Stmt;
     case 'repeat_statement': return { type: 'Repeat', count: e('test'), body: block(field(node, 'body')), loc: at } as Stmt;
+    case 'switch_statement': return { type: 'Switch', value: e('value'),
+      cases: fields(node, 'cases').map(clause => ({ values: fields(clause, 'values').map(expr), body: block(field(clause, 'body')), loc: loc(clause) })),
+      alternate: has(node, 'alternate') ? block(field(node, 'alternate')) : hasToken(node, 'default') ? [] : null,
+      loc: at } as Stmt;
+    case 'for_statement': return { type: 'For', name: word('name'), from: e('from'), to: e('to'),
+      step: has(node, 'step') ? signedNumber(field(node, 'step')!).value : 1,
+      body: block(field(node, 'body')), loc: at } as Stmt;
     case 'while_statement': return { type: 'While', test: e('test'), body: block(field(node, 'body')), loc: at } as Stmt;
     case 'until_statement': return { type: 'Until', test: e('test'), body: block(field(node, 'body')), loc: at } as Stmt;
     case 'forever_statement': return { type: 'Forever', body: block(field(node, 'body')), loc: at } as Stmt;
@@ -421,7 +428,7 @@ function statement(wrapper: SyntaxNode): Stmt {
       const kinds: Record<string, NullaryStatementType> = { break: 'Break', continue: 'Continue', skip: 'Skip', restart: 'Restart' };
       return { type: kinds[word('kind')]!, loc: at } as Stmt;
     }
-    case 'return_statement': return { type: 'Return', value: e('value'), loc: at } as Stmt;
+    case 'return_statement': return { type: 'Return', value: opt('value'), loc: at } as Stmt;
     case 'stop_statement': {
       if (has(node, 'sound')) return { type: 'StopSound', target: word('target'), loc: at } as Stmt;
       if (has(node, 'what')) {
@@ -610,20 +617,22 @@ function foldPrefix(operators: SyntaxNode[], operand: SyntaxNode, name: 'not' | 
 }
 
 function primary(node: SyntaxNode): Expr {
+  let target = primaryAtom(field(node, 'operand')!);
+  for (const suffix of fields(node, 'suffix')) {
+    target = {
+      type: 'Index', target, index: expr(field(suffix, 'index')!),
+      column: has(suffix, 'column') ? expr(field(suffix, 'column')!) : null,
+      loc: { start: loc(node).start, end: loc(suffix).end },
+    } as Expr;
+  }
+  return target;
+}
+
+function primaryAtom(node: SyntaxNode): Expr {
   const inner = field(node, 'inner');
   if (inner) return expr(inner);
   const call = field(node, 'call');
   if (call) return callExpr(call);
-  const index = field(node, 'index');
-  if (index) {
-    return {
-      type: 'Index',
-      target: identifier(field(index, 'target')!),
-      index: expr(field(index, 'index')!),
-      column: has(index, 'column') ? expr(field(index, 'column')!) : null,
-      loc: loc(index),
-    } as Expr;
-  }
   const number = field(node, 'number');
   if (number) return numberNode(number);
   const string = field(node, 'string');

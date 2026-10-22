@@ -9,6 +9,7 @@
  */
 import {
   ambiguousLocalError,
+  checkFunctionArity,
   compileAnyValue,
   compileBoolean,
   compileCallArguments,
@@ -16,13 +17,15 @@ import {
   isBooleanBlock,
   resolveList,
   resolveTarget,
+  unknownFunctionError,
 } from "./expression.ts";
 import { requireSaveFunction, requireScaleSetter } from "./runtime.ts";
-import { didYouMean, orHint } from '@tess/core';
+import { BUILTIN_FUNCTIONS, didYouMean, orHint } from '@tess/core';
+import { caseValue } from '@tess/parser';
 import type {
-  AssignNode, Expr, ExpressionStatementNode, Identifier, IndexNode, PlaySoundNode,
+  AssignNode, Expr, ExpressionStatementNode, ForNode, Identifier, IndexNode, PlaySoundNode,
   ListDeclNode, Node, ShowHideNode, Stmt, TableAddLineNode, TableRemoveLineNode,
-  VarDeclNode,
+  SwitchNode, VarDeclNode,
 } from '@tess/parser';
 import type { Context } from './context.ts';
 import type {
@@ -115,11 +118,28 @@ const blocksOf = (items: Array<EntryBlock | null>): EntryBlock[] => (
   items.filter((item): item is EntryBlock => item !== null)
 );
 
-export function compileStatements(statements: Stmt[], ctx: Context): EntryBlock[] {
+export function compileStatements(statements: Stmt[], ctx: Context, scoped = true): EntryBlock[] {
+  const bindings = ctx.funcScope?.bindings;
+  if (bindings && scoped) ctx.funcScope!.bindings = new Map(bindings);
+  const locals = ctx.locals;
+  const scopedLocals = !ctx.funcScope && ctx.object && locals !== ctx.object.locals;
+  if (scopedLocals && scoped) ctx.locals = new Map(locals);
   const blocks: EntryBlock[] = [];
-  for (const statement of statements)
-    for (const block of compileStatement(statement, ctx)) blocks.push(block);
+  try {
+    for (const statement of statements)
+      for (const block of compileStatement(statement, ctx)) blocks.push(block);
+  } finally {
+    if (bindings && scoped) ctx.funcScope!.bindings = bindings;
+    if (scopedLocals && scoped) ctx.locals = locals;
+  }
   return blocks;
+}
+
+function compileLoopBody(statements: Stmt[], ctx: Context, update: (() => EntryBlock) | null = null): EntryBlock[] {
+  const previous = ctx.loopUpdate;
+  ctx.loopUpdate = update;
+  try { return compileStatements(statements, ctx); }
+  finally { ctx.loopUpdate = previous; }
 }
 
 export function compileStatement(node: Stmt, ctx: Context): EntryBlock[] {
@@ -139,6 +159,8 @@ function compile(node: Stmt, ctx: Context): EntryBlock[] | null {
 
   switch (node.type) {
     // --- 제어 흐름 ---------------------------------------------------------
+    case 'Switch':
+      return compileSwitch(node, ctx);
     case "If": {
       const test = compileBoolean(node.test, ctx);
       if (!test) return [];
@@ -171,7 +193,7 @@ function compile(node: Stmt, ctx: Context): EntryBlock[] | null {
           ctx.block(
             "repeat_basic",
             [count, null],
-            [compileStatements(node.body, ctx)],
+            [compileLoopBody(node.body, ctx)],
           ),
         )
       );
@@ -182,7 +204,7 @@ function compile(node: Stmt, ctx: Context): EntryBlock[] | null {
         ctx.block(
           "repeat_inf",
           [null, null],
-          [compileStatements(node.body, ctx)],
+          [compileLoopBody(node.body, ctx)],
         ),
       );
 
@@ -198,7 +220,7 @@ function compile(node: Stmt, ctx: Context): EntryBlock[] | null {
           ctx.block(
             "repeat_inf",
             [null, null],
-            [compileStatements(node.body, ctx)],
+            [compileLoopBody(node.body, ctx)],
           ),
         );
       }
@@ -210,7 +232,7 @@ function compile(node: Stmt, ctx: Context): EntryBlock[] | null {
           ctx.block(
             "repeat_while_true",
             [test, mode, null],
-            [compileStatements(node.body, ctx)],
+            [compileLoopBody(node.body, ctx)],
           ),
         )
       );
@@ -231,16 +253,18 @@ function compile(node: Stmt, ctx: Context): EntryBlock[] | null {
     case "Break":
       return one(ctx.block("stop_repeat", [null]));
     case "Continue":
-      return one(ctx.block("continue_repeat", [null]));
+      return [...(ctx.loopUpdate ? [ctx.loopUpdate()] : []), ctx.block("continue_repeat", [null])];
     // `skip` reads `continue_repeat` from a boolean slot, which restarts the
     // loop without giving up the frame that a plain `continue_repeat` costs.
     case "Skip":
-      return one(
+      return [...(ctx.loopUpdate ? [ctx.loopUpdate()] : []), ...one(
         ctx.block("wait_until_true", [
           ctx.block("boolean_not", [null, ctx.block("continue_repeat", [null]), null]),
           null,
         ]),
-      );
+      )];
+    case "For":
+      return compileFor(node, ctx);
     case "Restart":
       return one(ctx.block("restart_project", [null]));
     case "Stop":
@@ -250,10 +274,13 @@ function compile(node: Stmt, ctx: Context): EntryBlock[] | null {
     case "StopProject":
       return one(ctx.block("stop_run", [null]));
 
-    case "Return":
-      return blocksOf([
-        ctx.error(node, "return 은 함수의 마지막 문장에서만 쓸 수 있습니다."),
-      ]);
+    case "Return": {
+      if (!ctx.funcScope) return [];
+      const id = ctx.funcScope?.returnId;
+      if (!id) return [ctx.block('stop_object', ['thisThread', null])];
+      const value = node.value ? compileValue(node.value, ctx) : ctx.number(0);
+      return value ? [ctx.block('set_variable', [id, value, null]), ctx.block('stop_object', ['thisThread', null])] : [];
+    }
 
     // --- 신호 · 복제 · 장면 -------------------------------------------------
     case "Send": {
@@ -563,6 +590,76 @@ function compile(node: Stmt, ctx: Context): EntryBlock[] | null {
 // ---------------------------------------------------------------------------
 //  보조 컴파일러
 // ---------------------------------------------------------------------------
+function compileSwitch(node: SwitchNode, ctx: Context): EntryBlock[] {
+  const value = compileValue(node.value, ctx);
+  if (!value) return [];
+  const id = ctx.newId();
+  // Branch labels are literals, so selection completes before a body can yield or recurse.
+  ctx.variables.push({ id, name: '[Tess] switch', value: 0, visible: false,
+    variableType: 'variable', isCloud: false, isRealTime: false, cloudDate: false,
+    object: ctx.object?.id ?? null, x: 0, y: 0 });
+  let alternate = node.alternate ? compileStatements(node.alternate, ctx) : [];
+  for (let i = node.cases.length - 1; i >= 0; i--) {
+    const clause = node.cases[i]!;
+    const body = compileStatements(clause.body, ctx);
+    let test: EntryBlock | null = null;
+    for (const expression of clause.values) {
+      if (caseValue(expression) === null) continue;
+      const label = compileValue(expression, ctx);
+      if (!label) continue;
+      const equals = ctx.block('boolean_basic_operator', [ctx.block('get_variable', [id, null]), 'EQUAL', label]);
+      test = test ? ctx.block('boolean_and_or', [test, 'OR', equals]) : equals;
+    }
+    if (test) alternate = [ctx.block('if_else', [test, null, null], [body, alternate])];
+  }
+  return [ctx.block('set_variable', [id, value, null]), ...alternate];
+}
+
+function compileFor(node: ForNode, ctx: Context): EntryBlock[] {
+  if (!Number.isFinite(node.step) || node.step === 0) {
+    return blocksOf([ctx.error(node, 'for 의 step 은 0이 아닌 유한한 숫자여야 합니다. 거꾸로 세려면 step -1 을 쓰세요.')]);
+  }
+  const from = compileValue(node.from, ctx);
+  const to = compileValue(node.to, ctx);
+  if (!from || !to) return [];
+  const bindings = ctx.funcScope?.bindings;
+  const locals = ctx.locals;
+  if (bindings) ctx.funcScope!.bindings = new Map(bindings);
+  else ctx.locals = new Map(locals);
+  try {
+    const allocate = (name: string, visibleName: boolean) => {
+      const local = ctx.funcScope;
+      const id = local ? `${local.id}_${ctx.newId()}` : ctx.newId();
+      if (local) {
+        const binding = { id, displayName: name };
+        local.localVars.set(id, binding);
+        if (visibleName) local.bindings.set(name, binding);
+      } else {
+        const entry: EntryVariable = { id, name, value: 0, visible: false,
+          variableType: 'variable', isCloud: false, isRealTime: false, cloudDate: false,
+          object: ctx.object?.id ?? null, x: 0, y: 0 };
+        ctx.variables.push(entry);
+        if (visibleName) ctx.locals.set(name, entry);
+      }
+      return {
+        read: () => ctx.block(local ? 'get_func_variable' : 'get_variable', [id, null]),
+        write: (value: EntryParam) => ctx.block(local ? 'set_func_variable' : 'set_variable', [id, value, null]),
+      };
+    };
+    const counter = allocate(node.name, true);
+    const bound = allocate('[Tess] for end', false);
+    const number = (value: EntryBlock) => ctx.block('calc_basic', [value, 'MULTI', ctx.number(1)]);
+    const update = () => counter.write(ctx.block('calc_basic', [counter.read(), 'PLUS', ctx.number(node.step)]));
+    const body = compileLoopBody(node.body, ctx, update);
+    body.push(update());
+    const test = ctx.block('boolean_basic_operator', [counter.read(), node.step > 0 ? 'LESS_OR_EQUAL' : 'GREATER_OR_EQUAL', bound.read()]);
+    return [counter.write(number(from)), bound.write(number(to)), ctx.block('repeat_while_true', [test, 'while', null], [body])];
+  } finally {
+    if (bindings) ctx.funcScope!.bindings = bindings;
+    ctx.locals = locals;
+  }
+}
+
 function timerAction(action: string, ctx: Context): EntryBlock {
   return ctx.block("choose_project_timer_action", [null, action, null, null]);
 }
@@ -854,6 +951,24 @@ function requireList(node: Expr, ctx: Context): EntryVariable | null {
 //  선언 · 대입
 // ---------------------------------------------------------------------------
 function compileDeclaration(node: VarDeclNode | ListDeclNode, ctx: Context): EntryBlock[] {
+  if (ctx.funcScope) {
+    if (node.type === 'ListDecl') {
+      return blocksOf([ctx.error(node, '함수 안에서는 리스트를 선언할 수 없습니다. 전역 리스트를 쓰세요.')]);
+    }
+    // Resolve the initializer before this declaration shadows an outer binding.
+    const value = compileValue(node.value, ctx);
+    const local = { id: `${ctx.funcScope.id}_${ctx.newId()}`, displayName: node.displayName ?? node.name };
+    ctx.funcScope.localVars.set(local.id, local);
+    ctx.funcScope.bindings.set(node.name, local);
+    return value ? [ctx.block('set_func_variable', [local.id, value, null])] : [];
+  }
+  // Event declarations still belong to the object, even when a for counter shadows their name.
+  if (ctx.object && ctx.locals !== ctx.object.locals) {
+    const entry = ctx.object.locals.get(node.name) ?? ctx.globals.get(node.name);
+    const value = node.type === 'VarDecl' ? compileValue(node.value, ctx) : null;
+    if (entry) ctx.locals.set(node.name, entry);
+    return entry && value ? [ctx.block('set_variable', [entry.id, value, null])] : [];
+  }
   // 선언 자체는 미리 수집해 두었고, 여기서는 초기값 대입만 만든다.
   if (node.type === "ListDecl") {
     const found = ctx.lookupVariable(node.name);
@@ -1185,13 +1300,7 @@ function compilePropertyAssign(node: AssignNode, name: string, ctx: Context): En
     }
 
     default:
-      return blocksOf([
-        ctx.error(
-          node,
-          `선언되지 않은 이름 '${name}' 에 값을 대입했습니다.`
-          + orHint(name, ctx.knownNames(), 'var 로 먼저 선언하세요.'),
-        ),
-      ]);
+      return blocksOf([ctx.unresolvedName(node.target, name, true)]);
   }
 }
 
@@ -1284,12 +1393,11 @@ function compileCallStatement(node: ExpressionStatementNode, ctx: Context): Entr
   const call = node.expression;
   const fn = ctx.functionByName.get(call.callee);
   if (!fn) {
-    return blocksOf([
-      ctx.error(
-        node,
-        `'${call.callee}' 함수를 찾을 수 없습니다. 내장 함수는 문장으로 쓸 수 없습니다.`,
-      ),
-    ]);
+    return blocksOf([BUILTIN_FUNCTIONS.has(call.callee)
+      ? ctx.error(call, `'${call.callee}' 내장 함수는 문장으로 쓸 수 없습니다.`, {
+        help: `결과를 쓸 자리에 호출하세요. 예: var 결과 = ${call.callee}(...)`,
+      })
+      : unknownFunctionError(call, ctx)]);
   }
   if (fn.isValue) {
     // Entry has no statement form of a value function: the call runs as the
@@ -1298,14 +1406,7 @@ function compileCallStatement(node: ExpressionStatementNode, ctx: Context): Entr
     if (!value) return [];
     return [ctx.block('_if', [ctx.block('boolean_basic_operator', [value, 'EQUAL', ctx.text('')]), null], [[]])];
   }
-  if (call.arguments.length !== fn.params.length) {
-    return blocksOf([
-      ctx.error(
-        node,
-        `함수 '${call.callee}' 는 인자가 ${fn.params.length}개여야 합니다.`,
-      ),
-    ]);
-  }
+  if (!checkFunctionArity(call, fn, ctx)) return [];
   const params = compileCallArguments(fn, call.arguments, ctx);
   if (params.some((param) => param === null)) return [];
   // 값을 돌려주지 않는 함수 블록은 끝에 아이콘 자리(null)가 하나 더 붙는다

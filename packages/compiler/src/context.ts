@@ -7,12 +7,15 @@ import { createIdFactory, seedFrom } from './ids.ts';
 import type { IdFactory } from './ids.ts';
 import { commentKey, makeComment } from './comments.ts';
 import { lineIndex } from '@tess/parser';
+import { BUILTIN_FUNCTIONS, OBJECT_PROPERTIES, STATE_VALUES, didYouMean } from '@tess/core';
 import type { Expr, Node } from '@tess/parser';
 import type {
   CompileCache, CompileDiagnostic, CompiledFunction, CompiledObject,
   CompileOptions, EntryBlock, EntryMessage, EntryParam, EntryScene, EntryTable,
   EntryVariable, FunctionScope, ResourceRef, SourceMap, VariableRef,
 } from './types.ts';
+
+type DiagnosticDetails = Pick<CompileDiagnostic, 'code' | 'help' | 'related'>;
 
 /**
  * 엔트리 블록 하나에 대한 기본 구조를 생성합니다.
@@ -111,6 +114,7 @@ export class Context {
   locals: Map<string, EntryVariable>;
 
   funcScope: FunctionScope | null;
+  loopUpdate: (() => EntryBlock) | null = null;
 
   constructor(source: string, options: CompileOptions = {}) {
     this.source = source;
@@ -160,8 +164,8 @@ export class Context {
   }
 
   // --- 진단 ---------------------------------------------------------------
-  error(node: Node | null | undefined, message: string): null {
-    this.#report(this.errors, node, message);
+  error(node: Node | null | undefined, message: string, details: DiagnosticDetails = {}): null {
+    this.#report(this.errors, node, message, details);
     return null;
   }
 
@@ -179,11 +183,45 @@ export class Context {
     return null;
   }
 
-  #report(bucket: CompileDiagnostic[], node: Node | null | undefined, message: string) {
+  diagnostic(node: Node | null | undefined, message: string): CompileDiagnostic {
     const offset = node?.loc?.start ?? 0;
     const file = node?.loc?.file;
     const { line, column } = this.#positionIn(file, offset);
-    bucket.push({ line, column, file, offset, message });
+    return { line, column, file, offset, endOffset: node?.loc?.end, message };
+  }
+
+  #report(bucket: CompileDiagnostic[], node: Node | null | undefined, message: string, details: DiagnosticDetails = {}) {
+    bucket.push({ ...this.diagnostic(node, message), ...details });
+  }
+
+  unresolvedName(node: Node, name: string, assignment = false): null {
+    const declarations: Node[] = [];
+    const visit = (value: unknown) => {
+      if (!value || typeof value !== 'object') return;
+      if (Array.isArray(value)) { value.forEach(visit); return; }
+      const item = value as Node & { name?: string };
+      if ((item.type === 'VarDecl' || item.type === 'For') && item.name === name) declarations.push(item);
+      for (const [key, child] of Object.entries(value)) if (key !== 'loc') visit(child);
+    };
+    // Search only on failure: a correct build needs no extra declaration walk.
+    if (this.funcScope) visit(this.functionByName.get(this.funcScope.name)?.node?.body);
+    const functionName = !assignment && (this.functionByName.has(name) || BUILTIN_FUNCTIONS.has(name));
+    const readOnly = assignment && STATE_VALUES.has(name);
+    const help = declarations.length
+      ? '이 지역 변수는 선언한 블록 안에서, 선언 뒤에만 쓸 수 있습니다. 바깥에서도 필요하면 선언을 바깥 블록으로 옮기세요.'
+      : functionName
+        ? `'${name}' 은(는) 함수입니다. ${name}(...) 처럼 괄호와 인자를 붙여 호출하세요.`
+        : readOnly
+          ? `'${name}' 은(는) 읽기 전용 상태 값입니다. 일반 변수처럼 대입할 수 없습니다.`
+          : '새 변수는 var 이름 = 초기값 으로 먼저 선언하세요. 이미 선언했다면 이름의 철자와 대소문자를 확인하세요.';
+    const message = readOnly ? `'${name}' 은(는) 읽기 전용이라 값을 대입할 수 없습니다.`
+      : `선언되지 않은 이름 '${name}' ${assignment ? '에 값을 대입했습니다.' : '입니다.'}`;
+    const suggestion = declarations.length || functionName || readOnly ? ''
+      : didYouMean(name, [...this.knownNames(), ...STATE_VALUES, ...OBJECT_PROPERTIES]);
+    return this.error(node, message + suggestion, {
+      code: readOnly ? 'E0007' : 'E0004', help,
+      ...(declarations.length ? { related: declarations.map(declaration => this.diagnostic(declaration, '같은 이름의 지역 변수를 선언한 위치입니다.')) } : {}),
+    });
   }
 
   /**
@@ -245,14 +283,12 @@ export class Context {
   }
 
   // --- 심볼 조회 -----------------------------------------------------------
-  /** 이름으로 변수/리스트 찾기: 매개변수 -> 함수 지역 -> 오브젝트 로컬 -> 전역 */
+  /** 이름으로 변수/리스트 찾기: 함수 블록 지역 -> 매개변수 -> 오브젝트 로컬 -> 전역 */
   lookupVariable(name: string): VariableRef | null {
     if (this.funcScope) {
+      const local = this.funcScope.bindings.get(name);
+      if (local) return { kind: 'funcLocal', name, id: local.id };
       if (this.funcScope.params.has(name)) return { kind: 'param', name };
-      // 엔트리 함수 지역 변수는 이름이 아니라 `함수id_해시` 로 가리킨다
-      if (this.funcScope.localVars.has(name)) {
-        return { kind: 'funcLocal', name, id: this.funcScope.localVars.get(name)!.id };
-      }
       // A function declared inside an object sees that object's locals.
       const owned = this.locals.get(name);
       if (owned) return { kind: 'variable', entry: owned };
@@ -303,7 +339,7 @@ export class Context {
   knownNames(): string[] {
     const names = [...this.globals.keys(), ...this.locals.keys()];
     if (this.funcScope) {
-      names.push(...this.funcScope.params.keys(), ...this.funcScope.localVars.keys());
+      names.push(...this.funcScope.params.keys(), ...this.funcScope.bindings.keys());
       // A global function can name an object's local, so those are candidates too.
       for (const object of this.objects) names.push(...(object.locals?.keys() ?? []));
     }

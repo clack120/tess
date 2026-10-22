@@ -18,7 +18,7 @@
 
 const KEYWORDS = [
   'add', 'all', 'and', 'append', 'as', 'ask', 'async', 'at', 'back', 'bgm', 'bounce', 'break',
-  'bubble', 'call', 'center', 'clear', 'click', 'clone', 'cloned', 'clones',
+  'bubble', 'call', 'case', 'center', 'clear', 'click', 'clone', 'cloned', 'clones',
   'chart', 'column', 'columns', 'continue', 'costume', 'default', 'del', 'description', 'do', 'draw', 'effects', 'else',
   'end', 'false', 'fill', 'flip', 'for', 'force', 'forever', 'forward', 'fps',
   'free', 'from', 'front', 'first', 'function', 'go', 'hide', 'id', 'if', 'in',
@@ -27,7 +27,7 @@ const KEYWORDS = [
   'play', 'prepend', 'prev', 'project', 'read', 'realtime', 'remove', 'repeat',
   'reset', 'restart', 'return', 'rotation', 'row', 'save', 'say', 'scene', 'send',
   'series', 'shared', 'signal', 'show',
-  'size', 'skip', 'sound', 'speed', 'stage', 'stamp', 'start', 'steer', 'stop', 'store',
+  'size', 'skip', 'sound', 'speed', 'stage', 'stamp', 'start', 'steer', 'step', 'stop', 'store', 'switch',
   'table', 'text', 'them', 'then', 'think', 'this', 'timer', 'title', 'to', 'transparent',
   'true', 'tts', 'turn', 'until', 'up', 'use', 'useobject', 'usetext', 'var',
   'vertical', 'visible', 'voice', 'wait', 'when', 'while', 'write', 'x', 'y',
@@ -52,7 +52,7 @@ const PROPERTY_WORDS = [
 
 /** Keywords that open a statement; followed by `(` they still do (`if (a):`). */
 const STATEMENT_LEADERS = [
-  'if', 'repeat', 'while', 'until', 'forever', 'wait', 'return', 'break', 'continue', 'skip', 'restart',
+  'if', 'switch', 'repeat', 'for', 'while', 'until', 'forever', 'wait', 'return', 'break', 'continue', 'skip', 'restart',
   'stop', 'start', 'reset', 'clear', 'send', 'call', 'clone', 'del', 'kill', 'jump', 'forward', 'bounce',
   'move', 'go', 'turn', 'steer', 'look', 'show', 'hide', 'next', 'prev', 'say', 'think', 'flip', 'order',
   'write', 'append', 'prepend', 'stamp', 'play', 'read', 'tts', 'in', 'remove', 'ask', 'save', 'var', 'list',
@@ -93,6 +93,7 @@ module.exports = grammar({
     [$.point_args, $._pow],
     [$._and, $.and_expr],
     [$.block],
+    [$.case_clause],
   ],
 
   rules: {
@@ -270,7 +271,9 @@ module.exports = grammar({
     statement: ($) => choice(
       prec.dynamic(PREC.keyword_statement, choice(
         $.if_statement,
+        $.switch_statement,
         $.repeat_statement,
+        $.for_statement,
         $.while_statement,
         $.until_statement,
         $.forever_statement,
@@ -321,13 +324,22 @@ module.exports = grammar({
     )),
 
     repeat_statement: ($) => prec.right(1, seq('repeat', field('test', $._expr), $._block_open, optional(field('body', $.block)), 'end')),
+    switch_statement: ($) => prec.right(1, seq('switch', field('value', $._expr), $._block_open,
+      repeat(field('cases', $.case_clause)),
+      optional(seq('default', $._block_open, optional(field('alternate', $.block)))), 'end')),
+    case_clause: ($) => seq('case', field('values', $._expr), repeat(seq(',', field('values', $._expr))),
+      $._block_open, optional(field('body', $.block))),
+    for_statement: ($) => prec.right(1, seq('for', field('name', $.identifier),
+      'from', field('from', $._expr), 'to', field('to', $._expr),
+      optional(seq('step', field('step', $.signed_number))),
+      $._block_open, optional(field('body', $.block)), 'end')),
     while_statement: ($) => prec.right(1, seq('while', field('test', $._expr), $._block_open, optional(field('body', $.block)), 'end')),
     until_statement: ($) => prec.right(1, seq('until', field('test', $._expr), $._block_open, optional(field('body', $.block)), 'end')),
     forever_statement: ($) => prec.right(1, seq('forever', $._block_open, optional(field('body', $.block)), 'end')),
 
     wait_statement: ($) => prec.right(1, seq('wait', field('value', $._expr))),
     flow_statement: ($) => field('kind', choice('break', 'continue', 'skip', 'restart')),
-    return_statement: ($) => prec.right(1, seq('return', field('value', $._expr))),
+    return_statement: ($) => prec.right(1, seq('return', optional(seq($._same_line, field('value', $._expr))))),
 
     stop_statement: ($) => prec.right(1, seq('stop', optional(choice(
       seq(field('sound', 'sound'), field('target', choice('this', 'all'))),
@@ -492,10 +504,11 @@ module.exports = grammar({
     _unary: ($) => choice($.primary_expr, $.unary_expr),
     unary_expr: ($) => seq(repeat1(field('operators', '-')), field('operand', $.primary_expr)),
 
-    primary_expr: ($) => choice(
+    primary_expr: ($) => seq(field('operand', $.primary_atom), repeat(field('suffix', $.index_suffix))),
+
+    primary_atom: ($) => choice(
       seq('(', field('inner', $._expr), ')'),
       field('call', $.call_expr),
-      field('index', $.index_expr),
       field('number', $.number),
       field('string', $.string),
       field('boolean', $.boolean),
@@ -506,8 +519,7 @@ module.exports = grammar({
 
     call_expr: ($) => seq(field('callee', $.identifier), $._call_open, commaSep(field('args', $._expr)), ')'),
 
-    index_expr: ($) => seq(
-      field('target', $.identifier),
+    index_suffix: ($) => seq(
       $._index_open,
       field('index', $._expr),
       optional(seq(',', field('column', $._expr))),

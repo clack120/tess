@@ -24,7 +24,7 @@ const DECLARATION = ['project', 'scene', 'object', 'text', 'table', 'function', 
 const STORAGE = ['shared', 'realtime'];
 // Modifiers trailing a declaration: `as "name"`, `force id "..."`, `default costume`.
 const MODIFIER = ['as', 'force', 'id', 'default'];
-const CONTROL = ['if', 'else', 'end', 'then', 'do', 'repeat', 'while', 'until', 'forever',
+const CONTROL = ['if', 'else', 'switch', 'case', 'default', 'end', 'then', 'do', 'repeat', 'for', 'while', 'until', 'forever',
   'wait', 'break', 'continue', 'skip', 'restart', 'stop', 'return'];
 const EVENT = ['when', 'cloned', 'signal', 'click', 'stage', 'key', 'start'];
 const OPERATOR_WORDS = ['and', 'or', 'not', 'in', 'at', 'to', 'from', 'for', 'up'];

@@ -24,6 +24,33 @@ const AXES: Record<string, { setter: string; probe: string; label: string }> = {
   scale_y: { setter: 'HEIGHT', probe: 'WIDTH', label: '[Tess] 세로 비율 정하기' },
 };
 
+/** Select numeric parameters once, without overflow-prone arithmetic identities. */
+export function requireMinMax(kind: 'min' | 'max', ctx: Context): CompiledFunction {
+  const cached = ctx.runtimeFunctions.get(kind);
+  if (cached) return cached;
+  const id = ctx.newId();
+  const params = ['a', 'b'];
+  const paramTypes = new Map(params.map(name => [name, `stringParam_${ctx.newId()}`]));
+  const numeric = (name: string) => ctx.block('calc_basic', [ctx.block(paramTypes.get(name)!, []), 'MULTI', ctx.number(1)]);
+  const local = `${id}_${ctx.newId()}`;
+  const body = [
+    ctx.block('set_func_variable', [local, numeric('a'), null]),
+    ctx.block('_if', [ctx.block('boolean_basic_operator', [numeric('b'), kind === 'min' ? 'LESS' : 'GREATER', numeric('a')]), null],
+      [[ctx.block('set_func_variable', [local, numeric('b'), null])]]),
+  ];
+  const field = ctx.block('function_field_label', [
+    `[Tess] ${kind}`,
+    params.reduceRight<EntryParam>((next, name) => ctx.block('function_field_string', [ctx.block(paramTypes.get(name)!, []), next]), null),
+  ]);
+  const create = ctx.block('function_create_value', [field, null, null, ctx.block('get_func_variable', [local, null])], [body]);
+  const fn: CompiledFunction = { id, name: `[Tess] ${kind}`, params, paramTypes,
+    isValue: true, generated: true, type: 'value',
+    localVariables: [{ id: local, name: 'result', value: 0 }], content: [[create]] };
+  ctx.functions.push(fn);
+  ctx.runtimeFunctions.set(kind, fn);
+  return fn;
+}
+
 /**
  * 오브젝트의 가로 또는 세로 크기를 특정 비율로 설정하는 엔트리 함수를 생성하여 등록합니다.
  * 이미 동일한 함수가 생성되어 있다면 기존 함수를 반환합니다.

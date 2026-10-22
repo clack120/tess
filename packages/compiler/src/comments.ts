@@ -53,7 +53,7 @@ type AnyNode = Record<string, unknown> & { type?: string; loc?: { file?: string;
  */
 const ATTACHABLE = new Set([
   'Event',
-  'If', 'Repeat', 'While', 'Until', 'Forever', 'Wait', 'Break', 'Continue', 'Skip', 'Restart', 'Return',
+  'If', 'Switch', 'Repeat', 'For', 'While', 'Until', 'Forever', 'Wait', 'Break', 'Continue', 'Skip', 'Restart', 'Return',
   'Stop', 'StopSound', 'StopBgm', 'StopDraw', 'StopFill', 'StopTimer',
   'StartDraw', 'StartFill', 'StartTimer', 'ResetSize', 'ResetTimer', 'Clear',
   'Send', 'Clone', 'DeleteClone', 'DeleteClones', 'Jump',

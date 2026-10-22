@@ -42,7 +42,7 @@ function unicodePattern(source: string) {
  */
 export const KEYWORDS = [
   'add', 'all', 'and', 'append', 'as', 'ask', 'async', 'at', 'back', 'bgm', 'bounce', 'break',
-  'bubble', 'call', 'center', 'clear', 'click', 'clone', 'cloned', 'clones',
+  'bubble', 'call', 'case', 'center', 'clear', 'click', 'clone', 'cloned', 'clones',
   'chart', 'column', 'columns', 'continue', 'costume', 'default', 'del', 'description', 'do', 'draw', 'effects', 'else',
   'end', 'false', 'fill', 'flip', 'for', 'force', 'forever', 'forward', 'fps',
   'free', 'from', 'front', 'first', 'function', 'go', 'hide', 'id', 'if', 'in',
@@ -51,7 +51,7 @@ export const KEYWORDS = [
   'play', 'prepend', 'prev', 'project', 'read', 'realtime', 'remove', 'repeat',
   'reset', 'restart', 'return', 'rotation', 'row', 'save', 'say', 'scene', 'send',
   'series', 'shared', 'signal', 'show',
-  'size', 'skip', 'sound', 'speed', 'stage', 'stamp', 'start', 'steer', 'stop', 'store',
+  'size', 'skip', 'sound', 'speed', 'stage', 'stamp', 'start', 'steer', 'step', 'stop', 'store', 'switch',
   'table', 'text', 'them', 'then', 'think', 'this', 'timer', 'title', 'to', 'transparent',
   'true', 'tts', 'turn', 'until', 'up', 'use', 'useobject', 'usetext', 'var',
   'vertical', 'visible', 'voice', 'wait', 'when', 'while', 'write', 'x', 'y',
@@ -83,7 +83,7 @@ export const STANDALONE_STATEMENTS = new Set([
  * @example STATEMENT_KEYWORDS.has('move'); // true
  */
 export const STATEMENT_KEYWORDS = new Set([
-  'if', 'repeat', 'while', 'until', 'forever', 'wait', 'return',
+  'if', 'switch', 'repeat', 'for', 'while', 'until', 'forever', 'wait', 'return',
   'break', 'continue', 'skip', 'restart', 'stop', 'start', 'reset', 'clear',
   'send', 'call', 'clone', 'del', 'kill', 'jump', 'forward', 'bounce',
   'move', 'go', 'turn', 'steer', 'look', 'show', 'hide', 'next',

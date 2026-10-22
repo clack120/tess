@@ -136,14 +136,14 @@ export function parseSource(
   const { tokens, errors: lexErrors } = tokenize(source);
 
   if (lexErrors.length > 0) {
-    return { ok: false, ast: null, errors: [toFailure(source, lexErrors[0])] };
+    return { ok: false, ast: null, errors: lexErrors.map(error => toFailure(source, error)) };
   }
 
   parser.input = tokens;
   const cst = (parser as unknown as Record<string, () => CstNode>)[rule]!();
 
   if (parser.errors.length > 0) {
-    return { ok: false, ast: null, errors: [toFailure(source, parser.errors[0])] };
+    return { ok: false, ast: null, errors: parser.errors.map(error => toFailure(source, error)) };
   }
 
   // 일찍 매칭이 끝난 규칙은 남은 토큰을 무시합니다. 이는 전체 텍스트 매칭 실패로 간주합니다.
