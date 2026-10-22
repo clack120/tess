@@ -413,6 +413,7 @@ export class Vm implements Project {
     const input: CompileInput = {
       objects: project.objects.map((raw) => ({
         id: String(raw.id),
+        scene: String(raw.scene ?? this.targetOf(String(raw.id))?.sceneId ?? this.currentSceneId),
         script: raw.script as string | RawBlock[][],
       })),
       variables: this.variables.map((variable) => ({ id: variable.id })),
@@ -579,6 +580,7 @@ export class Vm implements Project {
     const input: CompileInput = {
       objects: project.objects.map((raw) => ({
         id: String(raw.id),
+        scene: String(raw.scene ?? this.targetOf(String(raw.id))?.sceneId ?? this.currentSceneId),
         script: raw.script as string | RawBlock[][],
       })),
       variables: this.variables.map((variable) => ({ id: variable.id })),

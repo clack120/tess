@@ -145,3 +145,19 @@ test('raw .ent media URLs are served with their original bytes', async (t) => {
     }
   } finally { await server.close(); }
 });
+
+test('raw .ent block counts use the original object and scene IDs', async (t) => {
+  const work = project();
+  work.objects[0]!.script = JSON.stringify([[{ id: 'hat-original', type: 'when_run_button_click' },
+    { id: 'write-original', type: 'set_variable', params: ['value-original',
+      { id: 'count-original', type: 'get_block_count', params: ['scene-scene-original'] },
+    ] },
+  ]]);
+  const { file } = fixture(t, work);
+  const loaded = await load(t, file);
+  const vm = new Vm({ renderer: null, audio: null });
+  vm.load(loaded.project as never); vm.start();
+  for (let i = 0; i < 5; i++) { vm.tick(); await Promise.resolve(); }
+  assert.equal(vm.variables[0]!.value, 3);
+  assert.deepEqual(vm.errors, []);
+});

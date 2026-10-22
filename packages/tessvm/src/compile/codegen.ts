@@ -1,25 +1,14 @@
 // Compile blocks once into generators; yield only where Entry gives up the frame.
 import { SAVE_FUNCTIONS, functionLabel } from '../runtime/save.ts';
+import { isBlock, parseScript, findFunctionDefine, functionBody, collectParams, type RawBlock, type FunctionEntry } from './blocks.ts';
+import { blockCounts } from './block-count.ts';
+export type { RawBlock, FunctionEntry } from './blocks.ts';
 import type { GeneratedTrace } from '../runtime/diagnostics.ts';
 
 let nextSourceId = 0;
 
-export interface RawBlock {
-  id: string;
-  type: string;
-  params: unknown[];
-  statements?: RawBlock[][];
-}
-
-export interface FunctionEntry {
-  id: string;
-  type: string;
-  localVariables: Array<{ id: string; name: string; value: string | number }>;
-  content: string | RawBlock[][];
-}
-
 export interface CompileInput {
-  objects: Array<{ id: string; script: string | RawBlock[][] }>;
+  objects: Array<{ id: string; scene?: string; script: string | RawBlock[][] }>;
   variables: Array<{ id: string; variableType?: string }>;
   functions: FunctionEntry[];
   scenes: Array<{ id: string }>;
@@ -118,10 +107,6 @@ function comment(type: string): string {
   return `/* ${String(type).replace(/[^\w.-]+/g, ' ').slice(0, 60)} */`;
 }
 
-function isBlock(value: unknown): value is RawBlock {
-  return Boolean(value) && typeof value === 'object' && typeof (value as RawBlock).type === 'string';
-}
-
 // Entry executes flow blocks in inputs before reaching the parent block.
 const LOOP_TRICKS: Record<string, 'continue' | 'break'> = {
   continue_repeat: 'continue',
@@ -173,6 +158,7 @@ export class Codegen {
   private readonly bodies: string[] = [];
   private readonly functionSources: string[] = [];
   readonly unknown = new Map<string, number>();
+  private needsBlockCounts = false;
   private keys: Set<number> | null = new Set();
 
   private paramSlots: Map<string, number> | null = null;
@@ -259,6 +245,7 @@ export class Codegen {
     parts.push('"use strict";');
     parts.push('const O = R.ops, V = R.variables, T = R.targets, C = R.cast;');
     parts.push('const n = C.num, s = C.str, b = C.bool, nf = C.field;');
+    if (this.needsBlockCounts) parts.push(`const B = ${literal(blockCounts(this.input))};`);
     parts.push('const F = [];');
     this.functionSources.forEach((source, index) => {
       parts.push(`F[${index}] = ${source};`);
@@ -954,7 +941,8 @@ export class Codegen {
       case 'get_boolean_value':
         return { code: `(${this.raw(p[0])} ? 'TRUE' : 'FALSE')`, kind: 'str' };
       case 'get_block_count':
-        return { code: '0', kind: 'num', constant: 0 };
+        this.needsBlockCounts = true;
+        return { code: `(yield* O.blockCount(e, ${literal(p[0])}, B))`, kind: 'num' };
 
       // Translation waits for Entry's service like a function call.
       case 'get_translated_string':
@@ -1129,69 +1117,4 @@ export class Codegen {
   }
 }
 
-// Fill omitted params arrays because playentry leaves them out of argument-free blocks.
-function withParams(_key: string, value: unknown): unknown {
-  if (value && typeof value === 'object' && !Array.isArray(value) &&
-    typeof (value as RawBlock).type === 'string' && !Array.isArray((value as RawBlock).params)) {
-    (value as RawBlock).params = [];
-  }
-  return value;
-}
-
-function parseScript(script: string | RawBlock[][] | undefined): RawBlock[][] {
-  if (!script) {
-    return [];
-  }
-  if (typeof script === 'string') {
-    if (!script.trim()) {
-      return [];
-    }
-    try {
-      return JSON.parse(script, withParams) as RawBlock[][];
-    } catch {
-      return [];
-    }
-  }
-  return script;
-}
-
-// Find the definition stack even when workspace comments precede it.
-function findFunctionDefine(content: RawBlock[][]): RawBlock[] | null {
-  for (const stack of content) {
-    const first = stack[0];
-    if (first && (first.type === 'function_create' || first.type === 'function_create_value')) {
-      return stack;
-    }
-  }
-  return null;
-}
-
-// Accept both inline playentry function bodies and bodies nested in saved archives.
-function functionBody(stack: RawBlock[]): RawBlock[] {
-  const nested = stack[0]?.statements?.[0];
-  if (nested?.length) {
-    return nested;
-  }
-  return stack.slice(1);
-}
-
-function collectParams(field: unknown): string[] {
-  const names: string[] = [];
-  let node = field;
-  while (isBlock(node)) {
-    if (node.type === 'function_field_string' || node.type === 'function_field_boolean') {
-      const slot = node.params[0];
-      if (isBlock(slot)) {
-        names.push(slot.type);
-      }
-      node = node.params[1];
-    } else if (node.type === 'function_field_label') {
-      node = node.params[1];
-    } else {
-      break;
-    }
-  }
-  return names;
-}
-
-export { parseScript, findFunctionDefine, functionBody, collectParams };
+export { parseScript, findFunctionDefine, functionBody, collectParams } from './blocks.ts';

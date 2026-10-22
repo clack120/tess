@@ -177,7 +177,7 @@ export function mountPlayer(
   startButton.setAttribute("aria-label", "시작하기");
   startButton.innerHTML = ICONS.play;
   const status = el("div", "tessvm-status", cover);
-  status.textContent = "작품을 불러오는 중…";
+  status.textContent = "작품을 읽어들이는 중…";
 
   const bar = el("div", "tessvm-bar", root);
   const left = el("div", "tessvm-bar-side", bar);
@@ -345,8 +345,8 @@ export function mountPlayer(
         // Wait for assets before enabling input.
         onProgress: (done, all) => {
           status.textContent = all
-            ? `불러오는 중… ${Math.floor((done / all) * 100)}%`
-            : "불러오는 중…";
+            ? `읽어들이는 중: ${((done / all) * 100).toFixed(2)}%`
+            : "읽어들이는 중…";
         },
       });
       cloud.setChangeListener(() => {
