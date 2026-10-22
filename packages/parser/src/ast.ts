@@ -651,9 +651,13 @@ export interface Diagnostic {
   line: number;
   column: number;
   offset: number;
+  endOffset?: number;
   message: string;
   file?: string;
   detail?: string | null;
+  code?: string;
+  help?: string;
+  related?: Diagnostic[];
 }
 
 /**

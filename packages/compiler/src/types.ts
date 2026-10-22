@@ -4,7 +4,7 @@
  * 엔트리 엔진이 직접 읽어들이는 형태를 따르며, 
  * 컴파일 과정에서만 사용되는 데이터들은 하단의 "컴파일러 내부 타입" 섹션에 정의되어 있습니다.
  */
-import type { Expr, FunctionDeclNode, ObjectNode, ParseRoot } from '@tess/parser';
+import type { Diagnostic, Expr, FunctionDeclNode, ObjectNode, ParseRoot } from '@tess/parser';
 import type { CompilerHost } from './host.ts';
 
 /** 
@@ -214,14 +214,7 @@ export interface EntryProject {
  * @example
  * const diag: CompileDiagnostic = { line: 10, column: 5, offset: 150, message: "구문 오류" };
  */
-export interface CompileDiagnostic {
-  line: number;
-  column: number;
-  offset: number;
-  message: string;
-  file?: string;
-  detail?: string | null;
-}
+export type CompileDiagnostic = Diagnostic;
 
 /** 
  * 생성된 블록이 원본 소스 코드의 어느 부분을 가리키는지 추적하기 위한 위치 정보입니다. 
@@ -308,11 +301,13 @@ export type ResourceRef =
 
 /** 함수 본문을 컴파일할 때 필요한 매개변수와 지역 변수의 스코프 정보입니다. */
 export interface FunctionScope {
+  id: string;
   name: string;
   /** Parameter name -> the entry block type that reads it. */
   params: Map<string, string>;
-  /** Local variable name -> its entry id and the name entry shows. */
+  /** All allocated locals by id, including bindings from nested blocks. */
   localVars: Map<string, { id: string; displayName: string }>;
+  bindings: Map<string, { id: string; displayName: string }>;
 }
 
 /** `compileProject` 실행 시 주입하는 컴파일 옵션 설정입니다. */

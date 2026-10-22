@@ -146,10 +146,16 @@ export { log, note, outro };
  * @returns 포맷팅된 문자열
  */
 function diagnostic(label: string, item: CompileDiagnostic, muted = false): string {
-  const where = item.file && item.file !== label ? path.basename(item.file) : label;
+  const file = item.file ?? label;
+  const where = path.isAbsolute(file) ? path.relative(process.cwd(), file) : file;
   const paint = muted ? grey : cyan;
-  const head = `${paint(`${where}:${item.line}:${item.column}`)}  ${muted ? dim(item.message) : item.message}`;
-  return item.detail ? `${head}\n${dim(item.detail)}` : head;
+  const head = `${paint(`${where}:${item.line}:${item.column}`)}  ${item.code ? `[${item.code}] ` : ''}${muted ? dim(item.message) : item.message}`;
+  return [
+    head,
+    ...(item.detail ? [dim(item.detail)] : []),
+    ...(item.related ?? []).map(other => `참고: ${diagnostic(label, other, muted)}`),
+    ...(item.help ? [`도움말: ${item.help}`] : []),
+  ].join('\n');
 }
 
 const MAX_SHOWN = 8;

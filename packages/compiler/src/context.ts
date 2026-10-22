@@ -183,7 +183,7 @@ export class Context {
     const offset = node?.loc?.start ?? 0;
     const file = node?.loc?.file;
     const { line, column } = this.#positionIn(file, offset);
-    bucket.push({ line, column, file, offset, message });
+    bucket.push({ line, column, file, offset, endOffset: node?.loc?.end, message });
   }
 
   /**
@@ -245,14 +245,12 @@ export class Context {
   }
 
   // --- 심볼 조회 -----------------------------------------------------------
-  /** 이름으로 변수/리스트 찾기: 매개변수 -> 함수 지역 -> 오브젝트 로컬 -> 전역 */
+  /** 이름으로 변수/리스트 찾기: 함수 블록 지역 -> 매개변수 -> 오브젝트 로컬 -> 전역 */
   lookupVariable(name: string): VariableRef | null {
     if (this.funcScope) {
+      const local = this.funcScope.bindings.get(name);
+      if (local) return { kind: 'funcLocal', name, id: local.id };
       if (this.funcScope.params.has(name)) return { kind: 'param', name };
-      // 엔트리 함수 지역 변수는 이름이 아니라 `함수id_해시` 로 가리킨다
-      if (this.funcScope.localVars.has(name)) {
-        return { kind: 'funcLocal', name, id: this.funcScope.localVars.get(name)!.id };
-      }
       // A function declared inside an object sees that object's locals.
       const owned = this.locals.get(name);
       if (owned) return { kind: 'variable', entry: owned };
@@ -303,7 +301,7 @@ export class Context {
   knownNames(): string[] {
     const names = [...this.globals.keys(), ...this.locals.keys()];
     if (this.funcScope) {
-      names.push(...this.funcScope.params.keys(), ...this.funcScope.localVars.keys());
+      names.push(...this.funcScope.params.keys(), ...this.funcScope.bindings.keys());
       // A global function can name an object's local, so those are candidates too.
       for (const object of this.objects) names.push(...(object.locals?.keys() ?? []));
     }

@@ -104,10 +104,26 @@ export function validate(
       positions.set(text, locate);
     }
     const { line, column } = locate(node?.loc?.start ?? 0);
-    bucket.push({ line, column, file, message, offset: node?.loc?.start ?? 0 });
+    const diagnostic = { line, column, file, message, offset: node?.loc?.start ?? 0, endOffset: node?.loc?.end };
+    bucket.push(diagnostic);
+    return diagnostic as Diagnostic;
   };
   const error = (node: Node, message: string) => report(errors, node, message);
   const warn = (node: Node, message: string) => report(warnings, node, message);
+  function checkDeclarations(body: Array<TopLevelItem | SceneMember | ObjectMember | Stmt>, params: string[] = []) {
+    const names = new Map<string, Node | null>(params.map(name => [name, null]));
+    for (const node of body) {
+      if (node.type !== 'VarDecl' && node.type !== 'ListDecl' && node.type !== 'TableDecl') continue;
+      if (names.has(node.name)) {
+        const item = error(node, `'${node.name}' 은(는) 이 범위에 이미 선언되어 있습니다.`);
+        item.code = 'E0001';
+        item.help = '같은 범위에서는 다른 이름을 쓰세요. 값을 바꾸려면 var/list 없이 대입하세요.';
+        const previous = names.get(node.name);
+        if (previous) item.related = [report([], previous, '처음 선언한 위치입니다.')];
+      } else names.set(node.name, node);
+    }
+  }
+  checkDeclarations(program.body);
 
   // --- 사전 수집 -----------------------------------------------------------
   const globals = declaredNames(program.body);
@@ -147,6 +163,7 @@ export function validate(
   }
 
   function visitObject(object: ObjectNode) {
+    checkDeclarations(object.body);
     const isText = object.kind === 'text';
     const locals = declaredNames(object.body);
     const objectFunctions = new Set(collectFunctionNames(object.body));
@@ -192,6 +209,12 @@ export function validate(
   }
 
   function visitFunction(fn: FunctionDeclNode, objectLocals: Set<string>) {
+    const params = new Set<string>();
+    for (const name of fn.params) {
+      if (params.has(name)) error(fn, `매개변수 '${name}' 이(가) 중복되었습니다. 매개변수마다 다른 이름을 쓰세요.`);
+      params.add(name);
+    }
+    checkDeclarations(fn.body, fn.params);
     // spec 14.2: 함수는 자신의 매개변수 · 지역 변수 · 전역 변수만 볼 수 있다.
     walkStatements(fn.body, {
       isText: true, // 함수는 오브젝트 종류와 무관하므로 글상자 검사는 하지 않는다
@@ -277,7 +300,10 @@ export function validate(
     }
     for (const key of blocks) {
       const block = fields[key];
-      if (Array.isArray(block)) walkStatements(block as Stmt[], innerCtx);
+      if (Array.isArray(block)) {
+        if (ctx.inFunction) checkDeclarations(block as Stmt[]);
+        walkStatements(block as Stmt[], ctx.inFunction ? { ...innerCtx, scope: new Set(innerCtx.scope) } : innerCtx);
+      }
     }
   }
 
@@ -289,6 +315,13 @@ export function validate(
     }
 
     const node = value as AnyNode;
+    if (node.type === 'Binary' && (node.operator === 'and' || node.operator === 'or') && mayRunOrFail(node.right)) {
+      const item = warn(node.right as Node, `'${node.operator}' 는 왼쪽 결과와 관계없이 오른쪽 식도 평가합니다. 범위 검사 뒤의 접근이나 함수 호출도 실행됩니다.`);
+      item.code = 'W0001';
+      item.help = node.operator === 'and'
+        ? '오른쪽 식을 보호하려면 if 조건을 두 단계로 나누어 중첩하세요.'
+        : '왼쪽 조건이 거짓일 때만 실행하려면 if/else로 나누세요.';
+    }
     if (node.type === 'Identifier') checkIdentifier(node as unknown as Identifier, ctx);
     if (node.type === 'Call') checkCall(node as unknown as CallNode, ctx);
 
@@ -344,6 +377,16 @@ export function validate(
   }
 
   return { errors, warnings };
+}
+
+/** Calls to user functions and indexed/string reads can run effects or stop the work. */
+function mayRunOrFail(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some(mayRunOrFail);
+  const node = value as AnyNode;
+  if (node.type === 'Index') return true;
+  if (node.type === 'Call' && (!BUILTIN_FUNCTIONS.has(node.callee as string) || node.callee === 'slice')) return true;
+  return Object.entries(node).some(([key, child]) => key !== 'loc' && mayRunOrFail(child));
 }
 
 // ---------------------------------------------------------------------------

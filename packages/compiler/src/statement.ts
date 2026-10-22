@@ -115,10 +115,16 @@ const blocksOf = (items: Array<EntryBlock | null>): EntryBlock[] => (
   items.filter((item): item is EntryBlock => item !== null)
 );
 
-export function compileStatements(statements: Stmt[], ctx: Context): EntryBlock[] {
+export function compileStatements(statements: Stmt[], ctx: Context, scoped = true): EntryBlock[] {
+  const bindings = ctx.funcScope?.bindings;
+  if (bindings && scoped) ctx.funcScope!.bindings = new Map(bindings);
   const blocks: EntryBlock[] = [];
-  for (const statement of statements)
-    for (const block of compileStatement(statement, ctx)) blocks.push(block);
+  try {
+    for (const statement of statements)
+      for (const block of compileStatement(statement, ctx)) blocks.push(block);
+  } finally {
+    if (bindings && scoped) ctx.funcScope!.bindings = bindings;
+  }
   return blocks;
 }
 
@@ -854,6 +860,17 @@ function requireList(node: Expr, ctx: Context): EntryVariable | null {
 //  선언 · 대입
 // ---------------------------------------------------------------------------
 function compileDeclaration(node: VarDeclNode | ListDeclNode, ctx: Context): EntryBlock[] {
+  if (ctx.funcScope) {
+    if (node.type === 'ListDecl') {
+      return blocksOf([ctx.error(node, '함수 안에서는 리스트를 선언할 수 없습니다. 전역 리스트를 쓰세요.')]);
+    }
+    // Resolve the initializer before this declaration shadows an outer binding.
+    const value = compileValue(node.value, ctx);
+    const local = { id: `${ctx.funcScope.id}_${ctx.newId()}`, displayName: node.displayName ?? node.name };
+    ctx.funcScope.localVars.set(local.id, local);
+    ctx.funcScope.bindings.set(node.name, local);
+    return value ? [ctx.block('set_func_variable', [local.id, value, null])] : [];
+  }
   // 선언 자체는 미리 수집해 두었고, 여기서는 초기값 대입만 만든다.
   if (node.type === "ListDecl") {
     const found = ctx.lookupVariable(node.name);
@@ -1302,7 +1319,7 @@ function compileCallStatement(node: ExpressionStatementNode, ctx: Context): Entr
     return blocksOf([
       ctx.error(
         node,
-        `함수 '${call.callee}' 는 인자가 ${fn.params.length}개여야 합니다.`,
+        `함수 '${call.callee}' 는 인자가 ${fn.params.length}개여야 합니다. (${call.arguments.length}개를 받았습니다) 사용법: ${call.callee}(${fn.params.join(', ')})`,
       ),
     ]);
   }

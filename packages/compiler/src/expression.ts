@@ -670,7 +670,7 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
       );
     }
     if (args.length !== fn.params.length) {
-      ctx.error(node, `함수 '${callee}' 는 인자가 ${fn.params.length}개여야 합니다.`);
+      ctx.error(node, `함수 '${callee}' 는 인자가 ${fn.params.length}개여야 합니다. (${args.length}개를 받았습니다) 사용법: ${callee}(${fn.params.join(', ')})`);
       return null;
     }
     const params = compileCallArguments(fn, args, ctx);

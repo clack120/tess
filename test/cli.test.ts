@@ -100,6 +100,21 @@ test('문법 에러는 그대로 위치와 함께 알려 준다', (t) => {
   assert.match(result.output, /main\.tess:\d+:\d+/);
 });
 
+test('진단은 오류 번호와 도움말, 처음 선언한 파일을 함께 보여준다', (t) => {
+  const dir = project(t, {
+    'main.tess': 'var score = 0\nuse "nested/shared.tess"',
+    'nested/shared.tess': 'var score = 1',
+  });
+  const result = cli('check', path.join(dir, 'main.tess'));
+  assert.equal(result.code, 1);
+  assert.match(result.output, /\[E0001\]/);
+  assert.match(result.output, /nested\/shared\.tess:1:1/);
+  assert.match(result.output, /main\.tess:1:1/);
+  assert.match(result.output, /var score = 0/);
+  assert.match(result.output, /var score = 1/);
+  assert.match(result.output, /도움말:.*대입/);
+});
+
 // --- 느슨한 실행 -------------------------------------------------------------
 const LOOSE_PROJECT = `scene "s":
   object "주인공":
