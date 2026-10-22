@@ -59,6 +59,52 @@ end`;
   }
 });
 
+test('a root falling back or stepping aside leaves the other roots in the kernel', () => {
+  const source = `
+var text_value = "000123"
+var total = 0
+var ret = 0
+list items = [1, 2]
+function f():
+  return (text_value + items[1])
+end
+function g():
+  total += 1
+  return 0
+end
+object "o":
+  when start do
+    forever:
+      ret = f()
+      ret = g()
+    end
+  end
+end`;
+  const work = project(source);
+  const plain = new Vm({ renderer: null, audio: null });
+  const optimized = new Vm({ renderer: null, audio: null, kernel: () => null });
+  for (const vm of [plain, optimized]) {
+    vm.load(structuredClone(work));
+    vm.start();
+    vm.tick();
+  }
+  const stats = optimized.kernel!.stats;
+  assert.equal(optimized.kernel!.roots.size, 2);
+  assert.ok(stats.fallbacks > 0, 'f falls back on text it cannot restore');
+  const runs = stats.runs;
+  assert.ok(runs > 0, 'g still runs in the kernel');
+  for (const vm of [plain, optimized]) {
+    vm.variables.find((v) => v.name === 'text_value')!.setValue('5');
+    const items = vm.variables.find((v) => v.name === 'items')!;
+    items.array.push({ data: 3 });
+    items.touch();
+    vm.tick();
+  }
+  assert.equal(stats.dropped, 1, 'only f steps aside once its list changes length');
+  assert.ok(stats.runs > runs, 'g keeps running in the kernel');
+  assert.equal(snapshot(optimized), snapshot(plain));
+});
+
 /** Compiles Tess source into the shape `Vm.load` takes. */
 function project(source: string): never {
   const result = compileProject(source, { path: 'kernel.tess' });

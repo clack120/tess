@@ -37,7 +37,8 @@ export interface KernelHandle {
   /**
    * How many times a root ran in the kernel, how often it fell back, how many
    * numbers crossed, and how many entry points were given back to the block
-   * runner because the crossing cost more than it saved.
+   * runner — because the crossing cost more than it saved, or because their
+   * data no longer fits the module.
    */
   readonly stats: { runs: number; fallbacks: number; copied: number; dropped: number };
 }
@@ -49,7 +50,7 @@ export interface KernelHandle {
  */
 export function attachKernel(
   wasm: Uint8Array<ArrayBuffer> | WebAssembly.Module,
-  plan: Pick<KernelPlan, 'slots' | 'roots' | 'depth' | 'size'>,
+  plan: Pick<KernelPlan, 'slots' | 'roots' | 'access' | 'depth' | 'size'>,
   variables: Variable[],
 ): KernelHandle | null {
   let instance: WebAssembly.Instance;
@@ -90,7 +91,7 @@ export function attachKernel(
  * either side of that is the same.
  */
 export function attachJsKernel(
-  plan: Pick<KernelPlan, 'javascript' | 'slots' | 'roots' | 'depth' | 'size'>,
+  plan: Pick<KernelPlan, 'javascript' | 'slots' | 'roots' | 'access' | 'depth' | 'size'>,
   variables: Variable[],
 ): KernelHandle | null {
   const cells = new Float64Array(plan.size);
@@ -115,14 +116,17 @@ export function attachJsKernel(
 /** Everything either kernel needs around it: moving the work's numbers across. */
 function marshal(
   where: 'wasm' | 'javascript',
-  plan: Pick<KernelPlan, 'slots' | 'roots' | 'depth' | 'size'>,
+  plan: Pick<KernelPlan, 'slots' | 'roots' | 'access' | 'depth' | 'size'>,
   variables: Variable[],
   entries: Map<number, KernelFn>,
   data: () => Float64Array,
 ): KernelHandle {
 
-  const reading = plan.slots.filter((slot) => slot.read || slot.written);
-  const writing = plan.slots.filter((slot) => slot.written);
+  // Each root copies only what its own call tree reads and writes.
+  const access = new Map([...plan.access].map(([root, used]) => [root, {
+    reading: used.touched.map((at) => plan.slots[at]!),
+    writing: used.written.map((at) => plan.slots[at]!),
+  }]));
   /**
    * The first calls of each entry point are timed, because moving the numbers
    * across is not always worth what it buys. A function the work calls once a
@@ -136,7 +140,6 @@ function marshal(
   /** Entry points the crossing was not worth; the block runner keeps those. */
   const dropped = new Set<number>();
   const stats = { runs: 0, fallbacks: 0, copied: 0, dropped: 0 };
-  let live = true;
   /**
    * What each slot's variable stood at when the kernel last agreed with it.
    * A table the work only reads — a connectome, a lookup curve — then crosses
@@ -153,7 +156,8 @@ function marshal(
    *
    * `stop` means the work and the module no longer describe the same data —
    * a list that changed length, or one holding text a run would rewrite — and
-   * the kernel steps aside for good. `skip` is only this call's business.
+   * the roots that touch it step aside for good. `skip` is only this call's
+   * business.
    */
   function copyIn(slot: KernelSlot, cells: Float64Array): 'ok' | 'skip' | 'stop' {
     const variable = variables[slot.variable];
@@ -253,17 +257,21 @@ function marshal(
     depth: plan.depth,
     stats,
     run(root: number, args: number[]): number | null {
-      const fn = live && !dropped.has(root) ? entries.get(root) : undefined;
-      if (!fn) {
+      const fn = !dropped.has(root) ? entries.get(root) : undefined;
+      const used = access.get(root);
+      if (!fn || !used) {
         return null;
       }
       const watch = trial.get(root);
       const started = watch ? performance.now() : 0;
       const cells = data();
-      for (const slot of reading) {
+      for (const slot of used.reading) {
         const state = copyIn(slot, cells);
         if (state !== 'ok') {
-          live = state !== 'stop';
+          if (state === 'stop') {
+            dropped.add(root);
+            stats.dropped += 1;
+          }
           stats.fallbacks += 1;
           return null;
         }
@@ -277,7 +285,7 @@ function marshal(
         return null;
       }
       const written = data();
-      for (const slot of writing) {
+      for (const slot of used.writing) {
         copyOut(slot, written);
       }
       stats.runs += 1;
