@@ -12,8 +12,6 @@ import { spawn } from 'node:child_process';
 import { Vm } from '../runtime/engine.ts';
 import { SilentAudioEngine } from '../audio/silent.ts';
 import { loadProject } from './load.ts';
-import { prepareKernel } from '../kernel/prepare.ts';
-import { fingerprint } from '../kernel/plan.ts';
 import { serveVm, DEFAULT_PORT } from './server.ts';
 import { exportHtml, exportZip, type ExportResult } from './export.ts';
 
@@ -43,10 +41,8 @@ const USAGE = `사용법
                     스위치이기도 하다 — 끄면 '부스트 모드인가?' 가 거짓이 되고, 채우기와
                     글상자를 캔버스 쪽 규칙으로 그린다
   --no-kernel       숫자 함수를 커널로 내리지 않는다. 기본은 내림 — 프레임을 넘기지
-                    않는 숫자 함수를 골라, moonbit 툴체인이 있으면 MoonBit 으로
-                    옮겨 wasm 으로 빌드해 돌리고, 없으면 같은 함수를 전용
-                    자바스크립트로 돌린다
-  --html            export 가 파일 하나로 낸다 — 모듈·작품·모양·소리·커널을 모두
+                    않는 숫자 함수를 골라 전용 자바스크립트로 돌린다
+  --html            export 가 파일 하나로 낸다 — 모듈·작품·모양·소리를 모두
                     글 안에 담고 열릴 때 Blob 으로 되살린다
   --zip             export 가 zip 하나로 낸다 (기본). 풀어서 정적 서버에 올리면 돈다
   --out <경로>      export 가 쓸 파일 이름 (기본은 작품 이름)
@@ -194,11 +190,7 @@ async function run(loaded: Loaded, options: Options): Promise<number> {
   });
   console.log(`${loaded.name} → ${server.url}`);
   console.log(`  오브젝트 ${loaded.project.objects.length} · 장면 ${loaded.project.scenes.length} · 에셋 ${loaded.assets.length}`);
-  const built = server.kernel.kernel;
-  console.log(built
-    ? `  커널   wasm · 함수 ${built.roots}개 · 값 ${built.slots}칸 · ${(built.wasm.byteLength / 1024).toFixed(0)} KB` +
-      ` (${built.cached ? '캐시' : `빌드 ${built.ms.toFixed(0)}ms`})`
-    : `  커널   javascript — ${server.kernel.reason}`);
+  console.log(`  커널   ${options.kernel ? '켬' : '끔 (--no-kernel)'}`);
   console.log('  Ctrl+C 로 끕니다.');
   if (options.open) {
     openBrowser(server.url);
@@ -212,21 +204,13 @@ async function run(loaded: Loaded, options: Options): Promise<number> {
 }
 
 function bench(loaded: Loaded, options: Options): number {
-  const prepared = options.kernel
-    ? prepareKernel(loaded.project)
-    : { kernel: null, reason: '껐습니다 (--no-kernel)' };
   const vm = new Vm({
     renderer: null,
     audio: new SilentAudioEngine(),
     fps: options.fps,
     stageWidth: options.stageWidth,
     stageHeight: options.stageHeight,
-    kernel: options.kernel
-      ? (plan) =>
-          prepared.kernel && fingerprint(plan.source) === prepared.kernel.fingerprint
-            ? prepared.kernel.wasm
-            : null
-      : null,
+    kernel: options.kernel,
   });
   const compileStart = performance.now();
   vm.load(loaded.project as never);
@@ -248,10 +232,9 @@ function bench(loaded: Loaded, options: Options): number {
   console.log(`  ${options.ticks} 틱  ${elapsed.toFixed(1)} ms  (틱당 ${perTick.toFixed(4)} ms)`);
   console.log(`  여유     ${(16.67 / perTick).toFixed(0)}× (60fps 한 프레임 예산 대비)`);
   console.log(vm.kernel
-    ? `  커널     ${vm.kernel.where} · 함수 ${vm.kernel.roots.size}개 · 실행 ${vm.kernel.stats.runs}회` +
-      `${vm.kernel.stats.fallbacks ? ` · 되돌림 ${vm.kernel.stats.fallbacks}회` : ''}` +
-      `${prepared.kernel ? '' : ` (wasm 없음 — ${prepared.reason})`}`
-    : `  커널     없음 — ${prepared.reason}`);
+    ? `  커널     함수 ${vm.kernel.roots.size}개 · 실행 ${vm.kernel.stats.runs}회` +
+      `${vm.kernel.stats.fallbacks ? ` · 되돌림 ${vm.kernel.stats.fallbacks}회` : ''}`
+    : `  커널     없음${options.kernel ? '' : ' (--no-kernel)'}`);
   if (vm.errors.length) {
     console.log(`  오류 ${vm.errors.length}건 — 첫 번째: ${vm.errors[0]!.message}`);
   }
@@ -283,7 +266,7 @@ function exportWork(loaded: Loaded, options: Options): number {
     fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
     fs.writeFileSync(file, made.data);
     console.log(`${loaded.name} → ${file} (${(made.data.length / 1024 / 1024).toFixed(2)} MB)`);
-    console.log(`  모듈 ${made.modules}개 · 에셋 ${made.assets}개 · 커널 ${made.kernel}`);
+    console.log(`  모듈 ${made.modules}개 · 에셋 ${made.assets}개 · 커널 ${made.kernel ? '켬' : '끔'}`);
   }
   return 0;
 }
@@ -310,12 +293,12 @@ function check(loaded: Loaded, options: Options): number {
   const vm = new Vm({
     renderer: null,
     audio: null,
-    kernel: options.kernel ? () => null : null,
+    kernel: options.kernel,
   });
   vm.load(loaded.project as never);
   const plan = vm.kernelPlan;
   if (plan?.roots.size) {
-    console.log(`${loaded.name}: wasm 으로 내릴 함수 ${plan.roots.size}개 (값 ${plan.size}칸 · 깊이 ${plan.depth})`);
+    console.log(`${loaded.name}: 커널로 내릴 함수 ${plan.roots.size}개 (값 ${plan.size}칸 · 깊이 ${plan.depth})`);
     const why = new Map<string, number>();
     for (const reason of plan.rejected.values()) {
       const kind = reason.startsWith('calls ') ? '부른 함수가 못 감' : reason;
@@ -325,7 +308,7 @@ function check(loaded: Loaded, options: Options): number {
       console.log(`  못 감 ${String(count).padStart(4)}개  ${reason}`);
     }
   } else {
-    console.log(`${loaded.name}: wasm 으로 내릴 함수가 없습니다.`);
+    console.log(`${loaded.name}: 커널로 내릴 함수가 없습니다.`);
   }
   if (!vm.unknownBlocks.size) {
     console.log(`${loaded.name}: 모든 블록을 실행할 수 있습니다.`);

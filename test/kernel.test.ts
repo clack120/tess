@@ -1,17 +1,15 @@
 /**
- * wasm 커널이 자바스크립트 경로와 같은 답을 내는지 검증합니다.
+ * 커널이 블록 실행기와 같은 답을 내는지 검증합니다.
  *
  * 커널은 프레임을 넘기지 않는 숫자 함수만 가져가므로, 확인할 것은 두 가지입니다 —
  * 무엇을 가져가고 무엇을 두고 가는가(`planKernel`), 그리고 가져간 것이 두고 간 것과
  * **똑같은 값**을 내는가. 마지막 하나는 같은 작품을 커널 있이·없이 돌린 뒤 변수와
  * 리스트를 통째로 맞춰 봅니다.
- *
- * moonbit 툴체인이 없는 곳에서는 빌드가 필요한 항목만 건너뜁니다.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileProject } from '@tess/compiler';
-import { Vm, buildKernel, fingerprint, planKernel } from '@tess/vm';
+import { Vm, planKernel } from '@tess/vm';
 import type { KernelPlan } from '@tess/vm';
 
 test('the JS kernel preserves untouched scalar text and falls back without partial writes', () => {
@@ -37,14 +35,13 @@ end`;
   for (const initial of ['000123', '9007199254740993', '-0', '123', '0.50']) {
     const work = project(source);
     const plain = new Vm({ renderer: null, audio: null });
-    const optimized = new Vm({ renderer: null, audio: null, kernel: () => null });
+    const optimized = new Vm({ renderer: null, audio: null, kernel: true });
     for (const vm of [plain, optimized]) {
       vm.load(structuredClone(work));
       vm.start();
       vm.variables.find((v) => v.name === 'text_value')!.setValue(initial);
       vm.tick();
     }
-    assert.equal(optimized.kernel!.where, 'javascript');
     assert.equal(snapshot(optimized), snapshot(plain), initial);
     if (['123', '0.50'].includes(initial)) assert.ok(optimized.kernel!.stats.runs > 0);
     else assert.ok(optimized.kernel!.stats.fallbacks > 0);
@@ -80,7 +77,7 @@ object "o":
 end`;
   const work = project(source);
   const plain = new Vm({ renderer: null, audio: null });
-  const optimized = new Vm({ renderer: null, audio: null, kernel: () => null });
+  const optimized = new Vm({ renderer: null, audio: null, kernel: true });
   for (const vm of [plain, optimized]) {
     vm.load(structuredClone(work));
     vm.start();
@@ -108,7 +105,7 @@ end`;
 function pair(source: string): [Vm, Vm] {
   const work = project(source);
   const plain = new Vm({ renderer: null, audio: null });
-  const optimized = new Vm({ renderer: null, audio: null, kernel: () => null });
+  const optimized = new Vm({ renderer: null, audio: null, kernel: true });
   for (const vm of [plain, optimized]) {
     vm.load(structuredClone(work));
     vm.start();
@@ -205,33 +202,18 @@ function project(source: string): never {
 
 /** The plan a work would get, without building anything. */
 function planOf(source: string): KernelPlan {
-  const vm = new Vm({ renderer: null, audio: null, kernel: () => null });
+  const vm = new Vm({ renderer: null, audio: null, kernel: true });
   vm.load(project(source));
   assert.ok(vm.kernelPlan, '계획이 없습니다');
   return vm.kernelPlan;
 }
 
-/**
- * Runs a work for `ticks` frames, with the kernel or without it. Without the
- * moonbit toolchain no wasm is built and the javascript kernel runs instead.
- */
+/** Runs a work for `ticks` frames, with the kernel or without it. */
 function runWork(source: string, ticks: number, withKernel: boolean): Vm {
   const built = project(source);
-  let plan: KernelPlan | null = null;
-  const vm = new Vm({
-    renderer: null,
-    audio: null,
-    kernel: withKernel
-      ? (found) => {
-          plan = found;
-          const wasm = buildKernel(found.source, [...found.roots.values()].map((root) => root.name));
-          return wasm ? wasm.wasm : null;
-        }
-      : null,
-  });
+  const vm = new Vm({ renderer: null, audio: null, kernel: withKernel });
   vm.load(built);
   if (withKernel) {
-    assert.ok(plan, '커널 계획이 세워지지 않았습니다');
     assert.ok(vm.kernel, '커널이 붙지 않았습니다');
   }
   vm.start();
@@ -422,11 +404,6 @@ end`);
 // ---------------------------------------------------------------------------
 //  같은 답을 내는가
 // ---------------------------------------------------------------------------
-test('지문은 같은 소스에 같은 값을 준다', () => {
-  assert.equal(fingerprint('abc'), fingerprint('abc'));
-  assert.notEqual(fingerprint('abc'), fingerprint('abd'));
-});
-
 test('커널이 낸 값은 자바스크립트가 낸 값과 같다 (10진 산술)', () => {
   assertSameAsJavascript(`
 var ret = 0

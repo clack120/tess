@@ -150,7 +150,7 @@ scene "메인":
     end
   end
 end`;
-  for (const kernel of [undefined, () => null]) {
+  for (const kernel of [false, true]) {
     const result = compileProject(source, { path: 'test.tess' });
     const vm = new Vm({ renderer: null, audio: null, kernel } as never);
     vm.load(result.project as unknown as never);

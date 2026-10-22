@@ -175,7 +175,7 @@ export async function start(
     container,
     autoStart: true,
     keyTarget: container,
-    kernelUrl: null,
+    kernel: false,
     // The scene being worked on is the one that runs, the way entry's editor does.
     scene,
     onProgress,

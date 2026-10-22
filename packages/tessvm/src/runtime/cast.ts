@@ -190,7 +190,7 @@ function tailOf(x: number, wall: number): number {
 /**
  * Digits after the decimal point in a number's shortest form, counted up to
  * `DECIMAL_CAP`. The kernel asks for these when it takes a table over, so that
- * the wasm side never has to look for them again.
+ * the kernel never has to look for them again.
  */
 export function decimals(x: number): number {
   if (Number.isInteger(x)) {

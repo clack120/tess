@@ -1,8 +1,8 @@
 /**
- * @fileoverview 빌드된 커널을 실행기에 붙입니다.
+ * @fileoverview 커널을 실행기에 붙입니다.
  *
  * 커널이 맡은 함수는 `F[i]` 자리를 이 파일이 만든 제너레이터로 바꿔 끼웁니다.
- * 그 제너레이터는 커널이 읽는 변수·리스트를 공유 영역으로 옮기고, wasm 함수를
+ * 그 제너레이터는 커널이 읽는 변수·리스트를 공유 영역으로 옮기고, 커널 함수를
  * 한 번 부르고, 커널이 쓴 것만 되돌려 놓습니다. 되돌릴 수 없는 자리를 만나면
  * 커널이 표시만 남기고 끝내므로, 여기서 그 판을 버리고 원래 자바스크립트
  * 함수를 대신 돌립니다.
@@ -11,9 +11,6 @@ import { BAIL_SLOT, canonical, judged, type KernelPlan, type KernelSlot } from '
 import { decimals } from '../runtime/cast.ts';
 import { kernelOps, type KernelMarks } from './runtime-js.ts';
 import type { Variable } from '../runtime/model.ts';
-
-/** Where the shared data region starts, in bytes. Matches `runtime.mbt`. */
-const DATA_BASE = 1024;
 
 /** Entry unwinds a call chain this deep; the kernel needs room for its own. */
 const CALL_DEPTH_LIMIT = 1000000;
@@ -37,14 +34,9 @@ const REST_MAX = 4096;
 const RETRY_FIRST = 8192;
 const RETRY_MAX = 1 << 20;
 
-/** The maths the wasm library rounds differently from the page's `Math`. */
-const HOST_MATHS = { ln: Math.log, acos: Math.acos };
-
 type KernelFn = (...args: number[]) => number;
 
 export interface KernelHandle {
-  /** Which of the two the run ended up on, for the line the cli prints. */
-  where: 'wasm' | 'javascript';
   /** Runs one root, or returns null when the caller should use javascript. */
   run(root: number, args: number[]): number | null;
   /** Roots the kernel can take, by function table index. */
@@ -59,53 +51,7 @@ export interface KernelHandle {
   readonly stats: { runs: number; fallbacks: number; copied: number; dropped: number };
 }
 
-/**
- * Instantiates a kernel module against the work's variables. Returns null when
- * the module and the work no longer line up, which leaves the work on the
- * javascript path rather than running it with the wrong data.
- */
-export function attachKernel(
-  wasm: Uint8Array<ArrayBuffer> | WebAssembly.Module,
-  plan: Pick<KernelPlan, 'slots' | 'roots' | 'access' | 'depth' | 'size'>,
-  variables: Variable[],
-): KernelHandle | null {
-  let instance: WebAssembly.Instance;
-  try {
-    const module = wasm instanceof WebAssembly.Module ? wasm : new WebAssembly.Module(wasm);
-    instance = new WebAssembly.Instance(module, { tess: HOST_MATHS });
-  } catch {
-    return null;
-  }
-  const exports = instance.exports as Record<string, unknown>;
-  const memory = exports.memory as WebAssembly.Memory | undefined;
-  if (!memory) {
-    return null;
-  }
-  const entries = new Map<number, KernelFn>();
-  for (const [index, root] of plan.roots) {
-    const fn = exports[root.name];
-    if (typeof fn !== 'function') {
-      return null;
-    }
-    entries.set(index, fn as KernelFn);
-  }
-
-  // The buffer moves when the heap grows, so the view is taken again each time.
-  let view = new Float64Array(memory.buffer, DATA_BASE, plan.size);
-  const data = (): Float64Array => {
-    if (view.buffer !== memory.buffer || view.byteLength === 0) {
-      view = new Float64Array(memory.buffer, DATA_BASE, plan.size);
-    }
-    return view;
-  };
-  return marshal('wasm', plan, variables, entries, data);
-}
-
-/**
- * The same functions in javascript, for a page with no wasm to hand. The
- * numbers live in one `Float64Array` instead of linear memory; everything
- * either side of that is the same.
- */
+/** Builds the kernel's functions over one `Float64Array` the work's numbers cross into. */
 export function attachJsKernel(
   plan: Pick<KernelPlan, 'javascript' | 'slots' | 'roots' | 'access' | 'depth' | 'size'>,
   variables: Variable[],
@@ -127,7 +73,7 @@ export function attachJsKernel(
     }
     entries.set(index, fn as KernelFn);
   }
-  return marshal('javascript', plan, variables, entries, () => cells, marks);
+  return marshal(plan, variables, entries, () => cells, marks);
 }
 
 interface Trial {
@@ -163,17 +109,15 @@ function newTrial(cold: boolean): Trial {
 }
 
 /**
- * Everything either kernel needs around it: moving the work's numbers across.
- * `marks` comes with the javascript kernel, which records the list items a run
- * stored into; without it every item of a list a root may write goes back.
+ * Moving the work's numbers across. `marks` records the list items a run
+ * stored into, and only those go back.
  */
 function marshal(
-  where: 'wasm' | 'javascript',
   plan: Pick<KernelPlan, 'slots' | 'roots' | 'access' | 'depth' | 'size'>,
   variables: Variable[],
   entries: Map<number, KernelFn>,
   data: () => Float64Array,
-  marks: KernelMarks | null = null,
+  marks: KernelMarks,
 ): KernelHandle {
   // Each root copies only what its own call tree reads and writes.
   const roots = new Map<number, Root>([...plan.access].map(([index, used]) => [index, {
@@ -293,16 +237,16 @@ function marshal(
     return 'ok';
   }
 
-  /** Whether a run stored into this list item; without marks, any it may write. */
-  const stored = (cell: number): boolean => !marks || marks.flags[cell] === 1;
+  /** Whether a run stored into this list item. */
+  const stored = (cell: number): boolean => marks.flags[cell] === 1;
 
   function copyOut(slot: KernelSlot, cells: Float64Array): void {
     const variable = variables[slot.variable]!;
     if (slot.list) {
       const array = variable.array;
-      // With marks, only the stored items, inside the span the run touched.
-      const from = marks ? Math.max(slot.base, marks.span[0]!) - slot.base : 0;
-      const to = marks ? Math.min(slot.base + slot.length - 1, marks.span[1]!) - slot.base : slot.length - 1;
+      // Only the stored items, inside the span the run touched.
+      const from = Math.max(slot.base, marks.span[0]!) - slot.base;
+      const to = Math.min(slot.base + slot.length - 1, marks.span[1]!) - slot.base;
       let wrote = false;
       for (let at = from; at <= to; at += 1) {
         if (!stored(slot.base + at)) continue;
@@ -324,7 +268,6 @@ function marshal(
   }
 
   const clearMarks = (): void => {
-    if (!marks) return;
     const [low, high] = marks.span;
     if (high! >= low!) marks.flags.fill(0, low, high! + 1);
     marks.span[0] = plan.size;
@@ -345,7 +288,6 @@ function marshal(
   };
 
   return {
-    where,
     roots: plan.roots,
     depth: plan.depth,
     stats,

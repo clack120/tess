@@ -6,7 +6,7 @@
  * 스레드가 블록 트리를 해석하는 대신 미리 컴파일해 둔 제너레이터라는 것뿐입니다.
  */
 import { Codegen, type CompileInput, type FunctionEntry, type RawBlock, type ScriptPlan } from '../compile/codegen.ts';
-import { attachJsKernel, attachKernel, CALL_DEPTH_LIMIT, type KernelHandle } from '../kernel/bridge.ts';
+import { attachJsKernel, CALL_DEPTH_LIMIT, type KernelHandle } from '../kernel/bridge.ts';
 import { planKernel, type KernelPlan } from '../kernel/plan.ts';
 import { CollisionSystem } from '../collision/detect.ts';
 import { MaskStore, type AlphaMask } from '../collision/mask.ts';
@@ -166,17 +166,11 @@ export interface VmOptions {
   /** Where shared and real-time variables are kept between runs. */
   store?: VariableStore | null;
   /**
-   * Hands back a wasm module for the numeric functions the work can run there,
-   * or null to take the javascript kernel instead. `run`·`bench` fill this in
-   * from the moonbit toolchain and the page from what the server built; a run
-   * with no module at all still gets the javascript one. Leave the whole option
-   * unset to keep every function on the block runner's own path.
+   * Runs the numeric functions the work spends its frame in as specialised
+   * javascript. Off keeps every function on the block runner's own path.
    */
-  kernel?: KernelSupply | null;
+  kernel?: boolean;
 }
-
-/** What turns a kernel plan into a module this run can instantiate. */
-export type KernelSupply = (plan: KernelPlan) => Uint8Array<ArrayBuffer> | WebAssembly.Module | null;
 
 /**
  * Standing storage for the work's shared (`isCloud`) and real-time variables.
@@ -266,9 +260,8 @@ export class Vm implements Project {
   private pendingMessages: string[] = [];
 
   private scripts: CompiledScript[] = [];
-  /** Builds the wasm kernel for a work, when the run was given one. */
-  private kernelSupply: KernelSupply | null;
-  /** What the last `load` found it could move to wasm, for `tessvm check`. */
+  private kernelOn: boolean;
+  /** What the last `load` found it could move to the kernel, for `tessvm check`. */
   kernelPlan: KernelPlan | null = null;
   /** The running kernel, or null when the work stayed on javascript. */
   kernel: KernelHandle | null = null;
@@ -308,7 +301,7 @@ export class Vm implements Project {
     this.user = options.user ?? null;
     this.maxCatchUp = options.maxCatchUp ?? 4;
     this.store = options.store ?? null;
-    this.kernelSupply = options.kernel ?? null;
+    this.kernelOn = options.kernel === true;
     this.masks = new MaskStore(
       (key, width, height) => this.renderer?.maskFor?.(key, width, height) ?? null,
     );
@@ -517,7 +510,7 @@ export class Vm implements Project {
   }
 
   /**
-   * Moves the numeric functions a work spends its frame in over to wasm.
+   * Moves the numeric functions a work spends its frame in over to the kernel.
    *
    * Nothing here changes what the work does: a call that the kernel cannot
    * finish the same way entry would leaves its mark, and the javascript body
@@ -526,7 +519,7 @@ export class Vm implements Project {
   private installKernel(input: CompileInput, table: CompiledFunction[]): void {
     this.kernelPlan = null;
     this.kernel = null;
-    if (!this.kernelSupply) {
+    if (!this.kernelOn) {
       return;
     }
     const plan = planKernel(input.objects, input.functions, this.variables);
@@ -534,12 +527,7 @@ export class Vm implements Project {
     if (!plan.roots.size) {
       return;
     }
-    // Wasm where the run was given one, and the same functions in javascript
-    // where it was not — a page on someone else's site has no toolchain behind
-    // it, and the boxing is worth losing either way.
-    const wasm = this.kernelSupply(plan);
-    const handle = (wasm && attachKernel(wasm, plan, this.variables)) ??
-      attachJsKernel(plan, this.variables);
+    const handle = attachJsKernel(plan, this.variables);
     if (!handle) {
       return;
     }

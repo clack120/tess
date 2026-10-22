@@ -663,7 +663,7 @@ export class Variable {
   value: VariableValue = 0;
   array: Array<{ data: VariableValue }> = [];
   /**
-   * Counts writes, not changes. The wasm kernel keeps its own copy of the
+   * Counts writes, not changes. The kernel keeps its own copy of the
    * numbers it works on and only reads this one back when the count moved, so
    * every place that writes a variable has to say so — `setValue` does it
    * itself, and whatever reaches into `array` calls `touch`.

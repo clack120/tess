@@ -1,10 +1,10 @@
 /**
- * @fileoverview 프레임을 넘기지 않는 숫자 함수를 골라 MoonBit 소스로 옮깁니다.
+ * @fileoverview 프레임을 넘기지 않는 숫자 함수를 골라 전용 자바스크립트로 옮깁니다.
  *
  * 엔트리의 `빠른 반복` 관용구 — 반복 블록 대신 함수를 두 배씩 불러 한 프레임 안에서
  * 수천 번을 도는 모양 — 은 프레임 경계가 없는 순수 숫자 코드입니다. 그런 함수는
  * 제너레이터로 둘 이유가 없으므로, 여기서 호출 그래프를 훑어 조건에 맞는 함수만
- * 뽑아 하나의 wasm 모듈로 내립니다.
+ * 뽑아 하나의 커널 모듈로 내립니다.
  *
  * 고를 수 있는 조건은 네 가지입니다.
  *
@@ -30,70 +30,26 @@ export const BAIL_SLOT = 0;
 /** Where variable data starts, in f64 slots. */
 const FIRST_SLOT = 1;
 
-/**
- * The handful of places the two targets are written differently. Everything
- * else — calls, operators, number literals — reads the same in both, so one
- * walk writes both.
- */
-interface Dialect {
-  /** `cond ? left : right`. */
-  pick(cond: string, left: string, right: string): string;
-  not(value: string): string;
-  floor(value: string): string;
-  ifOpen(cond: string): string;
-  /** What closes a statement, where one target wants a mark and the other not. */
-  end: string;
-  let(name: string, value: string): string;
-  local(name: string, value: string): string;
-  discard(call: string): string;
-  open(name: string, arity: number, id: string): string;
-  close: string;
-  entry(name: string, arity: number, inner: string, id: string): string;
-  /** Wraps the finished module, where the javascript one needs a factory. */
-  module(bodies: string[], roots: string[]): string;
-}
-
-const MOONBIT: Dialect = {
-  pick: (cond, left, right) => `(if ${cond} { ${left} } else { ${right} })`,
-  not: (value) => `(not(${value}))`,
-  floor: (value) => `(${value}).floor()`,
-  ifOpen: (cond) => `if ${cond} {`,
-  end: '',
-  let: (name, value) => `let ${name} = ${value}`,
-  local: (name, value) => `let mut ${name} : Double = ${value}`,
-  discard: (call) => `${call} |> ignore`,
-  open: (name, arity, id) => `///| ${id}\nfn ${name}(${
-    Array.from({ length: arity }, (_, at) => `a${at} : Double`).join(', ')
-  }) -> Double {`,
-  close: '}',
-  entry: (name, arity, inner, id) => {
-    const args = Array.from({ length: arity }, (_, at) => `a${at}`);
-    return `///| Entry point for ${id}.\npub fn ${name}(${
-      args.map((arg) => `${arg} : Double`).join(', ')
-    }) -> Double {\n  st(${BAIL_SLOT}, 0.0)\n  ${inner}(${args.join(', ')})\n}\n`;
-  },
-  module: (bodies) => bodies.join('\n'),
-};
-
-const JAVASCRIPT: Dialect = {
-  pick: (cond, left, right) => `(${cond} ? ${left} : ${right})`,
-  not: (value) => `(!(${value}))`,
-  floor: (value) => `Math.floor(${value})`,
-  ifOpen: (cond) => `if (${cond}) {`,
+/** The javascript forms the emitted code is written with. */
+const JS = {
+  pick: (cond: string, left: string, right: string) => `(${cond} ? ${left} : ${right})`,
+  not: (value: string) => `(!(${value}))`,
+  floor: (value: string) => `Math.floor(${value})`,
+  ifOpen: (cond: string) => `if (${cond}) {`,
   end: ';',
-  let: (name, value) => `const ${name} = ${value};`,
-  local: (name, value) => `let ${name} = ${value};`,
-  discard: (call) => `${call};`,
-  open: (name, arity, id) => `// ${id}\nfunction ${name}(${
+  let: (name: string, value: string) => `const ${name} = ${value};`,
+  local: (name: string, value: string) => `let ${name} = ${value};`,
+  discard: (call: string) => `${call};`,
+  open: (name: string, arity: number, id: string) => `// ${id}\nfunction ${name}(${
     Array.from({ length: arity }, (_, at) => `a${at}`).join(', ')
   }) {`,
   close: '}',
-  entry: (name, arity, inner, id) => {
+  entry: (name: string, arity: number, inner: string, id: string) => {
     const args = Array.from({ length: arity }, (_, at) => `a${at}`);
     return `// Entry point for ${id}.\nfunction ${name}(${args.join(', ')}) {\n` +
       `  st(${BAIL_SLOT}, 0);\n  return ${inner}(${args.join(', ')});\n}\n`;
   },
-  module: (bodies, roots) =>
+  module: (bodies: string[], roots: string[]) =>
     `"use strict";\nconst { ld, st, ld_item, st_item, ld_tail, add_num, sub_num, mul_num,\n` +
     `  div_num, math_op, quotient, to_num, truthy, js_bool, both, bail, float_point } = R;\n` +
     `${bodies.join('\n')}\nreturn { ${roots.join(', ')} };\n`,
@@ -105,7 +61,7 @@ const CALLS = /\bk\d+\(/;
 /** `calc_operation` names whose answer is always a whole number. */
 const WHOLE_OPS = new Set(['floor', 'ceil', 'round', 'factorial']);
 
-/** Counted tails stop here, as they do in `runtime.mbt`. */
+/** Counted tails stop here. */
 const DECIMAL_CAP = 21;
 
 /** `calc_operation` operator names in the order `math_op` numbers them. */
@@ -140,17 +96,13 @@ export interface KernelSlot {
 }
 
 export interface KernelPlan {
-  /** Moonbit source, for the toolchain to build into wasm. */
-  source: string;
   /**
-   * The same functions in javascript, over the same shared numbers. A page with
-   * no wasm to hand — the extension on playentry, or a machine without the
-   * moonbit toolchain — runs these instead, and they are still free of the
+   * The functions in javascript over one shared array of numbers, free of the
    * boxing and the name lookups the block runner pays for.
    */
   javascript: string;
   slots: KernelSlot[];
-  /** Function table index → the wasm export that takes it, and its arity. */
+  /** Function table index → the module export that takes it, and its arity. */
   roots: Map<number, { name: string; arity: number }>;
   /**
    * Root → positions in `slots` its call tree reads or writes, and the ones it
@@ -170,7 +122,7 @@ type Kind = 'num' | 'bool';
 interface KValue {
   code: string;
   kind: Kind;
-  /** Moonbit expression giving the value's tail, when one is at hand. */
+  /** Expression giving the value's tail, when one is at hand. */
   tailCode?: string;
   /**
    * Whether the value is already what `Entry.Scope.getNumberValue` would make
@@ -215,14 +167,9 @@ function text(value: unknown): string {
   }
 }
 
-/** A MoonBit double literal. Only finite values reach this. */
+/** A number literal. Only finite values reach this. */
 function double(value: number): string {
-  const source = String(value);
-  const at = source.indexOf('e');
-  // Moonbit wants a point in the mantissa, which `1e-9` does not have.
-  const mantissa = at === -1 ? source : source.slice(0, at);
-  const body = mantissa.includes('.') ? mantissa : `${mantissa}.0`;
-  return at === -1 ? body : `${body}e${source.slice(at + 1)}`;
+  return String(value);
 }
 
 /** The text a literal slot holds, or null when the slot is a block. */
@@ -263,20 +210,6 @@ function numeric(value: unknown): boolean {
 type Slot = 'num' | 'raw' | 'cmp' | 'bool' | 'plus' | 'index';
 
 const LIST_KEYWORDS = new Set(['FIRST', 'LAST', 'RANDOM']);
-
-/**
- * A short name for one kernel module's source, so the page can tell that the
- * module the server built is the one it planned for itself. FNV-1a, which both
- * sides can work out the same way without waiting on anything.
- */
-export function fingerprint(source: string): string {
-  let hash = 0x811c9dc5;
-  for (let at = 0; at < source.length; at += 1) {
-    hash ^= source.charCodeAt(at);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return `${hash.toString(16)}-${source.length.toString(16)}`;
-}
 
 /**
  * Whether a value is a judgement as entry stores one: the boolean itself. A
@@ -322,8 +255,8 @@ function floatPoint(value: string | number): number {
 }
 
 /**
- * Walks the work's functions and writes the MoonBit module for the ones that
- * can run in wasm. A plan with no roots means nothing qualified; `rejected`
+ * Walks the work's functions and writes the kernel module for the ones that
+ * can run in it. A plan with no roots means nothing qualified; `rejected`
  * still says why, which is what `tessvm check` reports.
  */
 export function planKernel(
@@ -351,7 +284,6 @@ export function planKernel(
   /** True while the first walk is only there to learn what each list holds. */
   let learning = false;
   /** Which of the two targets the current walk is writing. */
-  let dialect: Dialect = MOONBIT;
   /** Filled after the layout is known; the first pass only collects names. */
   let slotOf: (index: number) => KernelSlot | undefined = () => undefined;
 
@@ -407,7 +339,7 @@ export function planKernel(
   }
 
   function asNum(value: KValue): string {
-    return value.kind === 'bool' ? dialect.pick(value.code, '1.0', '0.0') : value.code;
+    return value.kind === 'bool' ? JS.pick(value.code, '1.0', '0.0') : value.code;
   }
 
   function asBool(value: KValue): string {
@@ -514,7 +446,7 @@ export function planKernel(
         return { code: `(${asNum(value(p[0], 'num'))} % ${asNum(value(p[2], 'num'))})`, kind: 'num' };
       case 'calc_share':
         return {
-          code: dialect.floor(`${asNum(value(p[0], 'num'))} / ${asNum(value(p[2], 'num'))}`),
+          code: JS.floor(`${asNum(value(p[0], 'num'))} / ${asNum(value(p[2], 'num'))}`),
           kind: 'num',
           tail: 0,
         };
@@ -541,7 +473,7 @@ export function planKernel(
       case 'boolean_or':
         return combine('OR', p[0], p[2]);
       case 'boolean_not':
-        return { code: dialect.not(asBool(value(p[1], 'bool'))), kind: 'bool' };
+        return { code: JS.not(asBool(value(p[1], 'bool'))), kind: 'bool' };
       case 'get_boolean_value':
         // `(<판단>의 값)` — the judgement, on its way into a value slot.
         return { code: asBool(value(p[0], 'bool')), kind: 'bool' };
@@ -705,8 +637,8 @@ export function planKernel(
         }
         writes.add(index);
         const slot = slotOf(index);
-        return `${indent}st(${slot?.base ?? 0}, ${asNum(value(p[1], 'raw'))})${dialect.end}\n` +
-          `${indent}st(${slot?.places ?? 0}, -1.0)${dialect.end}\n`;
+        return `${indent}st(${slot?.base ?? 0}, ${asNum(value(p[1], 'raw'))})${JS.end}\n` +
+          `${indent}st(${slot?.places ?? 0}, -1.0)${JS.end}\n`;
       }
       case 'change_variable': {
         const index = refer(p[0]);
@@ -725,14 +657,14 @@ export function planKernel(
           ? `${double(floatPoint(raw))}`
           : `float_point(__v)`;
         return `${indent}{\n` +
-          `${indent}  ${dialect.let('__v', asNum(increment))}\n` +
-          `${indent}  ${dialect.let('__c', `ld(${slot?.base ?? 0})`)}\n` +
-          `${indent}  ${dialect.let('__p', `ld(${slot?.places ?? 0})`)}\n` +
-          `${indent}  ${dialect.let('__was', dialect.pick('__p < 0.0', 'float_point(__c)', '__p'))}\n` +
-          `${indent}  ${dialect.let('__now', added)}\n` +
-          `${indent}  ${dialect.ifOpen('__v != __v || __c != __c')} bail()${dialect.end} }\n` +
-          `${indent}  st(${slot?.base ?? 0}, add_num(__v, __c, ${increment.tail ?? -1}, -1))${dialect.end}\n` +
-          `${indent}  st(${slot?.places ?? 0}, ${dialect.pick('__was > __now', '__was', '__now')})${dialect.end}\n` +
+          `${indent}  ${JS.let('__v', asNum(increment))}\n` +
+          `${indent}  ${JS.let('__c', `ld(${slot?.base ?? 0})`)}\n` +
+          `${indent}  ${JS.let('__p', `ld(${slot?.places ?? 0})`)}\n` +
+          `${indent}  ${JS.let('__was', JS.pick('__p < 0.0', 'float_point(__c)', '__p'))}\n` +
+          `${indent}  ${JS.let('__now', added)}\n` +
+          `${indent}  ${JS.ifOpen('__v != __v || __c != __c')} bail()${JS.end} }\n` +
+          `${indent}  st(${slot?.base ?? 0}, add_num(__v, __c, ${increment.tail ?? -1}, -1))${JS.end}\n` +
+          `${indent}  st(${slot?.places ?? 0}, ${JS.pick('__was > __now', '__was', '__now')})${JS.end}\n` +
           `${indent}}\n`;
       }
       case 'change_value_list_index': {
@@ -753,28 +685,28 @@ export function planKernel(
           fail(`list ${text(p[0])} holds both`);
         }
         return `${indent}st_item(${at?.base ?? 0}, ${at?.length ?? 0}, ` +
-          `${asNum(value(p[1], 'index'))}, ${asNum(stored)})${dialect.end}\n`;
+          `${asNum(value(p[1], 'index'))}, ${asNum(stored)})${JS.end}\n`;
       }
       case 'set_func_variable': {
         const name = locals.get(text(p[0]));
         if (!name) {
           fail('function local');
         }
-        return `${indent}${name} = ${asNum(value(p[1], 'raw'))}${dialect.end}\n`;
+        return `${indent}${name} = ${asNum(value(p[1], 'raw'))}${JS.end}\n`;
       }
       case '_if':
-        return `${indent}${dialect.ifOpen(asBool(value(p[0], 'bool')))}\n` +
+        return `${indent}${JS.ifOpen(asBool(value(p[0], 'bool')))}\n` +
           stack(block.statements?.[0] ?? [], `${indent}  `) +
-          `${indent}${dialect.close}\n`;
+          `${indent}${JS.close}\n`;
       case 'if_else':
-        return `${indent}${dialect.ifOpen(asBool(value(p[0], 'bool')))}\n` +
+        return `${indent}${JS.ifOpen(asBool(value(p[0], 'bool')))}\n` +
           stack(block.statements?.[0] ?? [], `${indent}  `) +
-          `${indent}${dialect.close} else {\n` +
+          `${indent}${JS.close} else {\n` +
           stack(block.statements?.[1] ?? [], `${indent}  `) +
-          `${indent}${dialect.close}\n`;
+          `${indent}${JS.close}\n`;
       default:
         if (block.type.startsWith('func_')) {
-          return `${indent}${dialect.discard(call(block, false))}\n`;
+          return `${indent}${JS.discard(call(block, false))}\n`;
         }
         return fail(block.type);
     }
@@ -785,7 +717,7 @@ export function planKernel(
     for (const block of blocks) {
       out += statement(block, indent);
     }
-    return out || `${indent}${dialect.end === ';' ? '' : '()'}\n`;
+    return out || `${indent}${JS.end === ';' ? '' : '()'}\n`;
   }
 
   /** Emits one function, or records why it stayed behind. */
@@ -809,21 +741,21 @@ export function planKernel(
       }
       const name = `l${locals.size}`;
       locals.set(local.id, name);
-      declarations.push(`  ${dialect.local(name, double(Number(local.value ?? 0)))}\n`);
+      declarations.push(`  ${JS.local(name, double(Number(local.value ?? 0)))}\n`);
     }
     try {
       const body = stack(functionBody(stackBlocks!), '  ');
       const answer = define.type === 'function_create_value'
         ? asNum(value(define.params[3], 'raw'))
         : '0.0';
-      const tail = `  ${dialect.end === ';' ? `return ${answer};` : answer}\n`;
+      const tail = `  ${JS.end === ';' ? `return ${answer};` : answer}\n`;
       scan.ok = true;
       scan.calls = calls;
       scan.valued = define.type === 'function_create_value';
       return {
         scan,
-        body: `${dialect.open(`k${index}`, params.size, fn.id)}\n` +
-          `${declarations.join('')}${body}${tail}${dialect.close}\n`,
+        body: `${JS.open(`k${index}`, params.size, fn.id)}\n` +
+          `${declarations.join('')}${body}${tail}${JS.close}\n`,
       };
     } catch (error) {
       scan.reason = error instanceof Fail ? error.message : String(error);
@@ -904,7 +836,7 @@ export function planKernel(
 
   if (!scans.some((scan) => scan.ok)) {
     return {
-      source: '', javascript: '', slots: [], roots: new Map(), access: new Map(), depth: 0, size: FIRST_SLOT, rejected,
+      javascript: '', slots: [], roots: new Map(), access: new Map(), depth: 0, size: FIRST_SLOT, rejected,
     };
   }
 
@@ -964,29 +896,25 @@ export function planKernel(
   writes.clear();
   changed.clear();
   const keep = [...settledKeep];
-  const written = new Map<Dialect, string[]>([[MOONBIT, []], [JAVASCRIPT, []]]);
-  for (const target of written.keys()) {
-    dialect = target;
-    functions.forEach((fn, index) => {
-      if (!keep[index]) {
-        return;
-      }
-      const result = emit(fn, index);
-      if (!result.scan.ok || !result.body) {
-        // The layout pass cannot turn a good function bad; if it did, drop it.
-        keep[index] = false;
-        rejected.set(fn.id, result.scan.reason || 'layout');
-        return;
-      }
-      written.get(target)!.push(result.body);
-    });
-  }
-  const sources = written.get(MOONBIT)!;
+  const emitted: string[] = [];
+  functions.forEach((fn, index) => {
+    if (!keep[index]) {
+      return;
+    }
+    const result = emit(fn, index);
+    if (!result.scan.ok || !result.body) {
+      // The layout pass cannot turn a good function bad; if it did, drop it.
+      keep[index] = false;
+      rejected.set(fn.id, result.scan.reason || 'layout');
+      return;
+    }
+    emitted.push(result.body);
+  });
 
   // -------------------------------------------------------------------------
   //  Roots — the ones something outside the kernel calls
   // -------------------------------------------------------------------------
-  // A call the kernel makes itself is a plain wasm call; only a call from
+  // A call the kernel makes itself is a plain function call; only a call from
   // outside has to copy the data across, so only those become entry points.
   const outside = new Set<number>();
   function noteCalls(node: unknown): void {
@@ -1046,17 +974,12 @@ export function planKernel(
   }
 
   const names = [...roots.values()].map((root) => root.name);
-  const write = (target: Dialect): string => {
-    dialect = target;
-    const entries = [...roots.entries()].map(([index, root]) =>
-      target.entry(root.name, root.arity, `k${index}`, functions[index]!.id));
-    return target.module([...written.get(target)!, ...entries], names);
-  };
+  const entries = [...roots.entries()].map(([index, root]) =>
+    JS.entry(root.name, root.arity, `k${index}`, functions[index]!.id));
 
   const depth = Math.max(...[...roots.keys()].map((index) => depths.get(index) ?? 1));
   return {
-    source: write(MOONBIT),
-    javascript: write(JAVASCRIPT),
+    javascript: JS.module([...emitted, ...entries], names),
     slots,
     roots,
     access,
