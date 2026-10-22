@@ -459,7 +459,8 @@ export class Codegen {
       case 'move_y':
         return line(`O.moveY(e, ${this.num(p[0])});`);
       case 'move_to_angle':
-        return line(`O.moveToAngle(e, ${this.numOf(p[1])}, ${this.numOf(p[0])});`);
+        // Entry evaluates ANGLE then VALUE before converting either to a number.
+        return line(`{ const angle = ${this.raw(p[0])}; const distance = ${this.raw(p[1])}; ${this.marker(block)}O.moveToAngle(e, Number(distance), Number(angle)); }`);
       case 'locate_x':
         return line(`O.locateX(e, ${this.num(p[0])});`);
       case 'locate_y':
@@ -515,7 +516,7 @@ export class Codegen {
       case 'erase_all_effects':
         return line('e.resetFilter();');
       case 'change_scale_size':
-        return line(`e.setSize(e.getSize() + ${this.num(p[0])});`);
+        return line(`{ const amount = ${this.num(p[0])}; ${this.marker(block)}e.setSize(e.getSize() + amount); }`);
       case 'set_scale_size':
         return line(`e.setSize(${this.num(p[0])});`);
       case 'stretch_scale_size':
@@ -632,7 +633,8 @@ export class Codegen {
       case 'remove_value_from_list':
         return line(`O.listRemove(e, ${this.varRef(p[1])}, ${this.raw(p[0])});`);
       case 'insert_value_to_list':
-        return line(`O.listInsert(e, ${this.varRef(p[1])}, ${this.raw(p[2])}, ${this.raw(p[0])});`);
+        // Entry evaluates DATA before INDEX, including calls that yield or fail.
+        return line(`{ const data = ${this.raw(p[0])}; const index = ${this.raw(p[2])}; ${this.marker(block)}O.listInsert(e, ${this.varRef(p[1])}, index, data); }`);
       case 'change_value_list_index':
         return line(`O.listReplace(e, ${this.varRef(p[0])}, ${this.raw(p[1])}, ${this.raw(p[2])});`);
       case 'show_list':
@@ -650,7 +652,7 @@ export class Codegen {
       case 'text_write':
         return line(`e.setText(${this.str(p[0])});`);
       case 'text_append':
-        return line(`e.setText(e.getText() + ${this.str(p[0])});`);
+        return line(`{ const value = ${this.str(p[0])}; ${this.marker(block)}e.setText(e.getText() + value); }`);
       case 'text_prepend':
         return line(`e.setText(${this.str(p[0])} + e.getText());`);
       case 'text_flush':

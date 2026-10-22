@@ -88,6 +88,72 @@ test('only list membership treats an unknown list as absent', () => {
   ]) assert.throws(run, RuntimeBlockError);
 });
 
+test('list insertion evaluates data before its index, including across a yielded frame', () => {
+  for (const wait of ['', 'wait 0']) for (const kernel of [false, true]) {
+    const compiled = compileProject(`var order = ""
+var after = 0
+list items = ["A", "B"]
+function data() do
+  order = order + "D"
+  ${wait}
+  return "X"
+end
+function position() do
+  order = order + "I"
+  return 1
+end
+object "actor":
+  when start do
+    in items insert data() at position()
+    in items insert data() at position()
+    after = 1
+  end
+end`);
+    assert.deepEqual(compiled.errors, []);
+    const vm = new Vm({ renderer: null, audio: null, kernel });
+    vm.load(compiled.project as never); vm.start();
+    for (let frame = 0; frame < 10; frame++) vm.tick();
+    assert.deepEqual(vm.errors, []);
+    assert.equal(vm.variables.find((item) => item.name === 'order')!.value, 'DIDI');
+    assert.equal(vm.variables.find((item) => item.name === 'after')!.value, '1');
+    assert.deepEqual(vm.variables.find((item) => item.name === 'items')!.array.map((item) => item.data), ['X', 'X', 'A', 'B']);
+  }
+});
+
+test('failed insertion inputs retain the correct evaluation order and error context', () => {
+  for (const failure of ['data', 'index']) for (const kernel of [false, true]) {
+    const compiled = compileProject(`var calls = 0
+var after = 0
+list items = ["A", "B"]
+function data() do
+  return ${failure === 'data' ? '"ABC"[4]' : '"X"'}
+end
+function position() do
+  calls += 1
+  return 4
+end
+object "actor":
+  when start do
+    in items insert data() at position()
+    after = 1
+  end
+end`);
+    assert.deepEqual(compiled.errors, []);
+    const vm = new Vm({ renderer: null, audio: null, kernel });
+    vm.load(compiled.project as never); vm.onError = () => vm.stop(); vm.start(); vm.tick();
+    assert.equal(vm.errors.length, 1);
+    assert.equal(vm.errors[0]!.blockType, failure === 'data' ? 'char_at' : 'insert_value_to_list');
+    assert.deepEqual(vm.errors[0]!.inputs!.index, failure === 'data' ? { type: 'number', value: 4 }
+      : { type: 'string', value: '4', length: 1, truncated: false });
+    if (failure === 'index') assert.deepEqual(vm.errors[0]!.inputs!.value,
+      { type: 'string', value: 'X', length: 1, truncated: false });
+    assert.ok(vm.errors[0]!.stack); assert.ok(vm.errors[0]!.snapshot);
+    assert.equal(vm.variables.find((item) => item.name === 'calls')!.value, failure === 'data' ? 0 : '1');
+    assert.equal(vm.variables.find((item) => item.name === 'after')!.value, 0);
+    assert.deepEqual(vm.variables.find((item) => item.name === 'items')!.array.map((item) => item.data), ['A', 'B']);
+  }
+});
+
 test('invalid kernel list stores retain evaluated data and discard speculative prefix writes', () => {
   for (const index of [0, -1, 1.5, 3]) for (const kernel of [false, true]) {
     const compiled = compileProject(`var index = ${index}

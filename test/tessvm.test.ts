@@ -96,6 +96,108 @@ function runVm(source: string): Vm {
   return vm;
 }
 
+test('directional movement evaluates its angle before its distance, including yielded calls', () => {
+  for (const wait of ['', 'wait 0']) for (const kernel of [false, true]) {
+    const compiled = compileProject(`var order = ""
+var amount = 2
+function heading() do
+  order = order + "A"
+  amount = 10
+  ${wait}
+  return 90
+end
+function distance() do
+  order = order + "D"
+  return amount
+end
+object "actor":
+  when start do
+    forward distance() at heading()
+    forward distance() at heading()
+  end
+end`);
+    assert.deepEqual(compiled.errors, []);
+    const vm = new Vm({ renderer: null, audio: null, kernel });
+    vm.load(compiled.project as never); vm.start();
+    for (let frame = 0; frame < 10; frame++) vm.tick();
+    assert.deepEqual(vm.errors, []);
+    assert.equal(vm.variables.find((item) => item.name === 'order')!.value, 'ADAD');
+    assert.equal(vm.targets[0]!.entity.x, 20);
+    assert.equal(vm.targets[0]!.entity.y, 0);
+  }
+});
+
+test('failed directional movement inputs preserve Entry evaluation order and error context', () => {
+  for (const failure of ['angle', 'distance', 'conversion']) for (const kernel of [false, true]) {
+    const compiled = compileProject(`var order = ""
+var after = 0
+var raw = 0
+function heading() do
+  order = order + "A"
+  return ${failure === 'angle' ? '"ABC"[4]' : failure === 'conversion' ? 'raw' : 90}
+end
+function distance() do
+  order = order + "D"
+  return ${failure === 'distance' ? '"ABC"[4]' : 10}
+end
+object "actor":
+  when start do
+    forward distance() at heading()
+    after = 1
+  end
+end`);
+    assert.deepEqual(compiled.errors, []);
+    const vm = new Vm({ renderer: null, audio: null, kernel });
+    vm.load(compiled.project as never);
+    vm.onError = () => vm.stop(); vm.start();
+    if (failure === 'conversion') vm.variables.find((item) => item.name === 'raw')!
+      .setValue({ valueOf: null, toString: null } as never);
+    vm.tick();
+    assert.equal(vm.errors.length, 1);
+    assert.equal(vm.errors[0]!.blockType, failure === 'conversion' ? 'move_to_angle' : 'char_at');
+    if (failure !== 'conversion') assert.deepEqual(vm.errors[0]!.inputs!.index, { type: 'number', value: 4 });
+    assert.ok(vm.errors[0]!.stack); assert.ok(vm.errors[0]!.snapshot);
+    assert.equal(vm.variables.find((item) => item.name === 'order')!.value, failure === 'angle' ? 'A' : 'AD');
+    assert.equal(vm.variables.find((item) => item.name === 'after')!.value, 0);
+    assert.equal(vm.targets[0]!.entity.x, 0);
+    assert.equal(vm.targets[0]!.entity.y, 0);
+  }
+});
+
+test('text append and size changes read current state after evaluating their input', () => {
+  for (const wait of ['', 'wait 0']) for (const kernel of [false, true]) {
+    for (const [body, change, result] of [
+      ['append input()', 'text_content = "changed"', 'changedX'],
+      ['prepend input()', 'text_content = "changed"', 'Xchanged'],
+      ['size += input()', 'size = 200', 205],
+    ] as const) {
+      const size = typeof result === 'number';
+      const compiled = compileProject(`var calls = 0
+function input() do
+  calls += 1
+  ${change}
+  ${wait}
+  return ${size ? 5 : '"X"'}
+end
+text "label":
+  text_content = "old"
+  size = 100
+  when start do
+    ${body}
+  end
+end`);
+      assert.deepEqual(compiled.errors, []);
+      const vm = new Vm({ renderer: null, audio: null, kernel });
+      vm.load(compiled.project as never); vm.start();
+      for (let frame = 0; frame < 5; frame++) vm.tick();
+      assert.deepEqual(vm.errors, []);
+      const entity = vm.targets[0]!.entity;
+      assert.equal(size ? entity.getSize() : entity.getText(), result, `${body}, ${wait}, kernel=${kernel}`);
+      assert.equal(vm.variables.find((item) => item.name === 'calls')!.value, '1');
+    }
+  }
+});
+
 test('out-of-range char_at and substring stop the script as entry does', () => {
   for (const [body, message] of [
     ['a = s[4]', '글자 위치 4 이(가) 범위를 벗어났습니다 (글자 수 3)'],
