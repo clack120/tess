@@ -5,7 +5,7 @@
  * 값과 그 값을 바꾸는 규칙을 그대로 옮기되, 화면 갱신은 하지 않습니다. 좌표를 바꾸면
  * `dirty` 표시만 남기고 렌더러가 프레임 끝에 한 번만 반영합니다.
  */
-import { clamp, mod, num, parseNumber } from './cast.ts';
+import { clamp, isNumber, mod, num, parseNumber } from './cast.ts';
 
 /** Entry's own stage: 480×270 units drawn onto a 640×360 canvas. */
 export const DEFAULT_STAGE_WIDTH = 480;
@@ -752,7 +752,7 @@ export class Variable {
 
   /** `Entry.Variable.isNumber` — decides whether `change_variable` adds or joins. */
   isNumber(): boolean {
-    return !isNaN(Number(this.value)) && String(this.value).trim() !== '';
+    return isNumber(this.value);
   }
 
   getArray(): Array<{ data: VariableValue }> {

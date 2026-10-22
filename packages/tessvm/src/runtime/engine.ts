@@ -563,18 +563,17 @@ export class Vm implements Project {
         // Entry ends a call chain this deep, and the kernel's own chain has to
         // fit inside what is left of it.
         if (thread.depth + handle.depth < CALL_DEPTH_LIMIT) {
-          const numbers: number[] = [];
           let numeric = true;
           for (let at = 0; at < root.arity; at += 1) {
             const raw = args?.[at];
-            if (typeof raw === 'number' ? !Number.isFinite(raw) : !cast.isNumber(raw)) {
+            const number = typeof raw === 'number' ? raw : cast.isNumber(raw) ? Number(raw) : NaN;
+            if (!Number.isFinite(number)) {
               numeric = false;
               break;
             }
-            numbers.push(cast.num(raw));
           }
           if (numeric) {
-            const result = handle.run(index, numbers);
+            const result = handle.run(index, args ?? []);
             if (result !== null) {
               return result;
             }

@@ -21,7 +21,7 @@ import zlib from 'node:zlib';
 import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { compileProject } from '@tess/compiler';
-import { Codegen, serveVm } from '@tess/vm';
+import { Codegen, serveVm, Vm } from '@tess/vm';
 import { decompileEnt } from '@tess/decompiler';
 import { parse } from '@tess/parser';
 import { tessComment, tessCommentLines, tessString } from '../packages/decompiler/src/ident.ts';
@@ -54,6 +54,53 @@ function work(blocks: unknown[], object: Record<string, unknown> = {}) {
 }
 
 const HAT = { id: 'a', type: 'when_run_button_click', params: [null], statements: [] };
+
+test('function IDs cannot escape generated kernel comments', () => {
+  const flag = '__tessKernelSecurityProbe';
+  const globals = globalThis as Record<string, unknown>;
+  try {
+    for (const separator of ['\n', '\r', '\u2028', '\u2029']) {
+      const compiled = compileProject(`var output = 0
+function result() do
+  return 7
+end
+object "actor":
+  when start do
+    output = result()
+  end
+end`);
+      assert.ok(compiled.project);
+      const project = compiled.project;
+      const original = project.functions[0]!.id;
+      const hostile = `f${separator}globalThis.${flag} = 1;${separator}//`;
+      project.functions[0]!.id = hostile;
+      const rewrite = (item: unknown): void => {
+        if (Array.isArray(item)) item.forEach(rewrite);
+        else if (item && typeof item === 'object') {
+          const block = item as Record<string, unknown>;
+          if (block.type === `func_${original}`) block.type = `func_${hostile}`;
+          Object.values(block).forEach(rewrite);
+        }
+      };
+      for (const object of project.objects) {
+        const script = JSON.parse(object.script);
+        rewrite(script);
+        object.script = JSON.stringify(script);
+      }
+      delete globals[flag];
+      const vm = new Vm({ renderer: null, audio: null, kernel: true });
+      vm.load(project as never);
+      assert.equal(globals[flag], undefined, `separator ${JSON.stringify(separator)}`);
+      vm.start(); vm.tick();
+      assert.deepEqual(vm.errors, []);
+      assert.equal(vm.variables.find((item) => item.name === 'output')!.value, '7');
+      assert.ok(vm.kernel!.stats.runs > 0, 'the function must still execute in the kernel');
+      assert.equal(globals[flag], undefined);
+    }
+  } finally {
+    delete globals[flag];
+  }
+});
 
 /** Builds and runs the emitted program, and says whether the work got to run its own code. */
 function runsOwnCode(blocks: unknown[]): boolean {

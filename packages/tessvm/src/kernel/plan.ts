@@ -23,6 +23,8 @@ import {
   type RawBlock,
 } from '../compile/codegen.ts';
 import type { Variable } from '../runtime/model.ts';
+import { isNumber, parseNumber } from '../runtime/cast.ts';
+import { scalarPlaces } from './values.ts';
 
 /** Slot 0 carries the flag that makes the bridge throw the run away. */
 export const BAIL_SLOT = 0;
@@ -40,18 +42,19 @@ const JS = {
   let: (name: string, value: string) => `const ${name} = ${value};`,
   local: (name: string, value: string) => `let ${name} = ${value};`,
   discard: (call: string) => `${call};`,
-  open: (name: string, arity: number, id: string) => `// ${id}\nfunction ${name}(${
+  open: (name: string, arity: number, id: string) => `// ${id.replace(/[\r\n\u2028\u2029]/g, ' ')}\nfunction ${name}(${
     Array.from({ length: arity }, (_, at) => `a${at}`).join(', ')
   }) {`,
   close: '}',
   entry: (name: string, arity: number, inner: string, id: string) => {
     const args = Array.from({ length: arity }, (_, at) => `a${at}`);
-    return `// Entry point for ${id}.\nfunction ${name}(${args.join(', ')}) {\n` +
+    return `// Entry point for ${id.replace(/[\r\n\u2028\u2029]/g, ' ')}.\nfunction ${name}(${args.join(', ')}) {\n` +
       `  st(${BAIL_SLOT}, 0);\n  return ${inner}(${args.join(', ')});\n}\n`;
   },
   module: (bodies: string[], roots: string[]) =>
     `"use strict";\nconst { ld, st, ld_item, st_item, ld_tail, add_num, sub_num, mul_num,\n` +
-    `  div_num, math_op, quotient, to_num, truthy, js_bool, both, bail, float_point } = R;\n` +
+    `  div_num, math_op, quotient, to_num, truthy, js_bool, both, bail, float_point,\n` +
+    `  raw, st_raw, raw_item, st_item_raw, plus, compare, increment_points, list_index } = R;\n` +
     `${bodies.join('\n')}\nreturn { ${roots.join(', ')} };\n`,
 };
 
@@ -117,11 +120,13 @@ export interface KernelPlan {
   rejected: Map<string, string>;
 }
 
-type Kind = 'num' | 'bool';
+type Kind = 'num' | 'bool' | 'raw';
 
 interface KValue {
   code: string;
   kind: Kind;
+  /** A known result; its code may still have side effects and must run once. */
+  constant?: string | number | boolean;
   /** Expression giving the value's tail, when one is at hand. */
   tailCode?: string;
   /**
@@ -183,15 +188,19 @@ function literalText(param: unknown): string | null {
   return text(param);
 }
 
-/** `Entry.Utils.isNumber` — plain decimal literals only, no exponent. */
+function literalValue(param: unknown): string | number | boolean | undefined {
+  if (isBlock(param)) {
+    if (param.type === 'True' || param.type === 'False') return param.type === 'True';
+    if (param.type !== 'number' && param.type !== 'text') return undefined;
+    param = param.params[0] ?? '';
+  }
+  if (param === null || param === undefined) return 0;
+  return typeof param === 'number' || typeof param === 'string' || typeof param === 'boolean' ? param : undefined;
+}
+
+/** The kernel can only carry finite values, even when Entry accepts their text. */
 function numeric(value: unknown): boolean {
-  if (typeof value === 'number') {
-    return Number.isFinite(value);
-  }
-  if (typeof value !== 'string') {
-    return false;
-  }
-  return /^-?\d+\.?\d*$/.test(value);
+  return isNumber(value) && Number.isFinite(Number(value));
 }
 
 /**
@@ -201,13 +210,14 @@ function numeric(value: unknown): boolean {
  * is already a number.
  *
  * - `num`   `Entry.Scope.getNumberValue` — `parseFloat`, and 0 for the rest.
- * - `raw`   kept as it is, so its text has to be what the number prints as.
+ * - `raw`   kept with its original type and decimal formatting.
  * - `cmp`   `comparable` — read as a number when the text parses as one.
  * - `bool`  `getBooleanValue` — text that is not a number reads as true.
+ * - `plainBool` `andOf`/`orOf` — JavaScript truthiness, so text "0" is true.
  * - `plus`  `calc_basic` PLUS, which joins unless both sides are numbers.
  * - `index` `Entry.getListRealIndex`, where the three keywords are not numbers.
  */
-type Slot = 'num' | 'raw' | 'cmp' | 'bool' | 'plus' | 'index';
+type Slot = 'num' | 'raw' | 'cmp' | 'bool' | 'plainBool' | 'plus' | 'index';
 
 const LIST_KEYWORDS = new Set(['FIRST', 'LAST', 'RANDOM']);
 
@@ -339,7 +349,13 @@ export function planKernel(
   }
 
   function asNum(value: KValue): string {
-    return value.kind === 'bool' ? JS.pick(value.code, '1.0', '0.0') : value.code;
+    return value.kind === 'bool' ? JS.pick(value.code, '1.0', '0.0')
+      : value.kind === 'raw' ? `to_num(${value.code})` : value.code;
+  }
+
+  function listIndex(param: unknown): string {
+    const index = value(param, 'index');
+    return index.kind === 'num' ? index.code : `list_index(${index.code})`;
   }
 
   function asBool(value: KValue): string {
@@ -352,8 +368,17 @@ export function planKernel(
   }
 
   /** A literal slot, read the way the block holding it would read it. */
-  function constant(raw: string, slot: Slot): KValue {
+  function constant(input: unknown, slot: Slot): KValue {
+    const raw = text(input);
     switch (slot) {
+      case 'raw':
+      case 'plainBool': {
+        if (input === null || input === undefined) return { code: '0', kind: 'num', clean: true };
+        if (typeof input === 'boolean') return { code: String(input), kind: 'bool' };
+        if (!numeric(input)) fail(`literal ${JSON.stringify(raw)}`);
+        return typeof input === 'number' ? { code: double(input), kind: 'num', clean: true, constant: input }
+          : { code: JSON.stringify(raw), kind: 'raw', constant: raw, tail: tailOf(Number(raw)) };
+      }
       case 'num': {
         const parsed = parseFloat(raw) || 0;
         return { code: double(parsed), kind: 'num', tail: tailOf(parsed), clean: true };
@@ -364,7 +389,7 @@ export function planKernel(
       }
       case 'cmp':
       case 'index': {
-        if (slot === 'index' && LIST_KEYWORDS.has(raw)) {
+        if (slot === 'index' && (LIST_KEYWORDS.has(raw) || !numeric(input))) {
           fail(`list index ${raw}`);
         }
         const n = Number(raw);
@@ -397,22 +422,22 @@ export function planKernel(
    */
   function value(param: unknown, slot: Slot = 'num'): KValue {
     const read = readValue(param, slot);
-    if (slot !== 'num' || read.clean || read.kind === 'bool') {
+    if (slot !== 'num' || read.clean) {
       return read;
     }
-    return { ...read, code: `to_num(${read.code})`, clean: true };
+    return { ...read, code: `to_num(${read.code})`, kind: 'num', clean: true };
   }
 
   function readValue(param: unknown, slot: Slot): KValue {
     if (!isBlock(param)) {
-      return constant(text(param), slot);
+      return constant(param, slot);
     }
     const block = param;
     const p = block.params;
     switch (block.type) {
       case 'number':
       case 'text':
-        return constant(text(p[0] ?? ''), slot);
+        return constant(p[0] ?? '', slot);
       case 'angle': {
         const angle = Number(p[0] ?? 0) || 0;
         return { code: double(angle), kind: 'num', tail: tailOf(angle), clean: true };
@@ -475,16 +500,18 @@ export function planKernel(
       case 'boolean_not':
         return { code: JS.not(asBool(value(p[1], 'bool'))), kind: 'bool' };
       case 'get_boolean_value':
-        // `(<판단>의 값)` — the judgement, on its way into a value slot.
-        return { code: asBool(value(p[0], 'bool')), kind: 'bool' };
+        return { code: JS.pick(asBool(value(p[0], 'bool')), "'TRUE'", "'FALSE'"), kind: 'raw' };
       case 'get_variable': {
         const index = refer(p[0]);
         if (index === null || variables[index]!.isList) {
           fail(`variable ${text(p[0])}`);
         }
         reads.add(index);
-        // The shared region only ever holds numbers the bridge checked.
-        return { code: `ld(${slotOf(index)?.base ?? 0})`, kind: 'num', clean: true };
+        if (slot === 'raw' || slot === 'plainBool') {
+          return { code: `raw(${slotOf(index)?.base ?? 0})`, kind: 'raw' };
+        }
+        const read = `ld(${slotOf(index)?.base ?? 0})`;
+        return { code: slot === 'num' || slot === 'plus' ? `(${read} || 0)` : read, kind: 'num', clean: true };
       }
       case 'value_of_index_from_list': {
         const index = refer(p[1]);
@@ -493,20 +520,23 @@ export function planKernel(
         }
         reads.add(index);
         const at = slotOf(index);
-        const where = asNum(value(p[3], 'index'));
+        const where = listIndex(p[3]);
         const item = `ld_item(${at?.base ?? 0}, ${at?.length ?? 0}, ${where})`;
         if (!judgements.has(index)) {
+          if (slot === 'raw' || slot === 'plainBool') {
+            return { code: `raw_item(${at?.base ?? 0}, ${at?.length ?? 0}, ${where})`, kind: 'raw' };
+          }
           // The index is read twice, so it may not be something that does
           // anything — every kernel expression but a call to another kernel
           // function is safe that way.
           const tailCode = at && at.tails >= 0 && !CALLS.test(where)
             ? `ld_tail(${at.tails}, ${at.length}, ${where})`
             : undefined;
-          return { code: item, kind: 'num', tailCode, clean: true };
+          return { code: slot === 'num' || slot === 'plus' ? `(${item} || 0)` : item, kind: 'num', tailCode, clean: true };
         }
         // A stored judgement only reads back as one. Anywhere else entry would
         // have `parseFloat(true)`, which is not 1, so the list stays behind.
-        if (slot !== 'bool') {
+        if (slot !== 'bool' && slot !== 'raw' && slot !== 'plainBool') {
           fail(`list ${text(p[1])} holds judgements`);
         }
         return { code: `(${item} != 0.0)`, kind: 'bool' };
@@ -529,16 +559,17 @@ export function planKernel(
         if (!name) {
           fail('function local');
         }
-        return { code: name, kind: 'num' };
+        return { code: name, kind: 'raw' };
       }
       default: {
         if (block.type.startsWith('func_')) {
-          return { code: call(block, true), kind: 'num' };
+          const target = funcIndex.get(block.type.slice('func_'.length));
+          const define = target === undefined ? undefined : findFunctionDefine(parseScript(functions[target]!.content))?.[0];
+          return { code: call(block, true), kind: 'raw', constant: define ? literalValue(define.params[3]) : undefined };
         }
         const at = params.get(block.type);
         if (at !== undefined) {
-          // The bridge only hands numbers over.
-          return { code: `a${at}`, kind: 'num', clean: true };
+          return { code: `a${at}`, kind: 'raw' };
         }
         return fail(block.type);
       }
@@ -549,10 +580,7 @@ export function planKernel(
     return binary(text(block.params[1] ?? 'PLUS'), block.params[0], block.params[2]);
   }
 
-  /**
-   * `calc_basic` PLUS joins when a side is not a number; the kernel only ever
-   * holds numbers, so it is always the decimal addition.
-   */
+  /** Numeric operands use decimal arithmetic; raw operands retain Entry's PLUS rules. */
   function binary(operator: string, left: unknown, right: unknown): KValue {
     const slot: Slot = operator === 'PLUS' ? 'plus' : 'num';
     const leftValue = value(left, slot);
@@ -562,6 +590,9 @@ export function planKernel(
     const tails = `${tailArgument(leftValue)}, ${tailArgument(rightValue)}`;
     switch (operator) {
       case 'PLUS':
+        if (leftValue.kind !== 'num' || rightValue.kind !== 'num') {
+          return { code: `plus(${leftValue.code}, ${rightValue.code})`, kind: 'raw' };
+        }
         return { code: `add_num(${a}, ${b}, ${tails})`, kind: 'num' };
       case 'MINUS':
         return { code: `sub_num(${a}, ${b}, ${tails})`, kind: 'num' };
@@ -587,8 +618,12 @@ export function planKernel(
     if (readsJudgement(left) || readsJudgement(right)) {
       fail('judgement compared');
     }
-    const a = asNum(value(left, 'cmp'));
-    const b = asNum(value(right, 'cmp'));
+    const leftValue = value(left, 'cmp'), rightValue = value(right, 'cmp');
+    if (leftValue.kind !== 'num' || rightValue.kind !== 'num') {
+      return { code: `compare(${leftValue.code}, ${rightValue.code}, ${JSON.stringify(operator)})`, kind: 'bool' };
+    }
+    const a = leftValue.code;
+    const b = rightValue.code;
     const table: Record<string, string> = {
       EQUAL: '==', NOT_EQUAL: '!=', GREATER: '>', LESS: '<',
       GREATER_OR_EQUAL: '>=', LESS_OR_EQUAL: '<=',
@@ -605,8 +640,8 @@ export function planKernel(
         fail('literal in and/or');
       }
     }
-    const a = asPlainBool(value(left, 'bool'));
-    const b = asPlainBool(value(right, 'bool'));
+    const a = asPlainBool(value(left, 'plainBool'));
+    const b = asPlainBool(value(right, 'plainBool'));
     return { code: `both(${a}, ${b}, ${operator === 'AND' ? 'true' : 'false'})`, kind: 'bool' };
   }
 
@@ -623,7 +658,7 @@ export function planKernel(
     // Entry hands the body every slot of the call block in order, and the body
     // reads them by declaration index, so the two line up position by position.
     const args = collectParams(define?.params[0]).map((_, at) =>
-      asNum(value(block.params[at], 'raw')));
+      value(block.params[at], 'raw').code);
     return `k${target}(${args.join(', ')})`;
   }
 
@@ -637,7 +672,19 @@ export function planKernel(
         }
         writes.add(index);
         const slot = slotOf(index);
-        return `${indent}st(${slot?.base ?? 0}, ${asNum(value(p[1], 'raw'))})${JS.end}\n` +
+        const stored = value(p[1], 'raw');
+        if (stored.constant !== undefined) {
+          const places = scalarPlaces(stored.constant);
+          if (places !== null) return `${indent}st(${slot?.base ?? 0}, (${stored.code}, ${double(Number(stored.constant))}));\n` +
+            `${indent}st(${slot?.places ?? 0}, ${places});\n`;
+        }
+        if (isBlock(p[1]) && p[1].type === 'get_variable') {
+          const source = slotOf(refer(p[1].params[0])!);
+          return `${indent}st(${slot?.base ?? 0}, ld(${source?.base ?? 0}));\n` +
+            `${indent}st(${slot?.places ?? 0}, ld(${source?.places ?? 0}));\n`;
+        }
+        if (stored.kind !== 'num') return `${indent}st_raw(${slot?.base ?? 0}, ${stored.code});\n`;
+        return `${indent}st(${slot?.base ?? 0}, ${stored.code})${JS.end}\n` +
           `${indent}st(${slot?.places ?? 0}, -1.0)${JS.end}\n`;
       }
       case 'change_variable': {
@@ -653,18 +700,22 @@ export function planKernel(
         // next change as well; the kernel carries them in their own slot.
         const raw = literalText(p[1]);
         const increment = value(p[1], 'raw');
-        const added = raw !== null && numeric(raw)
-          ? `${double(floatPoint(raw))}`
-          : `float_point(__v)`;
+        const literal = raw !== null && numeric(raw);
+        const added = literal
+          ? double(floatPoint(parseNumber(raw) as string | number))
+          : increment.kind === 'num' ? `float_point(__v)` : `increment_points(__raw)`;
         return `${indent}{\n` +
-          `${indent}  ${JS.let('__v', asNum(increment))}\n` +
+          (literal ? '' : `${indent}  ${JS.let('__raw', increment.code)}\n`) +
+          `${indent}  ${JS.let('__v', literal ? double(Number(raw)) : 'Number(__raw)')}\n` +
           `${indent}  ${JS.let('__c', `ld(${slot?.base ?? 0})`)}\n` +
           `${indent}  ${JS.let('__p', `ld(${slot?.places ?? 0})`)}\n` +
           `${indent}  ${JS.let('__was', JS.pick('__p < 0.0', 'float_point(__c)', '__p'))}\n` +
           `${indent}  ${JS.let('__now', added)}\n` +
-          `${indent}  ${JS.ifOpen('__v != __v || __c != __c')} bail()${JS.end} }\n` +
-          `${indent}  st(${slot?.base ?? 0}, add_num(__v, __c, ${increment.tail ?? -1}, -1))${JS.end}\n` +
-          `${indent}  st(${slot?.places ?? 0}, ${JS.pick('__was > __now', '__was', '__now')})${JS.end}\n` +
+          `${indent}  ${JS.ifOpen('!Number.isFinite(__v) || !Number.isFinite(__c)')} bail()${JS.end} }\n` +
+          `${indent}  ${JS.let('__result', `add_num(__v, __c, ${increment.tail ?? -1}, -1)`)}\n` +
+          `${indent}  ${JS.ifOpen('!Number.isFinite(__result)')} bail()${JS.end} }\n` +
+          `${indent}  st(${slot?.base ?? 0}, __result)${JS.end}\n` +
+          `${indent}  st(${slot?.places ?? 0}, Math.abs(__result) >= 1e21 ? -2 : ${JS.pick('__was > __now', '__was', '__now')})${JS.end}\n` +
           `${indent}}\n`;
       }
       case 'change_value_list_index': {
@@ -684,15 +735,31 @@ export function planKernel(
           // back as, so the kernel leaves that list alone.
           fail(`list ${text(p[0])} holds both`);
         }
+        if (typeof stored.constant === 'string' && canonical(stored.constant)) {
+          return `${indent}st_item(${at?.base ?? 0}, ${at?.length ?? 0}, ${listIndex(p[1])}, (${stored.code}, ${double(Number(stored.constant))}), true);\n`;
+        }
+        if (stored.kind === 'raw') {
+          const where = listIndex(p[1]);
+          if (isBlock(p[2]) && p[2].type === 'get_variable' && !CALLS.test(where)) {
+            const source = slotOf(refer(p[2].params[0])!);
+            // The index must be pure before consulting the source's stored type.
+            return `${indent}if (ld(${source?.places ?? 0}) === -1) {\n` +
+              `${indent}  st_item(${at?.base ?? 0}, ${at?.length ?? 0}, ${where}, ld(${source?.base ?? 0}));\n` +
+              `${indent}} else {\n` +
+              `${indent}  st_item_raw(${at?.base ?? 0}, ${at?.length ?? 0}, ${where}, ${stored.code});\n` +
+              `${indent}}\n`;
+          }
+          return `${indent}st_item_raw(${at?.base ?? 0}, ${at?.length ?? 0}, ${where}, ${stored.code});\n`;
+        }
         return `${indent}st_item(${at?.base ?? 0}, ${at?.length ?? 0}, ` +
-          `${asNum(value(p[1], 'index'))}, ${asNum(stored)})${JS.end}\n`;
+          `${listIndex(p[1])}, ${asNum(stored)})${JS.end}\n`;
       }
       case 'set_func_variable': {
         const name = locals.get(text(p[0]));
         if (!name) {
           fail('function local');
         }
-        return `${indent}${name} = ${asNum(value(p[1], 'raw'))}${JS.end}\n`;
+        return `${indent}${name} = ${value(p[1], 'raw').code}${JS.end}\n`;
       }
       case '_if':
         return `${indent}${JS.ifOpen(asBool(value(p[0], 'bool')))}\n` +
@@ -741,13 +808,13 @@ export function planKernel(
       }
       const name = `l${locals.size}`;
       locals.set(local.id, name);
-      declarations.push(`  ${JS.local(name, double(Number(local.value ?? 0)))}\n`);
+      declarations.push(`  ${JS.local(name, JSON.stringify(local.value ?? 0))}\n`);
     }
     try {
       const body = stack(functionBody(stackBlocks!), '  ');
       const answer = define.type === 'function_create_value'
-        ? asNum(value(define.params[3], 'raw'))
-        : '0.0';
+        ? value(define.params[3], 'raw').code
+        : 'undefined';
       const tail = `  ${JS.end === ';' ? `return ${answer};` : answer}\n`;
       scan.ok = true;
       scan.calls = calls;
