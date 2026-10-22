@@ -247,7 +247,7 @@ function marshal(
             // the list over from the next call.
             return 'skip';
           }
-          cells[slot.base + at] = item === 'TRUE' ? 1 : 0;
+          cells[slot.base + at] = item === true ? 1 : 0;
         }
         agree(slot, variable);
         return 'ok';
@@ -306,7 +306,7 @@ function marshal(
       let wrote = false;
       for (let at = from; at <= to; at += 1) {
         if (!stored(slot.base + at)) continue;
-        array[at] = { data: slot.judgement ? (cells[slot.base + at] !== 0 ? 'TRUE' : 'FALSE') : cells[slot.base + at]! };
+        array[at] = { data: slot.judgement ? (cells[slot.base + at] !== 0) as never : cells[slot.base + at]! };
         moved += 1;
         wrote = true;
       }

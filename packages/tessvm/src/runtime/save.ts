@@ -32,7 +32,7 @@ export const SAVE_FUNCTIONS: Record<string, 'wait' | 'async'> = {
 };
 
 /** One name's value: a variable's own, or a list's items. */
-export type StoredValue = string | number | Array<{ data: string | number }>;
+export type StoredValue = string | number | boolean | Array<{ data: string | number | boolean }>;
 
 /** Where the values are kept. Every call may be answered with nothing. */
 export interface SaveHost {

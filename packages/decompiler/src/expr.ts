@@ -3,45 +3,22 @@
  * 알려지지 않은 블록은 자리표시자를 남기고 경고에 기록합니다.
  */
 import { KEY_CODES, STORE_FLAG_ON, STORE_FLAG_VARIABLE } from '@tess/core';
-import { tessNumber, tessString, tessLiteral, ownsResource, isExactNumber, safeIdentifier } from './ident.ts';
+import { tessNumber, tessString, tessLiteral, ownsResource, isExactNumber } from './ident.ts';
+import { isBooleanBlock } from '../../compiler/src/expression.ts';
 import { expansionBlock } from '@tess/core';
 import type { DecompileContext, RawBlock, ResourceInfo } from './types.ts';
 
-const BOOLEAN_RESULTS = new Set([
-  'True', 'False', 'boolean_basic_operator', 'boolean_equal', 'boolean_bigger',
-  'boolean_smaller', 'boolean_and_or', 'boolean_and', 'boolean_or', 'boolean_not',
-  'is_clicked', 'is_object_clicked', 'is_press_some_key', 'reach_something',
-  'is_type', 'is_boost_mode', 'is_current_device_type', 'is_touch_supported',
-  'is_included_in_list',
-]);
-
-function booleanResult(block: any, ctx: DecompileContext): boolean {
-  const seen = new Set<string>();
-  while (block?.type?.startsWith('func_')) {
-    const id = block.type.slice(5);
-    if (seen.has(id)) return false;
-    seen.add(id);
-    block = ctx.functionsById.get(id)?.returnValue;
-  }
-  return BOOLEAN_RESULTS.has(block?.type) || block?.type?.startsWith('booleanParam_') === true
-    || expansionBlock(block?.type)?.kind === 'boolean';
+/**
+ * A condition slot's content. Tess puts any value there as it is, so entry reads
+ * it with its own rule; an empty slot is written as `false`, which it reads as.
+ */
+export function conditionOf(block: any, ctx: DecompileContext): string {
+  return block === null || block === undefined ? 'false' : exprOf(block, ctx);
 }
 
-/** Preserve Entry's numeric condition conversion without changing Tess conditions. */
-export function conditionOf(block: any, ctx: DecompileContext): string {
-  // Entry reads an empty condition slot as false; a Tess literal there is true.
-  if (block === null || block === undefined) return 'false';
-  const expression = exprOf(block, ctx);
-  if (booleanResult(block, ctx)) {
-    return block?.type?.startsWith('func_') ? `(${expression} == true)` : expression;
-  }
-  if (!ctx.conditionHelper) {
-    ctx.conditionHelper = {
-      test: safeIdentifier('entry_condition', ctx.identifiers),
-      empty: safeIdentifier('entry_no_value', ctx.identifiers),
-    };
-  }
-  return `(${ctx.conditionHelper.test}(${expression}) == true)`;
+/** Whether Tess compiles this block's expression to a judgement block (`wait x` vs `wait until x`). */
+export function isJudgement(block: any): boolean {
+  return isBooleanBlock(block);
 }
 
 const REVERSE_COMPARE: Record<string, string> = {
@@ -370,7 +347,7 @@ export function exprOf(block: any, ctx: DecompileContext): string {
      * 판단 블록을 값으로 사용할 때 감싸는 블록입니다.
      * Tess에서는 값 위치에 판단식을 그대로 사용할 수 있으므로 내부 표현식만 변환합니다.
      */
-    case 'get_boolean_value': return exprOf(at(0), ctx);
+    case 'get_boolean_value': return `boolean_value(${conditionOf(at(0), ctx)})`;
     case 'is_clicked': case 'is_object_clicked': case 'is_boost_mode':
     case 'is_touch_supported': case 'get_user_name': case 'get_nickname':
     case 'get_project_timer_value': case 'get_canvas_input_value':

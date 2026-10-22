@@ -53,7 +53,7 @@ test('round-trip preserves numeric condition conversion and evaluates a value ca
   const cases: Array<[unknown, boolean]> = [
     [0, false], [1, true], [-2, true], ['', false], [' ', false],
     ['0', false], ['0.00', false], ['0e2', false], ['0x0', false],
-    ['false', true], ['undefined', true], [false, false], [true, true],
+    ['FALSE', true], ['false', true], ['undefined', true], [false, false], [true, true],
   ];
   for (const negate of [false, true]) {
     const { project, stacks, condition, call } = fixture();
@@ -65,10 +65,6 @@ test('round-trip preserves numeric condition conversion and evaluates a value ca
       assert.deepEqual(run(project, input), expected, `original ${JSON.stringify({ input, negate })}`);
       assert.deepEqual(run(converted, input), expected, `roundtrip ${JSON.stringify({ input, negate })}`);
     }
-    // Tess writes a stored judgement as "FALSE", so that text can no longer be
-    // told apart from entry's false; the round-trip reads it as false.
-    assert.deepEqual(run(project, 'FALSE'), { out: Number(!negate), hits: 1 });
-    assert.deepEqual(run(converted, 'FALSE'), { out: Number(negate), hits: 1 });
   }
 });
 

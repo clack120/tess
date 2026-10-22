@@ -695,7 +695,7 @@ export function createOps(vm: Vm) {
     // -----------------------------------------------------------------------
     //  Variables and lists
     // -----------------------------------------------------------------------
-    getVariable(entity: Entity, index: number): string | number {
+    getVariable(entity: Entity, index: number): string | number | boolean {
       return variable(entity, index)?.getValue() ?? 0;
     },
 
@@ -712,7 +712,7 @@ export function createOps(vm: Vm) {
       const current = target.getValue();
       if (cast.isNumber(value) && target.isNumber()) {
         // Entry stores the result of `toFixed`, so a counter holds "1", not 1.
-        const places = maxFloatPoint([value as string | number, current]);
+        const places = maxFloatPoint([value as string | number, current as string | number]);
         target.setValue(cast.addNum(Number(value), Number(current)).toFixed(places));
         return;
       }
@@ -726,7 +726,7 @@ export function createOps(vm: Vm) {
       }
     },
 
-    listValue(entity: Entity, index: number, raw: unknown): string | number {
+    listValue(entity: Entity, index: number, raw: unknown): string | number | boolean {
       const list = variable(entity, index);
       if (!list) {
         return 0;

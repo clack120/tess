@@ -74,7 +74,7 @@ export interface EntryVariable {
   id: string;
   name: string;
   visible: boolean;
-  value: string | number;
+  value: string | number | boolean;
   variableType: VariableType;
   isCloud: boolean;
   isRealTime: boolean;
@@ -83,7 +83,7 @@ export interface EntryVariable {
   x: number;
   y: number;
   /** Lists only. */
-  array?: Array<{ data: string | number }>;
+  array?: Array<{ data: string | number | boolean }>;
   width?: number;
   height?: number;
   /** Slide variables only — the ends its slider runs between. */

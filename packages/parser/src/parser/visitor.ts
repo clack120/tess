@@ -490,7 +490,9 @@ export class TessAstVisitor extends BaseVisitor {
   }
 
   waitStatement(ctx: Ctx, node: CstNode): WaitNode {
-    return { type: 'Wait', value: this.visit(ctx.value), loc: nodeLoc(node) };
+    return {
+      type: 'Wait', value: this.visit(ctx.value), ...(ctx.until ? { until: true } : {}), loc: nodeLoc(node),
+    };
   }
 
   flowStatement(ctx: Ctx, node: CstNode): NullaryNode {

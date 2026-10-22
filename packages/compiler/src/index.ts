@@ -14,7 +14,7 @@ import { loadProgram, createCompileCache } from './include.ts';
 import { buildCommentMap } from './comments.ts';
 import { makeAsset } from './assets.ts';
 import { compileStatements, compileStatement } from './statement.ts';
-import { compileValue, BOOLEAN_TEXT } from './expression.ts';
+import { compileValue } from './expression.ts';
 import { KEY_CODES, STORE_PREFIX, keyCodeOf } from '@tess/core';
 import { didYouMean } from '@tess/core';
 import { validate } from '@tess/parser';
@@ -372,12 +372,12 @@ function makeVariable(
 }
 
 /** 선언 초기값으로 쓸 수 있는 상수인지 확인하고 원시값으로 바꾼다 */
-function constantOf(node: Expr, ctx: Context): string | number | null {
+function constantOf(node: Expr, ctx: Context): string | number | boolean | null {
   switch (node.type) {
     case 'Number': return node.value;
     case 'String': return node.value;
-    // 초기값도 대입할 때와 같은 글자를 쓴다. 엔트리에서 true 는 "TRUE" 이다(expression.ts 참고).
-    case 'Boolean': return BOOLEAN_TEXT[String(node.value)];
+    // Kept as the boolean, the way entry stores a judgement written to a variable.
+    case 'Boolean': return node.value;
     case 'Color': return node.value;
     case 'Transparent': return 'transparent';
     case 'Unary':

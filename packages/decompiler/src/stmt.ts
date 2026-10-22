@@ -2,7 +2,7 @@
  * 엔트리 문장 블록을 Tess 소스 코드로 변환합니다.
  * 블록 배열을 입력받아 들여쓰기가 없는 텍스트 줄 배열을 반환합니다.
  */
-import { exprOf, conditionOf, targetName } from "./expr.ts";
+import { exprOf, conditionOf, isJudgement, targetName } from "./expr.ts";
 import {
   append,
   tessString,
@@ -343,7 +343,7 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
       return [`wait ${e(0)}`];
     case "wait_until_true": {
       const trick = slotTrick(at(0));
-      if (!trick) return [`wait ${conditionOf(at(0), ctx)}`];
+      if (!trick) return [`wait ${isJudgement(at(0)) ? "" : "until "}${conditionOf(at(0), ctx)}`];
       // 반복 밖에는 되감을 스코프가 없어 기다리기가 제 스코프를 그대로 돌려주고,
       // 엔트리는 그 자리에서 프레임마다 같은 블록을 다시 본다 — 영영 기다린다.
       if (ctx.loopDepth === 0) return ["wait false"];

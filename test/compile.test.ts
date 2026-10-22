@@ -1049,7 +1049,7 @@ function firstBlocks(source: string) {
   return { project, thread: JSON.parse(project!.objects[0].script)[0] };
 }
 
-test('판단 자리의 리터럴은 참/거짓 블록이 되고, 계산되는 값은 == "TRUE" 로 감싼다', () => {
+test('판단 자리에는 값이 그대로 들어가 엔트리가 판단한다', () => {
   const { thread } = firstBlocks(`    var flag = false
     when start do
       if true then
@@ -1058,7 +1058,7 @@ test('판단 자리의 리터럴은 참/거짓 블록이 되고, 계산되는 �
       if "살아있음" then
         say "b"
       end
-      if 1 then
+      if 0 then
         say "c"
       end
       if flag then
@@ -1066,25 +1066,30 @@ test('판단 자리의 리터럴은 참/거짓 블록이 되고, 계산되는 �
       end
     end`);
   const conditions = thread.slice(1).map((block: any) => block.params[0]);
-  assert.deepEqual(conditions.slice(0, 3).map((c: any) => c.type), ['True', 'True', 'True']);
-  assert.equal(conditions[3].type, 'boolean_basic_operator');
-  assert.equal(conditions[3].params[2].params[0], 'TRUE');
+  assert.deepEqual(conditions.map((c: any) => c.type), ['True', 'text', 'number', 'get_variable']);
 });
 
-test('값 자리의 판단은 (<판단>의 값) 으로 감싸고, true/false 는 "TRUE"/"FALSE" 가 된다', () => {
+test('값 자리의 판단은 불리언 그대로이고, boolean_value 는 "TRUE"/"FALSE" 글자를 준다', () => {
   const { project, thread } = firstBlocks(`    var flag = true
     when start do
       flag = false
       flag = x > 3
+      flag = boolean_value(x > 3)
     end`);
-  // 초기값도 대입식과 같은 글자여야 if flag 가 맞아떨어진다
-  assert.equal(project!.variables.find((v) => v.name === 'flag')!.value, 'TRUE');
+  assert.equal(project!.variables.find((v) => v.name === 'flag')!.value, true);
 
-  const [, assignLiteral, assignCompare] = thread;
-  assert.equal(assignLiteral.params[1].type, 'get_boolean_value');
-  assert.equal(assignLiteral.params[1].params[0].type, 'False');
-  assert.equal(assignCompare.params[1].type, 'get_boolean_value');
-  assert.equal(assignCompare.params[1].params[0].type, 'boolean_basic_operator');
+  const [, assignLiteral, assignCompare, assignText] = thread;
+  assert.equal(assignLiteral.params[1].type, 'False');
+  assert.equal(assignCompare.params[1].type, 'boolean_basic_operator');
+  assert.equal(assignText.params[1].type, 'get_boolean_value');
+  assert.equal(assignText.params[1].params[0].type, 'boolean_basic_operator');
+});
+
+test('wait until 은 값도 "~까지 기다리기" 로 만든다', () => {
+  const { thread } = firstBlocks('    var flag = 0\n    when start do\n      wait until flag\n      wait flag\n    end');
+  assert.equal(thread[1].type, 'wait_until_true');
+  assert.equal(thread[1].params[0].type, 'get_variable');
+  assert.equal(thread[2].type, 'wait_second');
 });
 
 test('wait 은 판단을 감싸지 않고 "~까지 기다리기" 로 남는다', () => {

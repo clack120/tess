@@ -976,7 +976,7 @@ export class Overlay {
   }
 
   /** `Entry.Variable.updateView` — integers show raw, decimals get two places. */
-  private static formatValue(value: string | number): string {
+  private static formatValue(value: string | number | boolean): string {
     const text = String(value);
     if (text !== '' && !isNaN(Number(text))) {
       if (text[0] !== '0' && Number.isInteger(Number(text))) {

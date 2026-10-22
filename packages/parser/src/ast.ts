@@ -315,6 +315,8 @@ export interface ForeverNode extends Base {
 export interface WaitNode extends Base {
   type: 'Wait';
   value: Expr;
+  /** `wait until x` — waits for `x` to hold, whatever kind of value it is. */
+  until?: boolean;
 }
 
 export interface ReturnNode extends Base {

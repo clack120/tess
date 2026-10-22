@@ -621,7 +621,7 @@ const JUDGED = `
 var ret = 0
 var i = 0
 list point = [4, -4, 40, -40]
-list inside = ["FALSE", "FALSE", "FALSE", "FALSE"]
+list inside = [false, false, false, false]
 var hits = 0
 
 function step():
@@ -657,10 +657,10 @@ test('판단을 담는 리스트도 커널이 가져간다', () => {
   assert.ok(plan.roots.size > 0);
 });
 
-test('판단 리스트는 엔트리처럼 TRUE·FALSE 글자로 남는다', () => {
+test('판단 리스트는 엔트리처럼 불리언으로 남는다', () => {
   const vm = assertSameAsJavascript(JUDGED, 6);
   const inside = vm.variables.find((variable) => variable.name === 'inside')!;
-  assert.deepEqual(inside.array.map((item) => item.data), ['TRUE', 'TRUE', 'FALSE', 'FALSE']);
+  assert.deepEqual(inside.array.map((item) => item.data), [true, true, false, false]);
 });
 
 /**

@@ -763,7 +763,7 @@ test('되돌린 함수 머리는 다시 컴파일하면 원래 사슬로 돌아�
   assert.deepEqual(chain, ['label:스폰', 'param', 'label:체력', 'param']);
 });
 
-test('참/거짓 블록과 (<판단>의 값) 껍데기를 벗겨서 옮긴다', () => {
+test('(<판단>의 값) 블록은 boolean_value 로 옮긴다', () => {
   const field = fieldLabel('스폰', fieldString('p1', null));
   const body = [{
     type: 'dialog',
@@ -772,7 +772,7 @@ test('참/거짓 블록과 (<판단>의 값) 껍데기를 벗겨서 옮긴다', 
   }];
   const result = decompileProject(functionHeadProject(field, body), []);
   assert.deepEqual(result.warnings, []);
-  assert.match(result.source, /^ {2}say true$/m);
+  assert.match(result.source, /^ {2}say boolean_value\(true\)$/m);
 });
 
 test('when 본문은 한 단 들여쓰고, 선언 뭉치 뒤에는 두 줄을 띄운다', () => {
