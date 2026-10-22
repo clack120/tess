@@ -18,7 +18,7 @@ import {
   type Variable,
 } from './model.ts';
 import { cellToRowCol, columnIndex } from './table.ts';
-import { GUEST, maskedUserId } from './engine.ts';
+import { GUEST } from './engine.ts';
 import type { Vm } from './engine.ts';
 
 export type Ops = ReturnType<typeof createOps>;
@@ -1560,10 +1560,7 @@ export function createOps(vm: Vm) {
     // is signed in. A runner off the site has no such window, so it says who it
     // is instead of pretending to be a signed-in reader with a blank name.
     userId(): string {
-      if (!vm.user) {
-        return GUEST;
-      }
-      return vm.maskUserId ? maskedUserId(vm.user.id) : vm.user.id;
+      return vm.user ? vm.user.id : GUEST;
     },
 
     nickname(): string {

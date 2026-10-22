@@ -123,7 +123,7 @@ export interface AudioEngine {
 
 /** Who the work is running for; `null` where nobody is signed in. */
 export interface EntryUser {
-  /** `아이디` — entry's `window.user.username`, unmasked. */
+  /** `아이디` — entry's `window.user.username`. */
   id: string;
   /** `닉네임` — entry's `window.user.nickname`. */
   nickname: string;
@@ -134,14 +134,6 @@ export const GUEST = 'guest';
 
 /** How often a running work writes its shared and real-time variables out. */
 const STORE_FLUSH_MS = 1000;
-
-/** Characters of an id left in the clear. */
-const KEPT = 2;
-
-/** `abcdef` → `ab****`, the way playentry shows someone else's id. */
-export function maskedUserId(id: string): string {
-  return id.slice(0, KEPT) + '*'.repeat(Math.max(0, id.length - KEPT));
-}
 
 export interface VmOptions {
   renderer?: Renderer | null;
@@ -169,8 +161,6 @@ export interface VmOptions {
    * outside it leaves this unset and both blocks answer `guest`.
    */
   user?: EntryUser | null;
-  /** Hides all but the first two letters of the id. On unless turned off. */
-  maskUserId?: boolean;
   /** Ticks per frame ceiling when catching up on lost time. */
   maxCatchUp?: number;
   /** Where shared and real-time variables are kept between runs. */
@@ -233,7 +223,6 @@ export class Vm implements Project {
   deviceType: 'desktop' | 'tablet' | 'mobile';
   touch: boolean;
   user: EntryUser | null;
-  maskUserId: boolean;
 
   state: 'stop' | 'run' | 'pause' = 'stop';
   currentSceneId = '';
@@ -319,7 +308,6 @@ export class Vm implements Project {
     this.deviceType = options.deviceType ?? 'desktop';
     this.touch = options.touch ?? false;
     this.user = options.user ?? null;
-    this.maskUserId = options.maskUserId ?? false;
     this.maxCatchUp = options.maxCatchUp ?? 4;
     this.store = options.store ?? null;
     this.kernelSupply = options.kernel ?? null;

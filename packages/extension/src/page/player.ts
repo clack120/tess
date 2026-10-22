@@ -56,8 +56,6 @@ const nextFrame = () =>
 
 export interface MountedPlayer {
   dispose(): void;
-  /** The vm reads this each time the block runs, so a live work follows it. */
-  setMaskUserId(mask: boolean): void;
   /** Whether the row about blocks this runner does not have yet is shown. */
   setShowNotice(show: boolean): void;
 }
@@ -195,7 +193,6 @@ export function mountPlayer(
   projectId: string,
   groupId: string | null = null,
   svg = true,
-  maskUserId = false,
   showNotice = false,
 ): MountedPlayer {
   ensureStageStyle();
@@ -416,7 +413,6 @@ export function mountPlayer(
         boost: true,
         svg,
         user: signedInUser(),
-        maskUserId,
         // Nothing may be pressed until the work's files are all in.
         onProgress: (done, all) => {
           status.textContent = all
@@ -573,12 +569,6 @@ export function mountPlayer(
 
   return {
     dispose,
-    setMaskUserId(mask: boolean) {
-      maskUserId = mask;
-      if (handle) {
-        handle.vm.maskUserId = mask;
-      }
-    },
     setShowNotice(show: boolean) {
       showNotice = show;
       // Only while the row is not carrying a failure — that one is always shown.
