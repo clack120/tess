@@ -321,7 +321,7 @@ export interface WaitNode extends Base {
 
 export interface ReturnNode extends Base {
   type: 'Return';
-  value: Expr;
+  value: Expr | null;
 }
 
 /**

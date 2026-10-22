@@ -19,6 +19,8 @@ const SNIPPETS = [
   inObject('if (a == 1):\n  say (1)\nelse:\nend\nname(1)\nmove(1) 2'),
   inObject('x = "\u0000\\"\\n"\ny = #fff\nz = #red # comment'),
   'function f():\nend\nfunction g(a, b?):\n  return a\nend\n',
+  'function f(n):\n  if n:\n    return\n  end\n  return n\nend\n',
+  'function f(n):\n  return\n  n = 1\nend\n',
   'var a = 1 from 0 to 10 visible at -10 20\nshared list b = []\n',
 ];
 

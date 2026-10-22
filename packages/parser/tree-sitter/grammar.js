@@ -327,7 +327,7 @@ module.exports = grammar({
 
     wait_statement: ($) => prec.right(1, seq('wait', field('value', $._expr))),
     flow_statement: ($) => field('kind', choice('break', 'continue', 'skip', 'restart')),
-    return_statement: ($) => prec.right(1, seq('return', field('value', $._expr))),
+    return_statement: ($) => prec.right(1, seq('return', optional(seq($._same_line, field('value', $._expr))))),
 
     stop_statement: ($) => prec.right(1, seq('stop', optional(choice(
       seq(field('sound', 'sound'), field('target', choice('this', 'all'))),

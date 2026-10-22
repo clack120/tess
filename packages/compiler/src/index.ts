@@ -556,12 +556,6 @@ function collectFunctions(program: ProgramNode, ctx: Context) {
       return;
     }
     const returns = findReturns(node.body);
-    const tail = node.body[node.body.length - 1];
-    const isTailReturn = tail?.type === 'Return' && returns.length === 1;
-
-    if (returns.length > 0 && !isTailReturn) {
-      ctx.error(returns[0], '엔트리 함수는 중간에서 값을 돌려줄 수 없습니다. return 은 함수의 마지막 문장에만 쓸 수 있습니다.');
-    }
 
     // `이름?` 으로 적은 매개변수는 엔트리에서도 판단 칸이 된다 (SPEC-ADDENDUM.md 4.6)
     const booleanParams = new Set(node.booleanParams ?? []);
@@ -576,7 +570,7 @@ function collectFunctions(program: ProgramNode, ctx: Context) {
         param,
         `${booleanParams.has(param) ? 'booleanParam' : 'stringParam'}_${ctx.newId()}`,
       ])),
-      isValue: isTailReturn,
+      isValue: returns.some(node => node.value !== null),
       localVariables: [],
     };
     ctx.functions.push(fn);
@@ -645,11 +639,22 @@ function compileFunctions(ctx: Context) {
     };
 
     const declared = fn.node!;
-
-    const body = fn.isValue ? declared.body.slice(0, -1) : declared.body;
-    const statements = compileStatements(body, ctx, false);
     const tail = declared.body[declared.body.length - 1] as ReturnNode | undefined;
-    const returnValue = fn.isValue && tail ? compileValue(tail.value, ctx) : null;
+    const simpleReturn = tail?.type === 'Return' && tail.value !== null && findReturns(declared.body).length === 1;
+    if (fn.isValue && !simpleReturn) {
+      const id = ctx.newId();
+      ctx.funcScope.returnId = id;
+      // Entry's function-local reads turn empty strings and false into 0.
+      ctx.variables.push({ id, name: `[Tess] ${fn.name} return`, value: 0, visible: false,
+        variableType: 'variable', isCloud: false, isRealTime: false, cloudDate: false,
+        object: null, x: 0, y: 0 });
+    }
+    const body = simpleReturn ? declared.body.slice(0, -1) : declared.body;
+    const statements = compileStatements(body, ctx, false);
+    const returnId = ctx.funcScope.returnId;
+    if (returnId) statements.push(ctx.block('set_variable', [returnId, ctx.number(0), null]));
+    const returnValue = returnId ? ctx.block('get_variable', [returnId, null])
+      : fn.isValue && tail ? compileValue(tail.value, ctx) : null;
 
     const field = buildFunctionFields(fn, ctx);
     const params = fn.isValue ? [field, null, null, returnValue] : [field, null];

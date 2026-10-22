@@ -308,6 +308,7 @@ export interface FunctionScope {
   /** All allocated locals by id, including bindings from nested blocks. */
   localVars: Map<string, { id: string; displayName: string }>;
   bindings: Map<string, { id: string; displayName: string }>;
+  returnId?: string;
 }
 
 /** `compileProject` 실행 시 주입하는 컴파일 옵션 설정입니다. */

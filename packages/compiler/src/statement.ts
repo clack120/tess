@@ -256,10 +256,13 @@ function compile(node: Stmt, ctx: Context): EntryBlock[] | null {
     case "StopProject":
       return one(ctx.block("stop_run", [null]));
 
-    case "Return":
-      return blocksOf([
-        ctx.error(node, "return 은 함수의 마지막 문장에서만 쓸 수 있습니다."),
-      ]);
+    case "Return": {
+      if (!ctx.funcScope) return [];
+      const id = ctx.funcScope?.returnId;
+      if (!id) return [ctx.block('stop_object', ['thisThread', null])];
+      const value = node.value ? compileValue(node.value, ctx) : ctx.number(0);
+      return value ? [ctx.block('set_variable', [id, value, null]), ctx.block('stop_object', ['thisThread', null])] : [];
+    }
 
     // --- 신호 · 복제 · 장면 -------------------------------------------------
     case "Send": {

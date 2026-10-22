@@ -704,7 +704,10 @@ export class TessParser extends CstParser {
 
     $.RULE('returnStatement', () => {
       $.CONSUME(kw.return);
-      $.SUBRULE($.expr, { LABEL: 'value' });
+      $.OPTION({
+        GATE: () => $.sameLine() && $.startsExpr(),
+        DEF: () => $.SUBRULE($.expr, { LABEL: 'value' }),
+      });
     });
 
     // `stop` changes meaning entirely with what follows it.

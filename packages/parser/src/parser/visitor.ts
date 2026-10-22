@@ -503,7 +503,7 @@ export class TessAstVisitor extends BaseVisitor {
   }
 
   returnStatement(ctx: Ctx, node: CstNode): ReturnNode {
-    return { type: 'Return', value: this.visit(ctx.value), loc: nodeLoc(node) };
+    return { type: 'Return', value: ctx.value ? this.visit(ctx.value) : null, loc: nodeLoc(node) };
   }
 
   stopStatement(ctx: Ctx, node: CstNode): StopSoundNode | NullaryNode | StopNode {

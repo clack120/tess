@@ -421,7 +421,7 @@ function statement(wrapper: SyntaxNode): Stmt {
       const kinds: Record<string, NullaryStatementType> = { break: 'Break', continue: 'Continue', skip: 'Skip', restart: 'Restart' };
       return { type: kinds[word('kind')]!, loc: at } as Stmt;
     }
-    case 'return_statement': return { type: 'Return', value: e('value'), loc: at } as Stmt;
+    case 'return_statement': return { type: 'Return', value: opt('value'), loc: at } as Stmt;
     case 'stop_statement': {
       if (has(node, 'sound')) return { type: 'StopSound', target: word('target'), loc: at } as Stmt;
       if (has(node, 'what')) {

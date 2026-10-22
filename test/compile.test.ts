@@ -779,7 +779,7 @@ test('strict 는 주의를 경고로 올려서 알려 준다', () => {
   );
 });
 
-test('함수 중간의 return 은 에러다', () => {
+test('함수 중간의 return 은 값을 기록하고 함수 실행만 끝낸다', () => {
   const source = `function f(n):
   if n > 1:
     return 1
@@ -787,8 +787,9 @@ test('함수 중간의 return 은 에러다', () => {
   return 2
 end`;
   const result = compileProject(source, { path: 'x.tess' });
-  assert.equal(result.ok, false);
-  assert.match(result.errors[0].message, /중간에서 값을 돌려줄 수 없습니다/);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.errors, []);
+  assert.match(result.project!.functions[0]!.content, /stop_object/);
 });
 
 /**
