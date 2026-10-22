@@ -1,10 +1,5 @@
 #!/usr/bin/env node
-/**
- * @fileoverview tessvm 명령줄 도구입니다.
- *
- * `run` 은 작품을 컴파일해 브라우저로 띄우고, `bench` 는 화면 없이 돌려 초당 프레임을
- * 재며, `emit` 은 JIT 가 만든 자바스크립트를 그대로 보여 줍니다.
- */
+// Run, inspect, benchmark, and export projects with tessvm.
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -15,11 +10,10 @@ import { loadProject } from './load.ts';
 import { serveVm, DEFAULT_PORT } from './server.ts';
 import { exportHtml, exportZip, type ExportResult } from './export.ts';
 
-/** Diagnostics shown per grade before the rest are summed up. */
 const MAX_DIAGNOSTICS = 8;
 
 const USAGE = `사용법
-  tessvm run    <파일.tess|파일.ent>   컴파일해서 브라우저로 실행
+  tessvm run    <파일.tess|파일.ent>   작품을 브라우저로 실행
   tessvm bench  <파일.tess|파일.ent>   화면 없이 돌려 속도를 잰다
   tessvm emit   <파일.tess|파일.ent>   JIT 가 만든 자바스크립트를 출력
   tessvm check  <파일.tess|파일.ent>   아직 지원하지 않는 블록을 보고한다
@@ -135,8 +129,7 @@ async function main(): Promise<number> {
   if (loaded.decompiledTo) {
     console.log(`${path.basename(file)} → ${path.join(loaded.decompiledTo, 'main.tess')} (되돌린 Tess 소스)`);
   }
-  // Warnings and notices carry the blocks that survived a decompile with a
-  // dangling name, which is what a run of a restored work needs to see.
+  // Compiler diagnostics apply to Tess inputs.
   const grades = [
     ['에러', loaded.errors, console.error],
     ['경고', loaded.warnings, console.warn],
@@ -241,7 +234,6 @@ function bench(loaded: Loaded, options: Options): number {
   return 0;
 }
 
-/** Writes the work out as one zip, one html, or both. */
 function exportWork(loaded: Loaded, options: Options): number {
   const shapes: Array<{ suffix: string; make: () => ExportResult }> = [];
   const settings = {
@@ -271,7 +263,7 @@ function exportWork(loaded: Loaded, options: Options): number {
   return 0;
 }
 
-/** `--out` as given; with both shapes asked for, its extension gives way. */
+// Replace --out's extension when writing both formats.
 function fileFor(out: string | undefined, name: string, suffix: string, both: boolean): string {
   if (!out) {
     return `${name}${suffix}`;
