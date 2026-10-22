@@ -84,11 +84,12 @@ end`;
   for (const vm of [plain, optimized]) {
     vm.load(structuredClone(work));
     vm.start();
+    vm.variables.find((v) => v.name === 'text_value')!.setValue('abc');
     vm.tick();
   }
   const stats = optimized.kernel!.stats;
   assert.equal(optimized.kernel!.roots.size, 2);
-  assert.ok(stats.fallbacks > 0, 'f falls back on text it cannot restore');
+  assert.ok(stats.fallbacks > 0, 'f falls back on text that is not a number');
   const runs = stats.runs;
   assert.ok(runs > 0, 'g still runs in the kernel');
   for (const vm of [plain, optimized]) {
@@ -100,6 +101,98 @@ end`;
   }
   assert.equal(stats.dropped, 1, 'only f steps aside once its list changes length');
   assert.ok(stats.runs > runs, 'g keeps running in the kernel');
+  assert.equal(snapshot(optimized), snapshot(plain));
+});
+
+/** Loads one work twice, plain and on the javascript kernel, and starts both. */
+function pair(source: string): [Vm, Vm] {
+  const work = project(source);
+  const plain = new Vm({ renderer: null, audio: null });
+  const optimized = new Vm({ renderer: null, audio: null, kernel: () => null });
+  for (const vm of [plain, optimized]) {
+    vm.load(structuredClone(work));
+    vm.start();
+  }
+  return [plain, optimized];
+}
+
+test('a kernel run writes back only the list items it stored', () => {
+  const [plain, optimized] = pair(`
+var ret = 0
+list items = ["5", "6", "7"]
+function f():
+  items[1] = (items[1] + 1)
+  return 0
+end
+object "o":
+  when start do
+    forever:
+      ret = f()
+    end
+  end
+end`);
+  for (let i = 0; i < 3; i++) {
+    plain.tick();
+    optimized.tick();
+  }
+  assert.ok(optimized.kernel!.stats.runs > 0);
+  assert.equal(snapshot(optimized), snapshot(plain));
+  const kinds = (vm: Vm) => vm.variables.find((v) => v.name === 'items')!.array.map((item) => typeof item.data);
+  assert.deepEqual(kinds(optimized), kinds(plain));
+});
+
+test('a list item written from outside crosses alone, not the whole list', () => {
+  const items = Array.from({ length: 2000 }, (_, i) => i).join(', ');
+  const [plain, optimized] = pair(`
+var ret = 0
+var n = 0
+list items = [${items}]
+function f():
+  return (items[1] + items[2])
+end
+object "o":
+  when start do
+    forever:
+      items[2] = n
+      n += 1
+      ret = f()
+    end
+  end
+end`);
+  plain.tick();
+  optimized.tick();
+  const stats = optimized.kernel!.stats;
+  const before = stats.copied;
+  for (let i = 0; i < 50; i++) {
+    plain.tick();
+    optimized.tick();
+  }
+  assert.ok(stats.runs > 0);
+  assert.ok(stats.copied - before < 50 * 10, `copied ${stats.copied - before}`);
+  assert.equal(snapshot(optimized), snapshot(plain));
+});
+
+test('a root that keeps falling back rests instead of trying every call', () => {
+  const calls = Array.from({ length: 100 }, () => '      ret = f()').join('\n');
+  const [plain, optimized] = pair(`
+var ret = 0
+var x = 0
+function f():
+  return (x + 1)
+end
+object "o":
+  when start do
+    forever:
+${calls}
+    end
+  end
+end`);
+  for (const vm of [plain, optimized]) vm.variables.find((v) => v.name === 'x')!.setValue('abc');
+  for (let i = 0; i < 20; i++) {
+    plain.tick();
+    optimized.tick();
+  }
+  assert.ok(optimized.kernel!.stats.fallbacks < 200, `fallbacks ${optimized.kernel!.stats.fallbacks}`);
   assert.equal(snapshot(optimized), snapshot(plain));
 });
 

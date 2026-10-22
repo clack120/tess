@@ -790,7 +790,7 @@ export function createOps(vm: Vm) {
       const at = listIndex(raw, list);
       if (at >= 1 && at <= list.array.length) {
         list.array[at - 1] = { data: value as string | number };
-        list.touch();
+        list.touchItem(at - 1);
       }
     },
 
