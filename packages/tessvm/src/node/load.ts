@@ -1,10 +1,4 @@
-/**
- * @fileoverview 실행할 작품을 읽어들이는 곳입니다.
- *
- * tessvm 이 실제로 돌리는 것은 Tess 소스입니다. `.tess` 는 그대로 컴파일하고,
- * `.ent` 는 먼저 Tess 로 되돌린 뒤 같은 길을 지나갑니다 — 어느 쪽이든 실행기가 받는
- * 것은 같은 컴파일 결과입니다.
- */
+// Compile Tess inputs and load Entry archives without changing their blocks.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,7 +8,7 @@ export interface LoadOptions {
   assetDirs?: string[];
   name?: string;
   strict?: boolean;
-  /** Where a `.ent` is unpacked to; a temporary folder when omitted. */
+  // Save a Tess copy here without using it for execution.
   decompileTo?: string;
 }
 
@@ -24,17 +18,16 @@ export interface LoadedProject {
   assetDirs: string[];
   sourceMap?: SourceMap;
   name: string;
-  /** The `.tess` entry point that was compiled — the decompiled one for `.ent`. */
+  // The original input file, including for .ent archives.
   sourcePath: string;
   errors: CompileDiagnostic[];
   warnings: CompileDiagnostic[];
   notices: CompileDiagnostic[];
-  /** Set when the input was a `.ent` that had to be decompiled first. */
+  // Present only when a Tess copy was requested.
   decompiledTo?: string;
   decompileWarnings?: string[];
 }
 
-/** `.tess` or `.ent` in, a runnable entry project out. */
 export async function loadProject(file: string, options: LoadOptions = {}): Promise<LoadedProject> {
   const absolute = path.resolve(file);
   if (/\.ent$/i.test(absolute)) {
@@ -72,39 +65,78 @@ function loadTess(file: string, options: LoadOptions): LoadedProject {
 }
 
 async function loadEnt(file: string, options: LoadOptions): Promise<LoadedProject> {
-  const { decompileEnt, restoreTableRows } = await import('@tess/decompiler');
-  const bytes = fs.readFileSync(file);
-  // Table rows skip the source: a large table would be parsed back row by row.
-  const decompiled = await decompileEnt(bytes, { tableRows: false });
-  const outDir =
-    options.decompileTo ??
-    fs.mkdtempSync(path.join(os.tmpdir(), `tessvm-${path.basename(file, '.ent')}-`));
-  fs.mkdirSync(outDir, { recursive: true });
-  const mainFile = path.join(outDir, 'main.tess');
-  fs.writeFileSync(mainFile, decompiled.source);
-  const root = path.resolve(outDir);
-  for (const asset of decompiled.assets) {
-    const target = path.resolve(root, asset.path);
-    // The work's own text names these files. A name that climbs out of the
-    // folder is refused rather than written.
-    if (target !== root && !target.startsWith(root + path.sep)) {
-      throw new Error(`작품이 폴더 밖의 파일을 가리킵니다: ${asset.path}`);
+  const { readTar, builtinAssets, decompileProject } = await import('@tess/decompiler');
+  const entries = await readTar(fs.readFileSync(file));
+  const projectEntry = entries.find((entry) => entry.name === 'temp/project.json') ??
+    entries.find((entry) => path.posix.basename(entry.name) === 'project.json');
+  if (!projectEntry) throw new Error('project.json 을 찾지 못했습니다 — .ent 파일을 확인하세요.');
+  const project = JSON.parse(Buffer.from(projectEntry.data).toString('utf8')) as EntryProject;
+  if (!project || !Array.isArray(project.objects)) throw new Error('project.json 에 objects 배열이 없습니다.');
+  const files = entries.filter((entry) => entry !== projectEntry);
+  const urls = new Set(files.map((entry) => entry.name));
+  const byName = new Map(files.map((entry) => [entry.name.replace(/^\.\//, ''), entry.data]));
+  const builtin = builtinAssets();
+  const assetDirs = assetDirsFor(file, options.assetDirs);
+  const assets: AssetFile[] = [];
+  for (const object of project.objects) {
+    for (const resource of [...(object.sprite?.pictures ?? []), ...(object.sprite?.sounds ?? [])]) {
+      for (const key of ['fileurl', 'pngurl'] as const) {
+        const url = (resource as unknown as Record<string, unknown>)[key];
+        if (typeof url !== 'string' || urls.has(url)) continue;
+        const data = byName.get(url.replace(/^\.?\//, '')) ?? builtin(url);
+        if (data) {
+          files.push({ name: url, data }); urls.add(url);
+        } else if (!/^[a-z][a-z\d+.-]*:/i.test(url)) {
+          for (const dir of assetDirs) {
+            const root = path.resolve(dir);
+            const source = path.resolve(root, url.replace(/^\.?\//, ''));
+            if (source.startsWith(root + path.sep) && fs.existsSync(source) && fs.statSync(source).isFile()) {
+              assets.push({ source, target: url }); urls.add(url);
+              break;
+            }
+          }
+        }
+      }
     }
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, asset.data);
   }
-  const loaded = loadTess(mainFile, {
-    ...options,
-    name: options.name ?? decompiled.name,
-    assetDirs: [...(options.assetDirs ?? []), path.join(outDir, 'assets'), outDir],
-  });
-  if (loaded.project) restoreTableRows(loaded.project as never, decompiled.tableRows);
-  loaded.decompiledTo = outDir;
-  loaded.decompileWarnings = decompiled.warnings;
+  for (const { name } of files) {
+    if (name.split(/[\\/]/).includes('..') || name.includes('\0')) {
+      throw new Error(`작품이 폴더 밖의 파일을 가리킵니다: ${name}`);
+    }
+  }
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'tessvm-assets-'));
+  // Archive names stay as URLs and never become paths on disk.
+  for (const [index, { name, data }] of files.entries()) {
+    const ext = path.extname(name);
+    const source = path.join(folder, `${index}${/^\.[a-z0-9]+$/i.test(ext) ? ext : '.bin'}`);
+    fs.writeFileSync(source, data);
+    assets.push({ source, target: name });
+  }
+  const loaded: LoadedProject = {
+    project, assets, assetDirs: [...assetDirs, folder],
+    name: options.name ?? project.name ?? path.basename(file, path.extname(file)),
+    sourcePath: file, errors: [], warnings: [], notices: [],
+  };
+  if (options.decompileTo) {
+    const decompiled = decompileProject(project, entries, { tableRows: false });
+    const root = path.resolve(options.decompileTo);
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, 'main.tess'), decompiled.source);
+    for (const asset of decompiled.assets) {
+      const target = path.resolve(root, asset.path);
+      if (target !== root && !target.startsWith(root + path.sep)) {
+        throw new Error(`작품이 폴더 밖의 파일을 가리킵니다: ${asset.path}`);
+      }
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, asset.data);
+    }
+    loaded.decompiledTo = options.decompileTo;
+    loaded.decompileWarnings = decompiled.warnings;
+  }
   return loaded;
 }
 
-/** Same search entry's own tooling does: next to the source, then `assets/`. */
+// Search beside the input and in its assets folder after explicit paths.
 export function assetDirsFor(file: string, extra: string[] = []): string[] {
   const dir = path.dirname(path.resolve(file));
   return [...extra, dir, path.join(dir, 'assets')];
