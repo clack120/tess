@@ -37,6 +37,31 @@ import {
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+test('stop and restart restore table cells, field names and shape', () => {
+  const vm = new Vm({ renderer: null, audio: null });
+  vm.load({ scenes: [{ id: 's', name: 's' }], objects: [], variables: [], functions: [], messages: [],
+    tables: [{ id: 't', name: 't', fields: ['field'], origin: [[1]], data: [[99]] }],
+  } as unknown as never);
+  vm.start();
+  const table = vm.tables[0]!;
+  table.replaceValue(1, 1, 9);
+  table.replaceValue(0, 1, 'changed');
+  table.appendRow();
+  table.appendCol();
+  const revision = table.revision;
+  vm.pause();
+  vm.start();
+  assert.equal(table.getValue(1, 1), 9, 'resuming a pause preserves table edits');
+  vm.stop();
+  assert.deepEqual(table.fields, ['field']);
+  assert.deepEqual(table.rows, [[1]]);
+  assert.ok(table.revision > revision);
+  vm.start();
+  table.replaceValue(1, 1, 7);
+  vm.reset();
+  assert.deepEqual(table.rows, [[1]], 'restored rows do not alias the snapshot');
+});
+
 /** Compiles Tess source and hands back a started VM. */
 function runVm(source: string): Vm {
   const result = compileProject(source, { path: 'test.tess' });
