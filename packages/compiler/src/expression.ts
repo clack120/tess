@@ -42,17 +42,6 @@ const BOOLEAN_TYPES = new Set([
 // 계산할 필요 없이 값이 정해지는 리터럴들이다. 판단 자리에 오면 참으로 본다.
 const LITERAL_TYPES = new Set(['Number', 'String', 'Color', 'Transparent']);
 
-/**
- * Tess의 참/거짓(true/false) 값을 엔트리 블록 시스템에서 사용하는 문자열("TRUE"/"FALSE")로 매핑합니다.
- * 
- * 엔트리의 `(<판단>의 값)`(get_boolean_value) 블록은 판단 결과를 이 문자열로 반환하기 때문에,
- * 리터럴이든 비교 연산의 결과든 일관성 있게 같은 문자열이 나오도록 맞추는 데 사용됩니다.
- * 
- * @example
- * const trueString = BOOLEAN_TEXT.true; // "TRUE"
- */
-export const BOOLEAN_TEXT: Record<string, string> = { true: 'TRUE', false: 'FALSE' };
-
 const COMPARE_OPERATORS: Record<string, string> = {
   '==': 'EQUAL', '!=': 'NOT_EQUAL',
   '>': 'GREATER', '<': 'LESS',
@@ -108,43 +97,21 @@ export function isBooleanBlock(node: EntryParam): boolean {
 }
 
 /**
- * 주어진 표현식을 엔트리의 판단(boolean) 자리에 들어갈 수 있는 블록으로 컴파일합니다.
- * 
- * true/false 리터럴은 참/거짓 블록으로, 그 외의 리터럴은 참으로 처리합니다.
- * 실행 전까지 결과를 알 수 없는 일반 값 표현식은 `== "TRUE"` 형태의 비교 블록으로 감싸 판단 블록으로 만듭니다.
- *
- * @param node - 컴파일할 AST 노드
- * @param ctx - 현재 컴파일 컨텍스트
- * @returns 판단 타입의 엔트리 블록 객체
- * @example
- * const block = compileBoolean(exprNode, ctx);
+ * Compiles an expression for a condition slot. Any value goes in as it is and
+ * entry reads it the way it reads every condition (`getBooleanValue`):
+ * undefined is false, otherwise `Number(value)`, and text that is no number is true.
  */
 export function compileBoolean(node: Expr | null | undefined, ctx: Context): EntryBlock | null {
-  if (node?.type === 'Boolean') return ctx.block(node.value ? 'True' : 'False', [null]);
-  if (node && LITERAL_TYPES.has(node.type)) return ctx.block('True', [null]);
-
-  const compiled = compileAnyValue(node, ctx);
-  if (compiled === null) return null;
-  if (isBooleanBlock(compiled)) return compiled;
-  return ctx.block('boolean_basic_operator', [compiled, 'EQUAL', ctx.text(BOOLEAN_TEXT.true)]);
+  return compileAnyValue(node, ctx);
 }
 
 /**
- * 주어진 표현식을 일반 값(value) 자리에 들어갈 수 있는 엔트리 블록으로 컴파일합니다.
- * 
- * 컴파일 결과가 판단(boolean) 블록인 경우, 이를 엔트리의 `(<판단>의 값)` 블록으로
- * 감싸서 최종적으로 "TRUE" 또는 "FALSE" 문자열 값이 반환되도록 변환합니다.
- *
- * @param node - 컴파일할 AST 노드
- * @param ctx - 현재 컴파일 컨텍스트
- * @returns 값 타입의 엔트리 블록 객체
- * @example
- * const valueBlock = compileValue(exprNode, ctx);
+ * Compiles an expression for a value slot. A judgement goes in as it is, so a
+ * variable set from it holds the boolean, as in entry; `boolean_value(x)` asks
+ * for entry's "TRUE"/"FALSE" text instead.
  */
 export function compileValue(node: Expr | null | undefined, ctx: Context): EntryBlock | null {
-  const compiled = compileAnyValue(node, ctx);
-  if (compiled === null) return null;
-  return isBooleanBlock(compiled) ? ctx.block('get_boolean_value', [compiled]) : compiled;
+  return compileAnyValue(node, ctx);
 }
 
 /**
@@ -800,6 +767,13 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
       if (!arity(1)) return null;
       const sound = resolveSoundValue(args[0], ctx);
       return sound === null ? null : ctx.block('get_sound_duration', [null, sound, null]);
+    }
+
+    // `(<판단>의 값)` — entry's own "TRUE"/"FALSE" text for a judgement.
+    case 'boolean_value': {
+      if (!arity(1)) return null;
+      const argument = compileAnyValue(args[0], ctx);
+      return argument && ctx.block('get_boolean_value', [argument]);
     }
 
     case 'length': {

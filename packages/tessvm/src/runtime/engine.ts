@@ -188,8 +188,8 @@ export type KernelSupply = (plan: KernelPlan) => Uint8Array<ArrayBuffer> | WebAs
  */
 export interface VariableStore {
   /** Value of one variable, or undefined when nothing is stored for it. */
-  read(key: string): string | number | Array<{ data: string | number }> | undefined;
-  write(key: string, value: string | number | Array<{ data: string | number }>): void;
+  read(key: string): string | number | boolean | Array<{ data: string | number | boolean }> | undefined;
+  write(key: string, value: string | number | boolean | Array<{ data: string | number | boolean }>): void;
 }
 
 export interface VmError {

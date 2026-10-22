@@ -689,6 +689,7 @@ export class TessParser extends CstParser {
 
     $.RULE('waitStatement', () => {
       $.CONSUME(kw.wait);
+      $.OPTION(() => $.CONSUME(kw.until, { LABEL: 'until' }));
       $.SUBRULE($.expr, { LABEL: 'value' });
     });
 

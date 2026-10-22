@@ -259,9 +259,8 @@ function numeric(value: unknown): boolean {
  * - `bool`  `getBooleanValue` — text that is not a number reads as true.
  * - `plus`  `calc_basic` PLUS, which joins unless both sides are numbers.
  * - `index` `Entry.getListRealIndex`, where the three keywords are not numbers.
- * - `word`  the judgement itself, for measuring it against `TRUE` or `FALSE`.
  */
-type Slot = 'num' | 'raw' | 'cmp' | 'bool' | 'plus' | 'index' | 'word';
+type Slot = 'num' | 'raw' | 'cmp' | 'bool' | 'plus' | 'index';
 
 const LIST_KEYWORDS = new Set(['FIRST', 'LAST', 'RANDOM']);
 
@@ -280,14 +279,11 @@ export function fingerprint(source: string): string {
 }
 
 /**
- * Whether a value is the text `(<판단>의 값)` writes. Entry's `get_boolean_value`
- * hands a judgement over as `"TRUE"` or `"FALSE"`, and **both of those read back
- * as true** — `Number("FALSE")` is `NaN`, which `getBooleanValue` takes for true,
- * and `Boolean("FALSE")` is true as well. A list of them is carried as 1 and 0
- * and written back as the same two words.
+ * Whether a value is a judgement as entry stores one: the boolean itself. A
+ * list of them is carried as 1 and 0 and written back as booleans.
  */
 export function judged(value: unknown): boolean {
-  return value === 'TRUE' || value === 'FALSE';
+  return typeof value === 'boolean';
 }
 
 /** Whether a value prints back as the text it is stored as. */
@@ -371,8 +367,7 @@ export function planKernel(
       // A list comes back as numbers, so its text has to be what those print
       // as — otherwise a run would rewrite "0.50" as 0.5 on its way out. A list
       // of judgements is the other shape a work fills one with; what it holds
-      // right now is checked again on the way in, since a work that has not run
-      // yet still carries the `"FALSE"` its file was saved with.
+      // right now is checked again on the way in.
       return variable.array.every((item) => canonical(item.data)) ||
         variable.array.every((item) => judged(item.data));
     }
@@ -435,7 +430,6 @@ export function planKernel(
         const n = Number(raw);
         return { code: Number.isNaN(n) ? 'true' : String(Boolean(n)), kind: 'bool' };
       }
-      case 'word':
       case 'cmp':
       case 'index': {
         if (slot === 'index' && LIST_KEYWORDS.has(raw)) {
@@ -578,18 +572,12 @@ export function planKernel(
             : undefined;
           return { code: item, kind: 'num', tailCode, clean: true };
         }
-        // A judgement only reads back as one. Anywhere else entry would have
-        // `parseFloat(true)`, which is not 1, so the list stays behind instead.
-        if (slot === 'word') {
-          // Measured against one of the two words, where they do tell apart.
-          return { code: item, kind: 'num', clean: true };
-        }
+        // A stored judgement only reads back as one. Anywhere else entry would
+        // have `parseFloat(true)`, which is not 1, so the list stays behind.
         if (slot !== 'bool') {
           fail(`list ${text(p[1])} holds judgements`);
         }
-        // Read on its own, both words come back as true (see `judged`); the
-        // item is still read so the list stays among the ones that cross over.
-        return { code: `(${item} == ${item})`, kind: 'bool' };
+        return { code: `(${item} != 0.0)`, kind: 'bool' };
       }
       case 'length_of_list': {
         const index = refer(p[1]);
@@ -652,12 +640,6 @@ export function planKernel(
     }
   }
 
-  /** 1 or 0 when the slot holds one of the two words a judgement is written as. */
-  function judgementWord(param: unknown): number | null {
-    const raw = literalText(param);
-    return raw === 'TRUE' ? 1 : raw === 'FALSE' ? 0 : null;
-  }
-
   /** Whether the slot reads an item of a list the kernel fills with judgements. */
   function readsJudgement(param: unknown): boolean {
     if (!isBlock(param) || param.type !== 'value_of_index_from_list') {
@@ -668,18 +650,10 @@ export function planKernel(
   }
 
   function compare(operator: string, left: unknown, right: unknown): KValue {
-    // `만일 <리스트의 항목>` compiles to the item measured against the word it
-    // would have been written as, which is a comparison of two texts.
-    const word = judgementWord(right) ?? judgementWord(left);
-    if (word !== null && (operator === 'EQUAL' || operator === 'NOT_EQUAL')) {
-      const other = judgementWord(right) !== null ? left : right;
-      if (readsJudgement(other)) {
-        const item = value(other, 'word').code;
-        return {
-          code: `((${item} != 0.0) ${operator === 'EQUAL' ? '==' : '!='} ${word === 1})`,
-          kind: 'bool',
-        };
-      }
+    // A stored judgement compared as a value follows entry's rules for
+    // booleans, which the numbers here do not carry.
+    if (readsJudgement(left) || readsJudgement(right)) {
+      fail('judgement compared');
     }
     const a = asNum(value(left, 'cmp'));
     const b = asNum(value(right, 'cmp'));

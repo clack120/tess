@@ -222,7 +222,7 @@ function compile(node: Stmt, ctx: Context): EntryBlock[] | null {
       const value = compileAnyValue(node.value, ctx);
       if (!value) return [];
       return one(
-        isBooleanBlock(value)
+        node.until || isBooleanBlock(value)
           ? ctx.block("wait_until_true", [value, null])
           : ctx.block("wait_second", [value, null]),
       );

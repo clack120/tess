@@ -151,8 +151,6 @@ export function tessLiteral(value: unknown): string {
   if (typeof value === 'number') return tessNumber(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   const text = String(value ?? '');
-  if (text === 'TRUE') return 'true';
-  if (text === 'FALSE') return 'false';
   if (isExactNumber(text)) return text;
   return tessString(text);
 }

@@ -643,6 +643,9 @@ export class Target {
 
 export type VariableKind = 'variable' | 'list' | 'slide' | 'timer' | 'answer';
 
+/** What a variable or list item holds: entry stores a judgement as the boolean. */
+export type VariableValue = string | number | boolean;
+
 export class Variable {
   readonly id: string;
   readonly name: string;
@@ -657,8 +660,8 @@ export class Variable {
    */
   isCloud = false;
   isRealTime = false;
-  value: string | number = 0;
-  array: Array<{ data: string | number }> = [];
+  value: VariableValue = 0;
+  array: Array<{ data: VariableValue }> = [];
   /**
    * Counts writes, not changes. The wasm kernel keeps its own copy of the
    * numbers it works on and only reads this one back when the count moved, so
@@ -689,8 +692,8 @@ export class Variable {
    */
   onWrite: (() => void) | null = null;
   /** Snapshot taken when the project starts, restored on stop. */
-  private snapshotValue: string | number = 0;
-  private snapshotArray: Array<{ data: string | number }> = [];
+  private snapshotValue: VariableValue = 0;
+  private snapshotArray: Array<{ data: VariableValue }> = [];
   private snapshotVisible = false;
 
   constructor(id: string, name: string, objectId: string | null, kind: VariableKind) {
@@ -702,11 +705,11 @@ export class Variable {
     this.isSlide = kind === 'slide';
   }
 
-  getValue(): string | number {
+  getValue(): VariableValue {
     return this.value;
   }
 
-  setValue(value: string | number): void {
+  setValue(value: VariableValue): void {
     this.touch();
     if (this.isSlide) {
       const n = num(value);
@@ -752,7 +755,7 @@ export class Variable {
     return !isNaN(Number(this.value)) && String(this.value).trim() !== '';
   }
 
-  getArray(): Array<{ data: string | number }> {
+  getArray(): Array<{ data: VariableValue }> {
     return this.array;
   }
 
