@@ -355,11 +355,32 @@ export function validate(
     }
     if (node.type === 'Identifier') checkIdentifier(node as unknown as Identifier, ctx);
     if (node.type === 'Call') checkCall(node as unknown as CallNode, ctx);
+    if (node.type === 'Index' && !node.column) checkStringBounds(node.target as Expr, node.index as Expr);
+    if (node.type === 'Call' && node.callee === 'slice' && !ctx.functions.has('slice')) {
+      const args = node.arguments as Expr[];
+      if (args.length === 3) {
+        checkStringBounds(args[0]!, args[1]!);
+        checkStringBounds(args[0]!, args[2]!);
+      }
+    }
 
     for (const [key, child] of Object.entries(node)) {
       if (key === 'loc' || key === 'type') continue;
       walkExpressions(child, ctx);
     }
+  }
+
+  function checkStringBounds(text: Expr, index: Expr) {
+    if (text.type !== 'String') return;
+    const position = index.type === 'Number' ? index.value
+      : index.type === 'Unary' && index.operator === '-' && index.argument.type === 'Number' ? -index.argument.value : null;
+    if (position === null || !(position < 1 || position > text.value.length)) return;
+    const item = warn(index, `글자 위치 ${position} 이(가) 문자열 범위를 벗어나 실행하면 작품 전체가 멈춥니다.`);
+    item.code = 'W0003';
+    item.help = text.value.length
+      ? `글자 위치는 1부터 ${text.value.length}까지입니다. slice의 끝 위치도 포함되며, and/or 조건으로 감싸도 접근은 실행됩니다.`
+      : '빈 문자열에는 읽을 글자가 없습니다. if로 문자열 길이를 확인한 뒤 접근하세요.';
+    item.related = [report([], text, `이 문자열의 글자 수는 ${text.value.length}입니다. Entry는 이모지 등을 UTF-16 코드 단위로 셉니다.`)];
   }
 
   function checkIdentifier(identifier: Identifier, ctx: WalkContext) {

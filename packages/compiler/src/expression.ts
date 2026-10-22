@@ -199,7 +199,7 @@ function compileIdentifier(node: Node & { name: string }, ctx: Context): EntryBl
   if (OPTION_KEYWORDS.has(name) || STATE_VALUES.has(name)) {
     return ctx.error(node, `'${name}' 은(는) 이 자리에서 값으로 쓸 수 없습니다.`);
   }
-  return ctx.error(node, `선언되지 않은 이름 '${name}' 입니다.${didYouMean(name, ctx.knownNames())}`);
+  return ctx.unresolvedName(node, name);
 }
 
 /**
@@ -560,6 +560,26 @@ export function compileCallArguments(
     : compileValue(arg, ctx)));
 }
 
+export function checkFunctionArity(call: CallNode, fn: CompiledFunction, ctx: Context): boolean {
+  if (call.arguments.length === fn.params.length) return true;
+  ctx.error(call, `함수 '${call.callee}' 는 인자가 ${fn.params.length}개여야 합니다. (${call.arguments.length}개를 받았습니다) 사용법: ${call.callee}(${fn.params.join(', ')})`, {
+    code: 'E0006',
+    help: '선언된 매개변수마다 값을 하나씩 전달하세요. 생략 인자와 추가 인자는 지원하지 않습니다.',
+    ...(fn.node ? { related: [ctx.diagnostic(fn.node, '함수를 선언한 위치입니다.')] } : {}),
+  });
+  return false;
+}
+
+export function unknownFunctionError(call: CallNode, ctx: Context): null {
+  return ctx.error(call, `알 수 없는 함수 '${call.callee}' 입니다.`
+    + didYouMean(call.callee, [...BUILTIN_FUNCTIONS, ...ctx.functionByName.keys()]), {
+    code: 'E0005',
+    help: ctx.lookupVariable(call.callee)
+      ? `'${call.callee}' 은(는) 변수입니다. 값을 읽으려면 괄호를 빼세요. 문자열·리스트 항목은 ${call.callee}[위치] 로 읽습니다.`
+      : '함수 이름의 철자를 확인하거나 function 이름(인자) do ... end 로 선언하세요.',
+  });
+}
+
 /**
  * 소리 이름을 엔트리의 고유 리소스 ID로 변환합니다. (블록이 아니라 드롭다운 필드 값으로 사용됨)
  * `play sound` 블록과 달리 `get_sound_duration` 블록의 값은 필드 형태이므로 ID를 직접 주입합니다.
@@ -670,10 +690,7 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
         `함수 '${callee}' 는 값을 돌려주지 않습니다. 값 자리에서도 돌기는 하지만 자리에는 아무 값도 남지 않습니다.`,
       );
     }
-    if (args.length !== fn.params.length) {
-      ctx.error(node, `함수 '${callee}' 는 인자가 ${fn.params.length}개여야 합니다. (${args.length}개를 받았습니다) 사용법: ${callee}(${fn.params.join(', ')})`);
-      return null;
-    }
+    if (!checkFunctionArity(node, fn, ctx)) return null;
     const params = compileCallArguments(fn, args, ctx);
     if (params.some((p) => p === null)) return null;
     return ctx.block(`func_${fn.id}`, params);
@@ -952,8 +969,7 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
         return table && column
           && ctx.block('calc_values_from_table', [table.id, column, TABLE_CALCULATIONS[callee], null]);
       }
-      return ctx.error(node, `알 수 없는 함수 '${callee}' 입니다.`
-        + didYouMean(callee, [...BUILTIN_FUNCTIONS, ...ctx.functionByName.keys()]));
+      return unknownFunctionError(node, ctx);
   }
 }
 

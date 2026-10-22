@@ -9,6 +9,7 @@
  */
 import {
   ambiguousLocalError,
+  checkFunctionArity,
   compileAnyValue,
   compileBoolean,
   compileCallArguments,
@@ -16,9 +17,10 @@ import {
   isBooleanBlock,
   resolveList,
   resolveTarget,
+  unknownFunctionError,
 } from "./expression.ts";
 import { requireSaveFunction, requireScaleSetter } from "./runtime.ts";
-import { didYouMean, orHint } from '@tess/core';
+import { BUILTIN_FUNCTIONS, didYouMean, orHint } from '@tess/core';
 import { caseValue } from '@tess/parser';
 import type {
   AssignNode, Expr, ExpressionStatementNode, ForNode, Identifier, IndexNode, PlaySoundNode,
@@ -1298,13 +1300,7 @@ function compilePropertyAssign(node: AssignNode, name: string, ctx: Context): En
     }
 
     default:
-      return blocksOf([
-        ctx.error(
-          node,
-          `선언되지 않은 이름 '${name}' 에 값을 대입했습니다.`
-          + orHint(name, ctx.knownNames(), 'var 로 먼저 선언하세요.'),
-        ),
-      ]);
+      return blocksOf([ctx.unresolvedName(node.target, name, true)]);
   }
 }
 
@@ -1397,12 +1393,11 @@ function compileCallStatement(node: ExpressionStatementNode, ctx: Context): Entr
   const call = node.expression;
   const fn = ctx.functionByName.get(call.callee);
   if (!fn) {
-    return blocksOf([
-      ctx.error(
-        node,
-        `'${call.callee}' 함수를 찾을 수 없습니다. 내장 함수는 문장으로 쓸 수 없습니다.`,
-      ),
-    ]);
+    return blocksOf([BUILTIN_FUNCTIONS.has(call.callee)
+      ? ctx.error(call, `'${call.callee}' 내장 함수는 문장으로 쓸 수 없습니다.`, {
+        help: `결과를 쓸 자리에 호출하세요. 예: var 결과 = ${call.callee}(...)`,
+      })
+      : unknownFunctionError(call, ctx)]);
   }
   if (fn.isValue) {
     // Entry has no statement form of a value function: the call runs as the
@@ -1411,14 +1406,7 @@ function compileCallStatement(node: ExpressionStatementNode, ctx: Context): Entr
     if (!value) return [];
     return [ctx.block('_if', [ctx.block('boolean_basic_operator', [value, 'EQUAL', ctx.text('')]), null], [[]])];
   }
-  if (call.arguments.length !== fn.params.length) {
-    return blocksOf([
-      ctx.error(
-        node,
-        `함수 '${call.callee}' 는 인자가 ${fn.params.length}개여야 합니다. (${call.arguments.length}개를 받았습니다) 사용법: ${call.callee}(${fn.params.join(', ')})`,
-      ),
-    ]);
-  }
+  if (!checkFunctionArity(call, fn, ctx)) return [];
   const params = compileCallArguments(fn, call.arguments, ctx);
   if (params.some((param) => param === null)) return [];
   // 값을 돌려주지 않는 함수 블록은 끝에 아이콘 자리(null)가 하나 더 붙는다

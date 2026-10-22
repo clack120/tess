@@ -55,6 +55,55 @@ test('user function arity diagnostics include expected and actual counts and a s
     assert.match(error.message, /2개여야.*1개를 받았습니다/);
     assert.match(error.message, /f\(a, b\)/);
     assert.match(error.detail!, /f\(1\)/);
+    assert.equal(error.code, 'E0006');
+    assert.match(error.related![0]!.detail!, /function f\(a, b\)/);
+  }
+});
+
+test('name diagnostics retain state suggestions and distinguish missing calls from variables', () => {
+  const typo = compileProject(work('say timre')).errors.find(error => error.code === 'E0004')!;
+  assert.match(typo.message, /혹시 'timer'/);
+  for (const name of ['abs', 'f']) {
+    const bare = compileProject(work(`say ${name}`, 'function f() do\n  return 1\nend'));
+    assert.match(bare.errors.find(error => error.code === 'E0004')!.help!, /함수.*괄호/);
+  }
+  for (const expression of ['say score()', 'score()']) {
+    const call = compileProject(work(expression, 'var score = 0'));
+    assert.match(call.errors.find(error => error.code === 'E0005')!.help!, /변수.*괄호를 빼/);
+  }
+  const unknown = compileProject(work('helpr()', 'function helper() do\n  say 1\nend'));
+  assert.match(unknown.errors.find(error => error.code === 'E0005')!.message, /혹시 'helper'/);
+  const readOnly = compileProject(work('timer = 3'));
+  assert.match(readOnly.errors.find(error => error.code === 'E0007')!.help!, /읽기 전용/);
+});
+
+test('out-of-scope and used-before-declaration errors link local declarations in their own file', () => {
+  for (const body of [
+    'if true:\n    var hidden = 1\n  end\n  return hidden',
+    'hidden = 2\n  var hidden = 1\n  return hidden',
+    'for hidden from 1 to 2:\n    say hidden\n  end\n  return hidden',
+  ]) {
+    const result = compileProject('use "functions.tess"', {
+      path: 'main.tess', readFile: () => `function f() do\n  ${body}\nend`,
+    });
+    const error = result.errors.find(error => error.code === 'E0004')!;
+    assert.match(error.help!, /블록/);
+    assert.equal(error.related!.length, 1);
+    assert.match(error.related![0]!.file!, /functions\.tess$/);
+    assert.match(error.related![0]!.detail!, /var hidden = 1|for hidden from 1/);
+    assert.ok(result.warnings.every(warning => warning.offset !== error.offset), 'one diagnostic per unresolved name');
+  }
+});
+
+test('arity notes point to an included declaration for statement and value calls', () => {
+  for (const statement of ['say f()', 'f()']) {
+    const result = compileProject(`use "functions.tess"\n${work(statement)}`, {
+      path: 'main.tess', readFile: () => 'function f(n) do\n  say n\nend',
+    });
+    const error = result.errors.find(error => error.code === 'E0006')!;
+    assert.match(error.file!, /main\.tess$/);
+    assert.match(error.related![0]!.file!, /functions\.tess$/);
+    assert.match(error.related![0]!.detail!, /function f\(n\)/);
   }
 });
 
@@ -84,4 +133,25 @@ test('eager logic warns about guarded reads and calls without changing Entry eva
   }
   const simple = compileProject(work('if n > 0 and n < 10:\n        say 1\n      end', 'var n = 1'));
   assert.ok(simple.warnings.every(item => item.code !== 'W0001'));
+});
+
+test('literal string bounds warnings show valid positions without replacing native reads', () => {
+  for (const expression of ['"abc"[0]', '"abc"[-1]', '"abc"[4]', '""[1]', '"🙂"[3]',
+    'slice("abc", 0, 2)', 'slice("abc", 1, 4)']) {
+    const result = compileProject(work(`say ${expression}`));
+    assert.deepEqual(result.errors, [], expression);
+    const warning = result.warnings.find(item => item.code === 'W0003')!;
+    assert.match(warning.message, /작품 전체가 멈춥니다/, expression);
+    assert.match(warning.help!, /1부터|빈 문자열/);
+    assert.match(warning.related![0]!.message, /글자 수/);
+    assert.match(warning.related![0]!.detail!, /say /);
+    assert.match(result.project!.objects[0]!.script, /char_at|substring/);
+  }
+  for (const expression of ['"abc"[1]', '"abc"[3]', '"abc"[1.5]', '"🙂"[2]', 'slice("abc", 3, 1)']) {
+    const result = compileProject(work(`say ${expression}`));
+    assert.ok(result.warnings.every(item => item.code !== 'W0003'), expression);
+  }
+  const shadow = compileProject(work('say slice("abc", 0, 99)',
+    'function slice(text, start, finish) do\n  return text\nend'));
+  assert.ok(shadow.warnings.every(item => item.code !== 'W0003'), 'user function semantics are unknown');
 });
