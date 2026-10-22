@@ -195,7 +195,7 @@ export function mountPlayer(
   projectId: string,
   groupId: string | null = null,
   svg = true,
-  maskUserId = true,
+  maskUserId = false,
   showNotice = false,
 ): MountedPlayer {
   ensureStageStyle();

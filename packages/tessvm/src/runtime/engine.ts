@@ -313,7 +313,7 @@ export class Vm implements Project {
     this.deviceType = options.deviceType ?? 'desktop';
     this.touch = options.touch ?? false;
     this.user = options.user ?? null;
-    this.maskUserId = options.maskUserId ?? true;
+    this.maskUserId = options.maskUserId ?? false;
     this.maxCatchUp = options.maxCatchUp ?? 4;
     this.store = options.store ?? null;
     this.kernelSupply = options.kernel ?? null;
