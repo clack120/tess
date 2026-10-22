@@ -205,10 +205,12 @@ export function decompileProject(
 
   if (ctx.conditionHelper) {
     const { test, empty } = ctx.conditionHelper;
-    // A no-value call distinguishes undefined/null from nonnumeric text.
+    // A no-value call distinguishes undefined/null from nonnumeric text. A
+    // judgement stored in a variable is `false` in entry but "FALSE" once
+    // compiled from Tess, so that text reads as false too.
     lines.push(`function ${empty}():`, 'end', '',
       `function ${test}(value):`,
-      `  return ((value != 0) and (value != ${empty}()))`, 'end', '');
+      `  return (((value != 0) and (value != ${empty}())) and (value != "FALSE"))`, 'end', '');
   }
 
   // Notices are warnings under `strict`, matching compileProject.
