@@ -2,6 +2,7 @@
  * 엔트리 작품(.ent) 파일을 Tess 소스 코드로 디컴파일합니다.
  * 블록 트리를 분석하여 해당되는 텍스트 코드를 생성합니다.
  */
+import { imageSize } from '../../compiler/src/assets.ts';
 import { append, safeIdentifier, tessString, tessNumber, tessLiteral, tessComment, displayNamePart } from './ident.ts';
 import { autoParamName } from '@tess/core';
 import { blocksToLines, commentLines, indent, functionDeclarationLines, colorExpr } from './stmt.ts';
@@ -859,6 +860,13 @@ function useObjectLine(object: RawEntity, ctx: DecompileContext, sceneIdentifier
   return [`  ${isText ? 'usetext' : 'useobject'} ${tessString(relativePath)}`];
 }
 
+/** Whether the collected file at `path` measures exactly `dimension`. */
+function sameSize(ctx: DecompileContext, path: string, dimension: { width?: number; height?: number } | undefined): boolean {
+  const data = ctx.collectedAssets.find((asset) => asset.path === path)?.data;
+  const size = data ? imageSize(data) : null;
+  return !!size && !!dimension && size.width === dimension.width && size.height === dimension.height;
+}
+
 /** 조각 파일 하나의 내용 — `object`/`text` 로 감싸지 않은, 들여쓰기 0 부터 시작하는 줄들 */
 function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: boolean): string[] {
   const info = ctx.objectsById.get(object.id)!;
@@ -870,11 +878,11 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
     const picInfo = ctx.picturesById.get(picture.id);
     if (!picInfo) continue;
     const isDefault = object.selectedPictureId === picture.id;
-    // 크기는 적지 않는 것이 기본이다. 컴파일러가 그림 파일에서 크기를 직접 읽으므로,
-    // 적어 두면 그림을 바꿀 때마다 숫자까지 함께 고쳐야 한다. 파일이 없을 때와,
-    // 파일에서 잰 크기가 실제 크기가 아닌 1×1 빈 그림일 때만 적는다.
-    // (`sizes` 옵션을 켜면 원본 dimension 을 전부 적어 둔다.)
-    const measurable = picInfo.relativePath && !picInfo.blankImage && !ctx.allSizes;
+    // The compiler measures the file, so a size is written only where that
+    // would come out different from the saved one: no file, the 1×1 blank, or
+    // a file whose own size is not the dimension the work kept.
+    const measurable = picInfo.relativePath && !picInfo.blankImage && !ctx.allSizes &&
+      sameSize(ctx, picInfo.relativePath, picture.dimension);
     const sizePart = measurable
       ? ''
       : ` size ${tessNumber(picture.dimension?.width ?? 100)} ${tessNumber(picture.dimension?.height ?? 100)}`;

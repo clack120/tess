@@ -3268,3 +3268,21 @@ test('그림 오브젝트의 글상자 블록은 주석으로 남겨 컴파일�
   const compiled = compileProject(result.source, { path: 'main.tess' });
   assert.deepEqual(compiled.errors.map((error) => error.message), []);
 });
+
+test('a costume whose file measures differently from its saved size keeps the saved size', () => {
+  const png = new Uint8Array(fs.readFileSync(new URL('../examples/cat_idle.png', import.meta.url)));
+  const project = builtinObjectProject();
+  const picture = (id: string, file: string, width: number, height: number) => ({
+    id, name: id, imageType: 'png', fileurl: file, dimension: { width, height },
+  });
+  project.objects[0]!.sprite.pictures = [
+    picture('shrunk', 'temp/aa/bb/image/shrunk.png', 100, 100),
+    picture('same', 'temp/aa/bb/image/same.png', 220, 350),
+  ] as never;
+  project.objects[0]!.selectedPictureId = 'shrunk';
+  const entries = [{ name: 'temp/aa/bb/image/shrunk.png', data: png }, { name: 'temp/aa/bb/image/same.png', data: png.slice() }];
+  const result = decompileProject(project as never, entries);
+  const fragment = utf8(result.assets.find((a) => a.path === 'objects/엔트리봇.tess')!.data);
+  assert.match(fragment, /^default costume shrunk "[^"]+" size 100 100$/m);
+  assert.match(fragment, /^costume same "[^"]+"$/m);
+});
