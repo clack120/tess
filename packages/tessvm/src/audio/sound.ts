@@ -1,13 +1,3 @@
-/**
- * @fileoverview 소리 재생기입니다. WebAudio 로 직접 재생합니다.
- *
- * 소리 파일은 한 번만 받아서 디코딩해 두고 그 뒤로는 버퍼를 재사용합니다. 재생 속도
- * (`playbackRate`)와 소리 크기는 엔트리처럼 작품 전체에 하나씩만 있고, 이미 나고 있는
- * 소리에도 곧바로 적용됩니다.
- *
- * 배경음악은 소리와 따로 놉니다 — 엔트리가 `Entry.bgmInstances` 로 갈라 두어서
- * 소리 크기·재생 속도·소리 멈추기 블록이 닿지 않습니다. `AI/AI_TESSVM.md` 참고.
- */
 import type { AudioEngine, SpeechEngine } from '../runtime/engine.ts';
 import type { Sound, VoiceProps } from '../runtime/model.ts';
 
@@ -19,11 +9,7 @@ interface Playing {
 
 export class WebAudioEngine implements AudioEngine {
   private context: AudioContext | null = null;
-  /**
-   * Carries the sounds, not the background music. Entry keeps the two in
-   * separate lists (`Entry.soundInstances` and `Entry.bgmInstances`) and the
-   * volume, speed and stop blocks all walk the first one only.
-   */
+  // Entry keeps background music separate from sounds, so volume, speed, and stop affect sounds only.
   private master: GainNode | null = null;
   private readonly buffers = new Map<string, AudioBuffer>();
   private readonly loading = new Map<string, Promise<AudioBuffer | null>>();
@@ -32,15 +18,10 @@ export class WebAudioEngine implements AudioEngine {
   private volume = 1;
   private speed = 1;
   private paused = false;
-  /**
-   * Sounds asked for while their file is still on the way. Without these a
-   * `stop` or a scene change only reaches what is already playing, and the
-   * request that was still loading starts afterwards — the work then sings in
-   * the wrong scene, and a bgm asked for twice ends up playing twice over.
-   */
+  // Track pending loads so stops and scene changes also cancel sounds that have not started.
   private readonly pending = new Set<{ entityId: string; bgm: boolean; live: boolean }>();
 
-  /** Browsers only allow audio after a gesture, so the context opens lazily. */
+  // Browsers require a gesture, so create the audio context lazily.
   private ensure(): AudioContext | null {
     if (this.context) {
       if (this.context.state === 'suspended' && !this.paused) {
@@ -59,10 +40,7 @@ export class WebAudioEngine implements AudioEngine {
     return this.context;
   }
 
-  /**
-   * Fetches and decodes sounds ahead of time, a few at a time. Asking for a
-   * thousand files at once starves the costume loads the first frame needs.
-   */
+  // Limit parallel sound loads so they do not starve costume downloads.
   async preload(sounds: Sound[], limit = 6, onLoaded?: () => void): Promise<void> {
     let next = 0;
     const runners = new Array(Math.min(limit, sounds.length)).fill(0).map(async () => {
@@ -127,9 +105,7 @@ export class WebAudioEngine implements AudioEngine {
   }
 
   playBgm(sound: Sound): void {
-    // One background track at a time. Without this a second call while the first
-    // is still loading leaves two copies playing over each other, and only the
-    // later one can ever be stopped.
+    // Cancel earlier background music requests so overlapping loads cannot start duplicate tracks.
     this.stopBgm();
     const buffer = this.buffers.get(sound.id);
     if (!buffer) {
@@ -155,7 +131,6 @@ export class WebAudioEngine implements AudioEngine {
     return item.live;
   }
 
-  /** Drops the waiting requests a stop has just made pointless. */
   private cancel(matches: (item: { entityId: string; bgm: boolean }) => boolean): void {
     for (const item of this.pending) {
       if (matches(item)) {
@@ -164,12 +139,7 @@ export class WebAudioEngine implements AudioEngine {
     }
   }
 
-  /**
-   * Background music runs beside the sounds rather than among them:
-   * `Entry.Utils.playBGM` plays it once at full volume and files it in
-   * `Entry.bgmInstances`, which the volume, speed and stop-sound blocks never
-   * walk. Only `stop_bgm` and the next `play_bgm` reach it.
-   */
+  // Background music plays once at full volume and ignores sound volume, speed, and stop blocks.
   private start(
     buffer: AudioBuffer,
     entityId: string,
@@ -207,7 +177,7 @@ export class WebAudioEngine implements AudioEngine {
     }
   }
 
-  /** `Entry.Utils.forceStopSounds` — the background music plays on. */
+  // Stopping sounds leaves background music playing, matching Entry.
   stopAll(): void {
     this.cancel((item) => !item.bgm);
     for (const entry of [...this.playing]) {
@@ -215,7 +185,7 @@ export class WebAudioEngine implements AudioEngine {
     }
   }
 
-  /** `Entry.Utils.pauseSoundInstances` — held where they are, not thrown away. */
+  // Pause sound instances in place rather than discarding them.
   pause(): void {
     this.paused = true;
     void this.context?.suspend().catch(() => undefined);
@@ -226,7 +196,7 @@ export class WebAudioEngine implements AudioEngine {
     void this.context?.resume().catch(() => undefined);
   }
 
-  /** Releases the audio context; browsers only allow a handful per page. */
+  // Release the audio context because browsers limit the number per page.
   close(): void {
     this.stopAll();
     this.stopBgm();
@@ -267,7 +237,6 @@ export class WebAudioEngine implements AudioEngine {
     try {
       entry.source.stop();
     } catch {
-      // Already finished; nothing to stop.
     }
     this.playing.delete(entry);
   }
@@ -295,17 +264,7 @@ export class WebAudioEngine implements AudioEngine {
   }
 }
 
-/**
- * `읽어주기` 블록을 브라우저의 음성 합성으로 읽습니다. 엔트리의 목소리는 서버가 만든
- * mp3 이므로, 이쪽은 그 서버에 닿지 못할 때 대신 서는 자리입니다(`EntryTtsEngine`).
- */
-/**
- * The voices entry's `읽어주기` offers. They are clova voices on entry's own
- * service and cannot be reproduced here, so each one is pinned to a korean
- * voice the browser has, with the pitch nudged the way the name suggests. What
- * matters most is that a korean voice is chosen at all: without one the browser
- * reads hangul with whatever its default is, which is what makes it unlistenable.
- */
+// Map Entry voices to available Korean browser voices because Clova voices are unavailable locally.
 const SPEAKERS: Record<string, { pitch: number; rate: number }> = {
   kyuri: { pitch: 1.05, rate: 1 },
   jinho: { pitch: 0.8, rate: 1 },
@@ -324,10 +283,7 @@ export class SpeechSynthesisEngine {
   private voice: SpeechSynthesisVoice | null = null;
   private looked = false;
 
-  /**
-   * The list is empty until the browser has loaded it, so it is looked up again
-   * until something korean turns up.
-   */
+  // Retry voice lookup until the browser finishes loading Korean voices.
   private korean(): SpeechSynthesisVoice | null {
     const synth = (globalThis as { speechSynthesis?: SpeechSynthesis }).speechSynthesis;
     if (this.voice || !synth) {
@@ -361,8 +317,7 @@ export class SpeechSynthesisEngine {
       utterance.voice = picked;
     }
     utterance.lang = picked?.lang ?? 'ko-KR';
-    // Entry's dropdowns run 5(느리게 · 낮게) … -5(빠르게 · 높게), so a positive
-    // value slows the reading down and takes it lower — the other way round.
+    // Positive Entry codes mean slower speech and lower pitch.
     utterance.rate = Math.max(0.1, Math.min(10, speaker.rate * (1 - voice.speed * 0.1)));
     utterance.pitch = Math.max(0, Math.min(2, speaker.pitch * (1 - voice.pitch * 0.1)));
     utterance.volume = voice.volume;
@@ -386,35 +341,23 @@ export class SpeechSynthesisEngine {
   }
 }
 
-/** Entry's own reading service, and what it refuses to read. */
 const TTS_ORIGIN = 'https://playentry.org';
 const TTS_PATH = '/api/expansionBlock/tts/read.mp3';
-/** `checkText` — entry reads neither an empty sentence nor one longer than this. */
+// Entry refuses empty text and text longer than this limit.
 const TTS_MAX_CHARS = 2500;
 
-/** One reading on the air, with the handle that ends the wait for it. */
 interface Reading {
   audio: HTMLAudioElement;
   end(): void;
 }
 
-/**
- * `읽어주기` through entry's own service — the same mp3 its runner plays, so the
- * work is read in the voice it was written for.
- *
- * The address takes the sentence and the voice as a query string
- * (`AI_UTILIZE_BLOCK.tts.read`) and answers with the audio, which needs no cors
- * headers to play from an `<audio>` element. A run that cannot reach the site
- * falls back to the browser's own synthesis, which has neither those voices nor,
- * on many machines, a korean one at all.
- */
+// Use Entry's TTS audio when available, with browser speech synthesis as a fallback.
 export class EntryTtsEngine implements SpeechEngine {
   private readonly fallback = new SpeechSynthesisEngine();
   private readonly playing = new Set<Reading>();
 
   private address(text: string, voice: VoiceProps): string {
-    // `Common.toQueryString`: the joined pairs go through `encodeURI` as one
-    // string, so `&pitch=2` written in the sentence is a parameter of its own.
+    // Match Entry's encodeURI of the whole query; ampersands in text remain query separators.
     const query = encodeURI(Object.entries({
       text,
       speaker: voice.speaker || 'kyuri',
@@ -422,7 +365,6 @@ export class EntryTtsEngine implements SpeechEngine {
       pitch: String(voice.pitch || 0),
       volume: String(voice.volume ?? 1),
     }).map(([key, value]) => `${key}=${value}`).join('&'));
-    // Same origin on the site itself; elsewhere the reading comes from there.
     const here = (globalThis as { location?: Location }).location?.origin;
     return `${here === TTS_ORIGIN ? '' : TTS_ORIGIN}${TTS_PATH}?${query}`;
   }
@@ -439,7 +381,6 @@ export class EntryTtsEngine implements SpeechEngine {
     await this.fallback.speak(message, voice);
   }
 
-  /** Whether the reading was heard out; false where it never started. */
   private play(audio: HTMLAudioElement, voice: VoiceProps): Promise<boolean> {
     audio.volume = Math.max(0, Math.min(1, voice.volume ?? 1));
     return new Promise<boolean>((resolve) => {
@@ -452,7 +393,7 @@ export class EntryTtsEngine implements SpeechEngine {
         this.playing.delete(reading);
         resolve(played);
       };
-      // Stopping the work ends the wait as surely as the reading finishing does.
+      // Stopping the work must end the TTS wait too.
       const reading: Reading = { audio, end: () => finish(true) };
       audio.addEventListener('ended', () => finish(true));
       audio.addEventListener('error', () => finish(false));

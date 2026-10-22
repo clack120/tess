@@ -1,10 +1,3 @@
-/**
- * @fileoverview 파일 목록을 zip 한 덩어리로 묶습니다 (store-and-deflate).
- *
- * 폴더가 아니라 **메모리에 든 것**을 묶으므로, 내보내기가 만든 페이지·작품·에셋을
- * 디스크에 한 번 펼치지 않고 그대로 담을 수 있습니다. 확장 묶기(`pack.ts`)는 폴더를
- * 훑어 이 함수에 넘깁니다.
- */
 import zlib from 'node:zlib';
 
 const CRC_TABLE = (() => {
@@ -27,12 +20,11 @@ export function crc32(bytes: Buffer | Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-/** 1980-01-01 in the DOS fields zip uses; month and day 0 are not valid there. */
+// DOS dates require a nonzero month and day; use 1980-01-01.
 const DOS_DATE = (1 << 5) | 1;
 
-/** One file on its way into the archive. */
 export interface ZipFile {
-  /** Path inside the archive, with `/` separators and no leading slash. */
+  // Use forward slashes and omit the leading slash in archive paths.
   name: string;
   data: Buffer | Uint8Array | string;
 }
@@ -49,10 +41,10 @@ function localHeader(entry: Entry): Buffer {
   const name = Buffer.from(entry.name, 'utf-8');
   const head = Buffer.alloc(30);
   head.writeUInt32LE(0x04034b50, 0);
-  head.writeUInt16LE(20, 4); // version needed
-  head.writeUInt16LE(0x0800, 6); // utf-8 names
-  head.writeUInt16LE(8, 8); // deflate
-  head.writeUInt16LE(0, 10); // time
+  head.writeUInt16LE(20, 4); // Required ZIP version.
+  head.writeUInt16LE(0x0800, 6); // UTF-8 filenames.
+  head.writeUInt16LE(8, 8); // Deflate compression.
+  head.writeUInt16LE(0, 10); // Modification time.
   head.writeUInt16LE(DOS_DATE, 12);
   head.writeUInt32LE(entry.crc, 14);
   head.writeUInt32LE(entry.deflated.length, 18);
@@ -65,11 +57,11 @@ function centralHeader(entry: Entry): Buffer {
   const name = Buffer.from(entry.name, 'utf-8');
   const head = Buffer.alloc(46);
   head.writeUInt32LE(0x02014b50, 0);
-  head.writeUInt16LE(20, 4); // version made by
-  head.writeUInt16LE(20, 6); // version needed
+  head.writeUInt16LE(20, 4); // ZIP creator version.
+  head.writeUInt16LE(20, 6); // Required ZIP version.
   head.writeUInt16LE(0x0800, 8);
   head.writeUInt16LE(8, 10);
-  head.writeUInt16LE(0, 12); // time
+  head.writeUInt16LE(0, 12); // Modification time.
   head.writeUInt16LE(DOS_DATE, 14);
   head.writeUInt32LE(entry.crc, 16);
   head.writeUInt32LE(entry.deflated.length, 20);
@@ -79,7 +71,6 @@ function centralHeader(entry: Entry): Buffer {
   return Buffer.concat([head, name]);
 }
 
-/** Packs the files into one archive, in the order they are given. */
 export function zipFiles(files: ZipFile[]): Buffer {
   const entries: Entry[] = [];
   const parts: Buffer[] = [];

@@ -1,19 +1,4 @@
-/**
- * @fileoverview 프레임을 넘기지 않는 숫자 함수를 골라 전용 자바스크립트로 옮깁니다.
- *
- * 엔트리의 `빠른 반복` 관용구 — 반복 블록 대신 함수를 두 배씩 불러 한 프레임 안에서
- * 수천 번을 도는 모양 — 은 프레임 경계가 없는 순수 숫자 코드입니다. 그런 함수는
- * 제너레이터로 둘 이유가 없으므로, 여기서 호출 그래프를 훑어 조건에 맞는 함수만
- * 뽑아 하나의 커널 모듈로 내립니다.
- *
- * 고를 수 있는 조건은 네 가지입니다.
- *
- * 1. 쓰는 블록이 아래 `statement`·`value` 가 아는 것뿐일 것.
- * 2. 읽고 쓰는 변수·리스트가 전역이고, 슬라이드·공유·실시간이 아니며, 담긴 값이
- *    전부 숫자일 것.
- * 3. 부르는 함수도 모두 같은 조건을 만족할 것 (고정점으로 접는다).
- * 4. 호출 그래프에 순환이 없을 것 — 깊이가 컴파일 때 정해져야 한다.
- */
+// Compile only frameless numeric call trees with safe data and no call cycles.
 import {
   collectParams,
   findFunctionDefine,
@@ -26,13 +11,12 @@ import type { Variable } from '../runtime/model.ts';
 import { isNumber, parseNumber } from '../runtime/cast.ts';
 import { scalarPlaces } from './values.ts';
 
-/** Slot 0 carries the flag that makes the bridge throw the run away. */
+// Slot zero signals that the bridge must discard the kernel run.
 export const BAIL_SLOT = 0;
 
-/** Where variable data starts, in f64 slots. */
+// Variable data starts at this Float64 offset.
 const FIRST_SLOT = 1;
 
-/** The javascript forms the emitted code is written with. */
 const JS = {
   pick: (cond: string, left: string, right: string) => `(${cond} ? ${left} : ${right})`,
   not: (value: string) => `(!(${value}))`,
@@ -58,22 +42,17 @@ const JS = {
     `${bodies.join('\n')}\nreturn { ${roots.join(', ')} };\n`,
 };
 
-/** A call to another kernel function, which may not be made twice. */
 const CALLS = /\bk\d+\(/;
 
-/** `calc_operation` names whose answer is always a whole number. */
 const WHOLE_OPS = new Set(['floor', 'ceil', 'round', 'factorial']);
 
-/** Counted tails stop here. */
 const DECIMAL_CAP = 21;
 
-/** `calc_operation` operator names in the order `math_op` numbers them. */
 const MATH_OPS = [
   'square', 'factorial', 'root', 'log', 'ln', 'asin', 'acos', 'atan',
   'sin', 'cos', 'tan', 'unnatural', 'abs', 'floor', 'ceil', 'round',
 ];
 
-/** How a variable or list is laid out in the shared region. */
 export interface KernelSlot {
   /** Index into the project's variable table. */
   variable: number;
@@ -145,7 +124,6 @@ interface KValue {
   tail?: number;
 }
 
-/** Everything one pass over a function body learns about it. */
 interface Scan {
   ok: boolean;
   reason: string;
@@ -172,12 +150,10 @@ function text(value: unknown): string {
   }
 }
 
-/** A number literal. Only finite values reach this. */
 function double(value: number): string {
   return String(value);
 }
 
-/** The text a literal slot holds, or null when the slot is a block. */
 function literalText(param: unknown): string | null {
   if (isBlock(param)) {
     return param.type === 'number' || param.type === 'text' ? text(param.params[0] ?? '') : null;
@@ -198,38 +174,21 @@ function literalValue(param: unknown): string | number | boolean | undefined {
   return typeof param === 'number' || typeof param === 'string' || typeof param === 'boolean' ? param : undefined;
 }
 
-/** The kernel can only carry finite values, even when Entry accepts their text. */
+// The kernel can carry only finite numbers, even when Entry accepts their text.
 function numeric(value: unknown): boolean {
   return isNumber(value) && Number.isFinite(Number(value));
 }
 
-/**
- * Which rule the slot a literal sits in reads it by. Entry converts a slot's
- * text differently depending on the block that holds it, and a literal is the
- * only place the kernel can tell the difference — every other value it carries
- * is already a number.
- *
- * - `num`   `Entry.Scope.getNumberValue` — `parseFloat`, and 0 for the rest.
- * - `raw`   kept with its original type and decimal formatting.
- * - `cmp`   `comparable` — read as a number when the text parses as one.
- * - `bool`  `getBooleanValue` — text that is not a number reads as true.
- * - `plainBool` `andOf`/`orOf` — JavaScript truthiness, so text "0" is true.
- * - `plus`  `calc_basic` PLUS, which joins unless both sides are numbers.
- * - `index` `Entry.getListRealIndex`, where the three keywords are not numbers.
- */
+// Read literals using their parent slot's conversion rules; raw, boolean, PLUS, and index rules differ.
 type Slot = 'num' | 'raw' | 'cmp' | 'bool' | 'plainBool' | 'plus' | 'index';
 
 const LIST_KEYWORDS = new Set(['FIRST', 'LAST', 'RANDOM']);
 
-/**
- * Whether a value is a judgement as entry stores one: the boolean itself. A
- * list of them is carried as 1 and 0 and written back as booleans.
- */
+// Carry stored booleans as 1 or 0 and restore their boolean type when writing back.
 export function judged(value: unknown): boolean {
   return typeof value === 'boolean';
 }
 
-/** Whether a value prints back as the text it is stored as. */
 export function canonical(value: unknown): boolean {
   if (typeof value === 'number') {
     return Number.isFinite(value);
@@ -237,10 +196,6 @@ export function canonical(value: unknown): boolean {
   return numeric(value) && String(Number(value)) === value;
 }
 
-/**
- * Digits after the decimal point in a number's shortest form, the way
- * `cast.decimals` counts them. Only literals reach this, once, at compile time.
- */
 function tailOf(value: number): number {
   if (Number.isInteger(value)) {
     return 0;
@@ -257,18 +212,13 @@ function tailOf(value: number): number {
   return Math.min(Math.max(0, fraction - Number(source.slice(exponent + 1))), DECIMAL_CAP);
 }
 
-/** `maxFloatPoint` for one value — digits after the dot of its text, capped. */
 function floatPoint(value: string | number): number {
   const source = String(value);
   const dot = source.indexOf('.');
   return dot === -1 ? 0 : Math.min(source.length - dot - 1, 20);
 }
 
-/**
- * Walks the work's functions and writes the kernel module for the ones that
- * can run in it. A plan with no roots means nothing qualified; `rejected`
- * still says why, which is what `tessvm check` reports.
- */
+// Keep rejection reasons even when no function qualifies, so check can explain them.
 export function planKernel(
   objects: Array<{ script: string | RawBlock[][] }>,
   functions: FunctionEntry[],
@@ -289,32 +239,23 @@ export function planKernel(
   const reads = new Set<number>();
   const writes = new Set<number>();
   const changed = new Set<number>();
-  /** Lists the kernel fills with judgements, learned before anything is judged. */
+  // Learn which lists hold booleans before deciding whether their reads are safe.
   const judgements = new Set<number>();
-  /** True while the first walk is only there to learn what each list holds. */
   let learning = false;
-  /** Which of the two targets the current walk is writing. */
-  /** Filled after the layout is known; the first pass only collects names. */
+  // Delay offsets until the first pass has collected all variables.
   let slotOf: (index: number) => KernelSlot | undefined = () => undefined;
 
-  // -------------------------------------------------------------------------
-  //  Variable eligibility
-  // -------------------------------------------------------------------------
   function usable(index: number): boolean {
     const variable = variables[index];
     if (!variable || variable.objectId || variable.isSlide || variable.isStored) {
       return false;
     }
     if (variable.isList) {
-      // A list comes back as numbers, so its text has to be what those print
-      // as — otherwise a run would rewrite "0.50" as 0.5 on its way out. A list
-      // of judgements is the other shape a work fills one with; what it holds
-      // right now is checked again on the way in.
+      // List values must survive numeric conversion without losing text formatting or boolean type.
       return variable.array.every((item) => canonical(item.data)) ||
         variable.array.every((item) => judged(item.data));
     }
-    // A variable keeps its own text: the places it was written with cross over
-    // with the value and `toFixed` writes the same thing again.
+    // Preserve each variable's decimal places so toFixed restores its original text.
     return numeric(variable.value);
   }
 
@@ -326,21 +267,16 @@ export function planKernel(
     return index;
   }
 
-  // -------------------------------------------------------------------------
-  //  Emitting
-  // -------------------------------------------------------------------------
   class Fail extends Error {}
 
   function fail(why: string): never {
     throw new Fail(why);
   }
 
-  /** The state one function's emission carries. */
   let params = new Map<string, number>();
   let locals = new Map<string, string>();
   let calls = new Set<number>();
 
-  /** What a value can tell the arithmetic about its own tail. */
   function tailArgument(value: KValue): string {
     if (value.tail !== undefined) {
       return String(value.tail);
@@ -362,12 +298,11 @@ export function planKernel(
     return value.kind === 'bool' ? value.code : `truthy(${value.code})`;
   }
 
-  /** `C.andOf`/`C.orOf` read their sides with `Boolean`, where `NaN` is false. */
+  // Boolean conversion treats NaN as false.
   function asPlainBool(value: KValue): string {
     return value.kind === 'bool' ? value.code : `js_bool(${value.code})`;
   }
 
-  /** A literal slot, read the way the block holding it would read it. */
   function constant(input: unknown, slot: Slot): KValue {
     const raw = text(input);
     switch (slot) {
@@ -399,14 +334,14 @@ export function planKernel(
         return { code: double(n), kind: 'num', tail: tailOf(n), clean: true };
       }
       case 'plus': {
-        // A side that is not a number makes PLUS join the two as text.
+        // PLUS concatenates when either raw operand is not a number.
         if (!numeric(raw)) {
           fail(`literal ${JSON.stringify(raw)}`);
         }
         return { code: double(Number(raw)), kind: 'num', tail: tailOf(Number(raw)), clean: true };
       }
       default: {
-        // Kept as it is, so the number has to print back as the same text.
+        // Accept raw numbers only when printing them preserves the stored text.
         if (!numeric(raw) || String(Number(raw)) !== raw) {
           fail(`literal ${JSON.stringify(raw)}`);
         }
@@ -415,11 +350,7 @@ export function planKernel(
     }
   }
 
-  /**
-   * A value slot, read the way the block holding it reads it. A number slot is
-   * `parseFloat(…) || 0`, which is where `NaN` and `-0` fall to zero — without
-   * that a `0 / 0` spreads through the work instead of stopping at the slot.
-   */
+  // Match Entry's parseFloat fallback so NaN and negative zero become zero at number slots.
   function value(param: unknown, slot: Slot = 'num'): KValue {
     const read = readValue(param, slot);
     if (slot !== 'num' || read.clean) {
@@ -462,8 +393,6 @@ export function planKernel(
         return {
           code: `math_op(${asNum(value(p[1], 'num'))}, ${op === -1 ? MATH_OPS.length - 1 : op})`,
           kind: 'num',
-          // These four always land on a whole number, however long the tail
-          // they were handed was.
           tail: WHOLE_OPS.has(name) || op === -1 ? 0 : undefined,
         };
       }
@@ -526,16 +455,13 @@ export function planKernel(
           if (slot === 'raw' || slot === 'plainBool') {
             return { code: `raw_item(${at?.base ?? 0}, ${at?.length ?? 0}, ${where})`, kind: 'raw' };
           }
-          // The index is read twice, so it may not be something that does
-          // anything — every kernel expression but a call to another kernel
-          // function is safe that way.
+          // The index is read twice, so reject function calls and other side effects there.
           const tailCode = at && at.tails >= 0 && !CALLS.test(where)
             ? `ld_tail(${at.tails}, ${at.length}, ${where})`
             : undefined;
           return { code: slot === 'num' || slot === 'plus' ? `(${item} || 0)` : item, kind: 'num', tailCode, clean: true };
         }
-        // A stored judgement only reads back as one. Anywhere else entry would
-        // have `parseFloat(true)`, which is not 1, so the list stays behind.
+        // Boolean list reads must stay boolean; Entry's number conversion would otherwise differ.
         if (slot !== 'bool' && slot !== 'raw' && slot !== 'plainBool') {
           fail(`list ${text(p[1])} holds judgements`);
         }
@@ -580,7 +506,7 @@ export function planKernel(
     return binary(text(block.params[1] ?? 'PLUS'), block.params[0], block.params[2]);
   }
 
-  /** Numeric operands use decimal arithmetic; raw operands retain Entry's PLUS rules. */
+  // Use decimal arithmetic for numbers and Entry's PLUS rules for raw values.
   function binary(operator: string, left: unknown, right: unknown): KValue {
     const slot: Slot = operator === 'PLUS' ? 'plus' : 'num';
     const leftValue = value(left, slot);
@@ -603,7 +529,6 @@ export function planKernel(
     }
   }
 
-  /** Whether the slot reads an item of a list the kernel fills with judgements. */
   function readsJudgement(param: unknown): boolean {
     if (!isBlock(param) || param.type !== 'value_of_index_from_list') {
       return false;
@@ -613,8 +538,7 @@ export function planKernel(
   }
 
   function compare(operator: string, left: unknown, right: unknown): KValue {
-    // A stored judgement compared as a value follows entry's rules for
-    // booleans, which the numbers here do not carry.
+    // Reject raw comparisons of stored booleans because the numeric kernel loses their type.
     if (readsJudgement(left) || readsJudgement(right)) {
       fail('judgement compared');
     }
@@ -631,11 +555,10 @@ export function planKernel(
     return { code: `(${a} ${table[operator] ?? '=='} ${b})`, kind: 'bool' };
   }
 
-  /** Entry reads both sides before combining them, so neither is skipped. */
+  // Entry evaluates both sides before combining them.
   function combine(operator: string, left: unknown, right: unknown): KValue {
     for (const side of [left, right]) {
-      // `Boolean("0")` is true while `Boolean(0)` is false, so a literal here
-      // cannot be folded into a number.
+      // Preserve literal truthiness because Boolean("0") differs from Boolean(0).
       if (!isBlock(side) || side.type === 'number' || side.type === 'text') {
         fail('literal in and/or');
       }
@@ -655,8 +578,7 @@ export function planKernel(
       fail(`${block.type} has no value`);
     }
     calls.add(target);
-    // Entry hands the body every slot of the call block in order, and the body
-    // reads them by declaration index, so the two line up position by position.
+    // Keep call slots aligned with declaration indices.
     const args = collectParams(define?.params[0]).map((_, at) =>
       value(block.params[at], 'raw').code);
     return `k${target}(${args.join(', ')})`;
@@ -696,8 +618,7 @@ export function planKernel(
         writes.add(index);
         changed.add(index);
         const slot = slotOf(index);
-        // Entry stores what `toFixed` wrote, so the decimals it used decide the
-        // next change as well; the kernel carries them in their own slot.
+        // Carry toFixed decimal places separately because they affect the next variable change.
         const raw = literalText(p[1]);
         const increment = value(p[1], 'raw');
         const literal = raw !== null && numeric(raw);
@@ -731,8 +652,7 @@ export function planKernel(
             judgements.add(index);
           }
         } else if ((stored.kind === 'bool') !== judgements.has(index)) {
-          // Numbers and judgements in the same list have no one shape to cross
-          // back as, so the kernel leaves that list alone.
+          // Reject mixed number and boolean lists because their original types cannot be restored reliably.
           fail(`list ${text(p[0])} holds both`);
         }
         if (typeof stored.constant === 'string' && canonical(stored.constant)) {
@@ -742,7 +662,7 @@ export function planKernel(
           const where = listIndex(p[1]);
           if (isBlock(p[2]) && p[2].type === 'get_variable' && !CALLS.test(where)) {
             const source = slotOf(refer(p[2].params[0])!);
-            // The index must be pure before consulting the source's stored type.
+            // Require a pure index before inspecting the stored value type.
             return `${indent}if (ld(${source?.places ?? 0}) === -1) {\n` +
               `${indent}  st_item(${at?.base ?? 0}, ${at?.length ?? 0}, ${where}, ld(${source?.base ?? 0}));\n` +
               `${indent}} else {\n` +
@@ -787,7 +707,6 @@ export function planKernel(
     return out || `${indent}${JS.end === ';' ? '' : '()'}\n`;
   }
 
-  /** Emits one function, or records why it stayed behind. */
   function emit(fn: FunctionEntry, index: number): { scan: Scan; body: string | null } {
     const content = parseScript(fn.content);
     const stackBlocks = findFunctionDefine(content);
@@ -830,11 +749,7 @@ export function planKernel(
     }
   }
 
-  // -------------------------------------------------------------------------
-  //  Pass zero — what each list is filled with
-  // -------------------------------------------------------------------------
-  // A list read can come before the write that says what the list holds, so the
-  // shapes are learned on a walk of their own and only then relied on.
+  // Learn list shapes in a separate pass because reads may precede writes.
   learning = true;
   functions.forEach((fn, index) => {
     emit(fn, index);
@@ -844,9 +759,6 @@ export function planKernel(
   writes.clear();
   changed.clear();
 
-  // -------------------------------------------------------------------------
-  //  Pass one — who qualifies, and what they touch
-  // -------------------------------------------------------------------------
   functions.forEach((fn, index) => {
     const result = emit(fn, index);
     scans[index] = result.scan;
@@ -856,7 +768,7 @@ export function planKernel(
     }
   });
 
-  // A function is only as good as what it calls, and a cycle has no fixed depth.
+  // Reject calls to unsupported functions and cycles with no fixed depth.
   let settled = false;
   while (!settled) {
     settled = true;
@@ -907,16 +819,9 @@ export function planKernel(
     };
   }
 
-  // -------------------------------------------------------------------------
-  //  Pass two — lay the data out, then emit for real
-  // -------------------------------------------------------------------------
-  // The first pass walked every function, including the ones that fell out, so
-  // it knows about variables no kernel code ever touches. Walking only the ones
-  // that stayed keeps those out of the data the run copies back and forth —
-  // and out of the numbers-only rule, which they need not keep.
+  // Lay out only accepted functions so rejected code does not constrain or copy unrelated data.
   const settledKeep = scans.map((scan) => scan.ok);
   changed.clear();
-  // Each function's own reads and writes, for the roots that reach it.
   const own = new Map<number, { reads: Set<number>; writes: Set<number> }>();
   functions.forEach((fn, index) => {
     if (settledKeep[index]) {
@@ -970,7 +875,7 @@ export function planKernel(
     }
     const result = emit(fn, index);
     if (!result.scan.ok || !result.body) {
-      // The layout pass cannot turn a good function bad; if it did, drop it.
+      // Drop functions if the final layout unexpectedly makes emission fail.
       keep[index] = false;
       rejected.set(fn.id, result.scan.reason || 'layout');
       return;
@@ -978,11 +883,7 @@ export function planKernel(
     emitted.push(result.body);
   });
 
-  // -------------------------------------------------------------------------
-  //  Roots — the ones something outside the kernel calls
-  // -------------------------------------------------------------------------
-  // A call the kernel makes itself is a plain function call; only a call from
-  // outside has to copy the data across, so only those become entry points.
+  // Only external callers need entry points because internal calls do not cross the data bridge.
   const outside = new Set<number>();
   function noteCalls(node: unknown): void {
     if (Array.isArray(node)) {

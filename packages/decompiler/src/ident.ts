@@ -2,39 +2,17 @@ import { BUILTIN_NAMES } from '@tess/core';
 import { UNUSABLE_AS_NAME } from '@tess/parser';
 import type { DecompileContext, ResourceInfo } from './types.ts';
 
-/**
- * 식별자 시작 문자를 검사하는 정규 표현식입니다. 유니코드 문자(한글 등)와 언더스코어(`_`)를 허용합니다.
- *
- * @example
- * IDENT_START.test('가'); // true
- * IDENT_START.test('1'); // false
- */
 const IDENT_START = /[\p{L}_]/u;
-// Matches the lexer: only ASCII digits, so `¼`/`²` become `_`.
+// Match the lexer: only ASCII digits belong in identifiers.
 const IDENT_PART = /[\p{L}0-9_]/u;
 
-/**
- * 주어진 임의의 문자열을 안전한 Tess 식별자로 변환합니다. 
- * 동일한 네임스페이스(`usedNames`) 내에서 이름이 겹칠 경우 뒤에 숫자를 붙여 구분합니다.
- *
- * @param raw - 변환할 원본 문자열
- * @param usedNames - 중복 검사를 위한 기존 식별자 목록
- * @param fallback - 유효한 문자가 없을 때 사용할 기본 접두사
- * @returns 변환된 안전한 식별자 문자열
- *
- * @example
- * const used = new Set(['my_var']);
- * safeIdentifier('my var!', used, 'var'); // "my_var_2"
- * safeIdentifier('123', used, 'var'); // "var_123"
- */
 export function safeIdentifier(raw: unknown, usedNames: Set<string>, fallback = 'item'): string {
   let cleaned = '';
   for (const ch of String(raw ?? '')) cleaned += IDENT_PART.test(ch) ? ch : '_';
   cleaned = cleaned.replace(/_+/g, '_').replace(/^_+|_+$/g, '');
   if (!cleaned || !IDENT_START.test(cleaned[0]!)) cleaned = `${fallback}${cleaned ? `_${cleaned}` : ''}`;
   cleaned = cleaned.slice(0, 40) || fallback;
-  // 예약어와 내장 이름은 뒤에 `_` 를 붙여 비껴 간다. 내장 이름을 그대로 쓰면
-  // 선언이 그 이름을 가려서 `x = x` 처럼 서로 다른 두 값이 한 글자가 된다.
+  // Avoid reserved and built-in names so renamed declarations do not hide other values.
   if (UNUSABLE_AS_NAME.has(cleaned) || BUILTIN_NAMES.has(cleaned)) cleaned = `${cleaned}_`;
 
   let candidate = cleaned;
@@ -47,11 +25,7 @@ export function safeIdentifier(raw: unknown, usedNames: Set<string>, fallback = 
   return candidate;
 }
 
-/**
- * The characters that end a line for the lexer. A string literal may hold none
- * of them and a `#` comment stops at the first one, so both escape all four —
- * `\u2028`/`\u2029` included, which entry names are free to carry.
- */
+// Escape all four line endings because Entry names may contain Unicode line separators.
 const LINE_BREAK = /[\n\r\u2028\u2029]/g;
 
 const STRING_ESCAPE: Record<string, string> = {
@@ -61,7 +35,6 @@ const STRING_ESCAPE: Record<string, string> = {
   '\u2029': '\\u2029',
 };
 
-/** Tess 문자열 리터럴로 안전하게 넣는다 (따옴표 · 역슬래시 · 줄바꿈 이스케이프) */
 export function tessString(value: unknown): string {
   const escaped = String(value)
     .replaceAll('\\', '\\\\')
@@ -71,35 +44,25 @@ export function tessString(value: unknown): string {
   return `"${escaped}"`;
 }
 
-/**
- * One `# …` line. The text is the work's own, so a line break inside it would
- * end the comment and leave the rest standing as Tess code.
- */
+// Escape line breaks so project text cannot end a comment and become Tess code.
 export function tessComment(text: unknown): string {
   return `# ${String(text).replace(LINE_BREAK, ' ')}`.trimEnd();
 }
 
-/** The same, for text that is meant to keep its own lines. */
 export function tessCommentLines(text: unknown): string[] {
   return String(text).split(LINE_BREAK).map((line) => tessComment(line));
 }
 
-/**
- * The ` as "..."` clause that carries an Entry name the identifier cannot spell.
- * Without it a renamed resource breaks every runtime lookup by name.
- */
+// Keep the Entry name with as when the Tess identifier differs; runtime lookups need it.
 export function displayNamePart(identifier: string, entryName: unknown): string {
   const name = String(entryName ?? '');
   return name && name !== identifier ? ` as ${tessString(name)}` : '';
 }
 
-/**
- * Tess 가 숫자로 읽는 글자 모양 (`numberLiteral` = `digit+ ("." digit+)?`).
- * 지수 표기(`1e-10`)와 `+`·앞자리 `0` 은 이 모양이 아니다.
- */
+// Tess numeric literals exclude exponent notation, leading plus signs, and leading zeros.
 const PLAIN_DECIMAL = /^-?\d+(\.\d+)?$/;
 
-/** Rewrites exponent notation as the plain decimal Tess can lex. */
+// Expand exponent notation into a decimal literal Tess can parse.
 function expandExponent(text: string): string {
   const parts = /^(-?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(text);
   if (!parts) return text;
@@ -111,42 +74,24 @@ function expandExponent(text: string): string {
   return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
 }
 
-/** 숫자를 Tess 소스에 그대로 적을 수 있는 형태로 */
 export function tessNumber(value: unknown): string {
   if (!Number.isFinite(value)) return '0';
   return expandExponent(String(value));
 }
 
-/**
- * 다시 적어도 글자 하나 안 바뀌는 숫자인지 ("1.0"·"01"·" 1" 은 아니다).
- *
- * 엔트리의 `number` 블록과 `text` 블록은 둘 다 적어 둔 글자를 그대로 돌려주는 같은
- * 원시 블록이라(block_entry.js: 둘 다 `script.getField(...)` 하나뿐이다), 값이 글자로
- * 같기만 하면 어느 쪽으로 옮겨도 실행 결과가 똑같다. 그래서 이 검사를 통과하는
- * 리터럴만 숫자로 옮긴다.
- */
+// Use a number only when converting it back preserves every character.
 export function isExactNumber(literal: string): boolean {
   const value = Number(literal);
-  // "NaN" and "Infinity" round-trip through Number as text, but Tess has no
-  // literal for either, so they have to stay strings. So does exponent notation
-  // ("1e-10"): it survives Number but Tess has no literal for it either.
+  // NaN, Infinity, and exponent notation must stay strings because Tess has no matching literals.
   return literal !== '' && Number.isFinite(value)
     && String(value) === literal && PLAIN_DECIMAL.test(literal);
 }
 
-/**
- * Whether the function currently being written belongs to the object that owns
- * this costume/sound. Inside such a function the resource name is unambiguous,
- * so it can be written by name instead of by raw entry id (index.ts).
- */
+// Resource names are unambiguous inside a function owned by that object.
 export function ownsResource(ctx: DecompileContext, info: ResourceInfo | undefined): boolean {
   return Boolean(ctx.functionOwnerId) && info?.owner?.id === ctx.functionOwnerId;
 }
 
-/**
- * Entry stores every field value as a string; turn one back into the Tess
- * literal that compiles to the same value.
- */
 export function tessLiteral(value: unknown): string {
   if (typeof value === 'number') return tessNumber(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -155,7 +100,7 @@ export function tessLiteral(value: unknown): string {
   return tessString(text);
 }
 
-/** `target.push(...items)` without the engine's argument limit, which a large work passes. */
+// Push items separately to avoid the engine's argument limit on large projects.
 export function append<T>(target: T[], items: Iterable<T>): void {
   for (const item of items) target.push(item);
 }

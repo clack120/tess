@@ -1,4 +1,4 @@
-# spec 14 — 함수 정의 · 호출 · 스코프
+# Function declarations and calls.
 var global_multiplier = 2
 
 function add(a, b):
@@ -23,8 +23,6 @@ scene "main":
   object "hero":
     var local_power = 50
 
-    # 오브젝트 안의 함수도 전역 변수만 참조할 수 있다.
-    # 오브젝트 로컬 변수가 필요하면 매개변수로 넘긴다.
     function get_damage(base_dmg):
       return base_dmg * global_multiplier
     end

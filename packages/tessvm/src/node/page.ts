@@ -1,10 +1,3 @@
-/**
- * @fileoverview 실행 페이지의 HTML 을 만듭니다.
- *
- * 번들러 없이 브라우저의 ES 모듈을 그대로 씁니다 — 서버가 `.ts` 에서 타입만 지워
- * 내보내고, 임포트 맵이 `pixi.js` 를 실제 파일로 이어 줍니다. 글꼴은 엔트리가 쓰는
- * 것과 같은 CSS 를 걸어야 글상자가 같은 모양으로 그려집니다.
- */
 import { DEBUG_PANEL_STYLE, DEBUG_UI_PATH, ENTRY_FONT_STYLES } from '@tess/player';
 import { ASK_FIELD_STYLE } from '../web/ask-style.ts';
 import { CHART_WINDOW_STYLE } from '../web/chart-view.ts';
@@ -13,14 +6,13 @@ import { EXTRAS_DIALOG_STYLE } from '../web/extras.ts';
 export interface PageOptions {
   name: string;
   quality: number;
-  /** Leave undefined to follow the project's own `speed`. */
+  // Leave unset to use the project's speed.
   fps?: number;
   stats: boolean;
   reload: boolean;
   autoStart: boolean;
   boost: boolean;
   svg: boolean;
-  /** Off leaves every function on the block runner's own path. */
   kernel: boolean;
   stageWidth: number;
   stageHeight: number;
@@ -53,18 +45,13 @@ select, input[type=number] {
   border-radius: 6px; padding: 3px 6px;
 }
 input[type=number] { width: 64px; }
-/* The stage host fills the area on its own (place-items stays at stretch), so
-   its size never follows the canvas it holds — a canvas-sized host would feed
-   its own size back into the ResizeObserver that fits the canvas. The right
-   padding is the room the debug panel takes; the same observer re-fits the
-   canvas when the panel opens. */
+/* Keep host size independent of the canvas to avoid ResizeObserver feedback loops. */
 main {
   flex: 1; display: grid; min-height: 0;
   padding: 12px calc(12px + var(--debug-panel-width)) 34px 12px;
   transition: padding-right .15s ease-out;
 }
 #stage { min-width: 0; min-height: 0; position: relative; }
-/* The work waits behind this until it is started, the way entry's player does. */
 #tessvm-cover {
   position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 12px; background: #00000059;
@@ -97,7 +84,6 @@ ${EXTRAS_DIALOG_STYLE}
 }
 ${DEBUG_PANEL_STYLE}
 
-/* The panel is light unless the browser asks for dark; this page is always dark. */
 #debug-panel { background: #1c1f26; color: #e8eaee; }
 .debug-toggle-btn { border-color: #3a3f47; background: #23272e; }
 .debug-toggle-btn:hover { background: #2c313a; }
@@ -166,7 +152,7 @@ ${fonts}
 <aside id="debug-panel" aria-hidden="true"></aside>
 
 <script>
-// The panel is a module and loads late; errors before that wait here.
+// Buffer early errors until the debug module loads.
 (function () {
   const pending = [];
   let sink = null;
@@ -182,14 +168,13 @@ ${fonts}
       time: Date.now(),
     };
     if (sink) sink(item); else pending.push(item);
-    // Send it to the server too, so it shows in the terminal that started the run.
     fetch('/__log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(item),
     }).catch(() => {});
   };
-  // Called before the panel is up, so they start as no-ops.
+  // Use no-op hooks until the panel loads.
   window.tessLayoutCanvas = () => {};
   window.tessHighlightBlock = () => {};
   window.tessRenderProjectDebug = () => {};
@@ -208,8 +193,7 @@ function showError(message) {
   errorBox.style.display = 'block';
   errorBox.textContent = message;
 }
-// 'ResizeObserver loop …' is not an exception: the browser is saying it could not
-// deliver every notification this frame. Nothing breaks, so it stays in the console.
+// ResizeObserver delivery warnings are not exceptions; leave them in the console.
 const benign = (message) => /^ResizeObserver loop/.test(message);
 window.addEventListener('error', (event) => {
   if (benign(String(event.message))) { console.warn(event.message); return; }
@@ -221,9 +205,7 @@ window.addEventListener('unhandledrejection', (event) => {
   window.tessReportError('처리되지 않은 Promise 거부', event.reason);
 });
 
-// A script that throws goes to the panel's error tab, with its block highlighted,
-// and the work stops as entry stops it. The same error from the same block is
-// reported once.
+// Stop the work and report each failing block once in the debug panel.
 function reportVmErrors(handle, sourceMap) {
   const seen = new Set();
   handle.vm.onError = (error) => {
@@ -245,7 +227,7 @@ function reportVmErrors(handle, sourceMap) {
 }
 
 try {
-  // Fetched once here, shared by the runner and the debug panel.
+  // Fetch once and share the project between the runner and debug panel.
   const project = await (await fetch('/project.json')).json();
   const sourceMap = await fetch('/sourcemap.json').then((r) => r.json()).catch(() => ({}));
   window.tessSourceMap = sourceMap;
@@ -267,12 +249,9 @@ try {
     stageWidth: config.stageWidth,
     stageHeight: config.stageHeight,
     kernel: config.kernel,
-    // The run page serves the work off this machine, so there is nothing worth
-    // holding it for: the start button is up as soon as the runner is built and
-    // the files land while it waits to be pressed.
+    // Load local assets behind the start button instead of blocking player construction.
     waitForAssets: false,
   });
-  // From here the debug panel sees tessvm through this adapter.
   window.tessRuntime = makeVmRuntime(handle);
   window.tessPatchEnvironmentBlocks();
   window.tessLayoutCanvas();
@@ -282,12 +261,9 @@ try {
     event.preventDefault();
     handle.inspect();
   });
-  // One button carries both halves: it starts a stopped project, holds a running
-  // one, and resumes a held one.
   const runButton = runButtonEarly;
   runButton.disabled = false;
-  // Nothing runs until this is pressed, and nothing is waited for first — the
-  // files come in behind the button (waitForAssets is off on this page).
+  // Files load behind the start button because waitForAssets is disabled on this page.
   coverStart.disabled = false;
   coverStart.onclick = () => {
     handle.start();
@@ -308,7 +284,7 @@ try {
     handle.stop();
     showRunState();
   };
-  // The project can stop itself, so the label follows the vm rather than clicks.
+  // Read the button state from the VM because the work can stop itself.
   setInterval(showRunState, 100);
   showRunState();
 
@@ -351,11 +327,7 @@ const RELOAD_SCRIPT = `
 new EventSource('/__reload').onmessage = () => location.reload();
 `;
 
-/**
- * A value put inside a `<script>`. Html escaping does not apply in there, and a
- * `</script` in a string would end the block, so those characters leave as
- * escapes instead.
- */
+// Escape script terminators because HTML escaping cannot protect a JavaScript literal.
 function jsValue(value: unknown): string {
   return JSON.stringify(value ?? null)
     .replaceAll('<', '\\u003c')

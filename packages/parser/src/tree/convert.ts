@@ -1,17 +1,10 @@
-/**
- * @fileoverview tree-sitter syntax tree → the AST the Chevrotain visitor builds.
- *
- * Every function here mirrors a method of `parser/visitor.ts`; the two must
- * produce identical nodes, locations included (`test/tree-sitter.test.ts`
- * compares them over the example corpus).
- */
+// Match the Chevrotain AST exactly, including source positions.
 import { normalizeColor } from '@tess/core';
 import { decodeString } from '../parser/strings.ts';
 import type {
   BooleanNode, Expr, Identifier, Loc, NullaryStatementType, NumberNode, ProgramNode, Stmt, StringNode,
 } from '../ast.ts';
 
-/** The part of a web-tree-sitter node the converter reads. */
 export interface SyntaxNode {
   type: string;
   startIndex: number;
@@ -23,7 +16,6 @@ export interface SyntaxNode {
   childrenForFieldName(name: string): (SyntaxNode | null)[];
 }
 
-/** The part of a web-tree-sitter cursor `plainTree` reads. */
 export interface SyntaxCursor {
   readonly nodeTypeId: number;
   readonly currentFieldId: number;
@@ -34,14 +26,13 @@ export interface SyntaxCursor {
   gotoParent(): boolean;
 }
 
-/** The part of a web-tree-sitter language `plainTree` reads. */
 export interface SyntaxLanguage {
   readonly types: readonly (string | null | undefined)[];
   readonly fields: readonly (string | null | undefined)[];
   nodeTypeIsNamed(typeId: number): boolean;
 }
 
-/** A syntax node copied out of the wasm heap; reading it costs no boundary crossings. */
+// Copy nodes out of WASM so later reads avoid repeated boundary crossings.
 class PlainNode implements SyntaxNode {
   readonly children: PlainNode[] = [];
   readonly fieldNames: (string | null)[] = [];
@@ -79,10 +70,7 @@ class PlainNode implements SyntaxNode {
 
 const namedTypes = new WeakMap<SyntaxLanguage, boolean[]>();
 
-/**
- * Copies the tree under `cursor` in one walk. Positions are read on leaves
- * only; an inner node spans exactly its children.
- */
+// Read positions only on leaves because parent nodes span their children.
 export function plainTree(cursor: SyntaxCursor, language: SyntaxLanguage): SyntaxNode {
   let named = namedTypes.get(language);
   if (!named) {
@@ -129,7 +117,7 @@ let source = '';
 
 const text = (node: SyntaxNode) => source.slice(node.startIndex, node.endIndex);
 
-/** First and last real token under a node; comments tree-sitter tucks inside do not count. */
+// Ignore comments when finding a node's first and last tokens.
 function firstToken(node: SyntaxNode): SyntaxNode {
   if (!node.childCount) return node;
   for (let at = 0; at < node.childCount; at += 1) {
@@ -155,7 +143,6 @@ const field = (node: SyntaxNode, name: string) => node.childForFieldName(name);
 const fields = (node: SyntaxNode, name: string) => node.childrenForFieldName(name).filter((each): each is SyntaxNode => each !== null);
 const has = (node: SyntaxNode, name: string) => node.childForFieldName(name) !== null;
 
-/** Whether a keyword token appears among the node's direct children. */
 function hasToken(node: SyntaxNode, word: string): boolean {
   for (let at = 0; at < node.childCount; at += 1) if (node.child(at)!.type === word) return true;
   return false;
@@ -170,7 +157,6 @@ const numberNode = (node: SyntaxNode): NumberNode => {
 
 const identifier = (node: SyntaxNode): Identifier => ({ type: 'Identifier', name: text(node), loc: tokenLoc(node) });
 
-/** Converts a whole program. `root` must be free of errors. */
 export function programFromTree(root: SyntaxNode, input: string): ProgramNode {
   source = input;
   const body: AnyNode[] = [];
@@ -215,7 +201,6 @@ function item(node: SyntaxNode): AnyNode {
 
 const SCENE_MEMBERS = new Set(['object_decl', 'use_object_decl', 'use_decl', 'scene_name_decl']);
 
-/** Named children, comments left out. */
 function named(node: SyntaxNode): SyntaxNode[] {
   const out: SyntaxNode[] = [];
   for (let at = 0; at < node.childCount; at += 1) {
@@ -389,10 +374,6 @@ function eventHandler(node: SyntaxNode): AnyNode {
   return { type: 'Event', event: 'cloned', ...tail };
 }
 
-// ---------------------------------------------------------------------------
-//  Statements
-// ---------------------------------------------------------------------------
-
 function block(node: SyntaxNode | null): Stmt[] {
   if (!node) return [];
   return named(node).filter((child) => child.type === 'statement').map(statement);
@@ -560,10 +541,6 @@ function lvalue(node: SyntaxNode): AnyNode {
     loc: loc(node),
   };
 }
-
-// ---------------------------------------------------------------------------
-//  Expressions
-// ---------------------------------------------------------------------------
 
 function expr(node: SyntaxNode): Expr {
   switch (node.type) {

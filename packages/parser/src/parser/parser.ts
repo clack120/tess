@@ -1,10 +1,3 @@
-/**
- * @fileoverview Tess 구문 분석기 (Chevrotain 기반 문법)
- * 
- * 언어 명세서의 규칙을 일대일로 반영하되, 원활한 파싱을 위해 다음과 같이 조정되었습니다:
- * 1. 공통된 접두사를 가진 대체 규칙들은 선택적 꼬리를 갖는 하나의 규칙으로 병합되었습니다 (예: `say Expr (for Expr)?`).
- * 2. 순서가 중요한 선택 규칙의 경우 명시적인 게이트를 두어, PEG 파서처럼 처음 매칭되는 대안이 반드시 선택되도록 보장합니다.
- */
 import { CstParser, EOF, tokenLabel } from 'chevrotain';
 import type {
   CstNode, IParserErrorMessageProvider, IToken, ParserMethod, TokenType,
@@ -19,7 +12,6 @@ import {
 const idx = (tokenType: TokenType) => tokenType.tokenTypeIdx!;
 const idxSet = (...tokenTypes: TokenType[]) => new Set(tokenTypes.map(idx));
 
-/** Names that may take an initial value with `=` in an object body. */
 const PROPERTY_NAMES = new Set([
   'scale_x', 'scale_y', 'size',
   'text_content', 'text_bold', 'text_italic',
@@ -31,26 +23,20 @@ const PROPERTY_NAMES = new Set([
 
 const ASSIGN_OPERATOR_IDS = new Set(ASSIGN_OPERATORS.map(idx));
 
-/** Keywords that begin a statement form (`tokens.ts` holds the words). */
 const STATEMENT_LEADERS = idxSet(...[...STATEMENT_KEYWORDS].map((word) => kw[word]!));
 
-// Statements that are complete on their own. The grammar commits to these as
-// soon as it sees the keyword, so `stop = 5` is an error rather than an
-// assignment to a variable named `stop`.
+// Standalone commands win over assignments, so stop = 5 must fail.
 const STANDALONE_LEADERS = idxSet(...[...STANDALONE_STATEMENTS].map((word) => kw[word]));
 
-/** First set of Expr — what may legally begin an expression. */
 const EXPR_STARTERS = idxSet(
   LParen, Minus, kw.not, NumberLiteral, StringLiteral, kw.true, kw.false,
   ColorLiteral,
 );
 
-/** What the reader actually sees at the point the parse stopped. */
 const found = (token: IToken | undefined) => (!token || token.tokenTypeIdx === idx(EOF)
   ? '입력이 끝났습니다'
   : `'${token.image}' 이(가) 있습니다`);
 
-/** Messages the parser reports, in the language the rest of the tool speaks. */
 const errorMessageProvider: IParserErrorMessageProvider = {
   buildMismatchTokenMessage: ({ expected, actual }) => `${tokenLabel(expected)} 이(가) 와야 하는데 ${found(actual)}.`,
   buildNoViableAltMessage: ({ actual }) => `여기서 시작할 수 있는 문법이 없습니다 — ${found(actual[0])}.`,
@@ -58,11 +44,9 @@ const errorMessageProvider: IParserErrorMessageProvider = {
   buildNotAllInputParsedMessage: ({ firstRedundant }) => `입력의 끝이 와야 하는데 ${found(firstRedundant)}.`,
 };
 
-/** A grammar rule as `$.RULE` installs it — no arguments, one CST node out. */
 type Rule = ParserMethod<[], CstNode>;
 
 export class TessParser extends CstParser {
-  // Every rule below is installed by `$.RULE` in the constructor.
   declare readonly addExpr: Rule;
   declare readonly andExpr: Rule;
   declare readonly askStatement: Rule;
@@ -169,15 +153,11 @@ export class TessParser extends CstParser {
     });
     const $ = this;
 
-    // ========================================================================
-    //  Program and declarations
-    // ========================================================================
     $.RULE('program', () => {
       $.MANY({ GATE: () => $.startsTopLevelItem(), DEF: () => $.SUBRULE($.topLevelItem) });
     });
 
-    // `use` splices a file in place, so a fragment may hold only the members
-    // that belong at the position it is included from.
+    // Parse included fragments using the rules of their insertion scope.
     $.RULE('sceneFragment', () => {
       $.MANY({ GATE: () => !$.atBlockEnd(), DEF: () => $.SUBRULE($.sceneMember) });
     });
@@ -200,7 +180,6 @@ export class TessParser extends CstParser {
       ]);
     });
 
-    // A table (엔트리 "테이블") — a named grid with one header row.
     $.RULE('tableDecl', () => {
       $.CONSUME(kw.table);
       $.SUBRULE($.identifier, { LABEL: 'name' });
@@ -212,10 +191,6 @@ export class TessParser extends CstParser {
       $.CONSUME(kw.end);
     });
 
-    /**
-     * `chart line "제목" x 1 series 2, 3` — 엔트리의 차트 한 벌. 가로축(x)과
-     * 세로축(y)·계열(series)은 열 번호로 적고, 안 쓰는 자리는 비운다.
-     */
     $.RULE('tableChart', () => {
       $.CONSUME(kw.chart);
       $.SUBRULE($.identifier, { LABEL: 'kind' });
@@ -316,7 +291,6 @@ export class TessParser extends CstParser {
       ]);
     });
 
-    // Gives the scene a display name separate from the identifier scripts jump to.
     $.RULE('sceneNameDecl', () => {
       $.CONSUME(kw.name);
       $.CONSUME(StringLiteral, { LABEL: 'text' });
@@ -333,8 +307,6 @@ export class TessParser extends CstParser {
       $.CONSUME(kw.end);
     });
 
-    // Property declarations are listed last here, not first as in the reference.
-    // None of the keywords below can begin a property, so the order is moot.
     $.RULE('objectMember', () => {
       $.OR([
         { ALT: () => $.SUBRULE($.varDecl) },
@@ -346,9 +318,6 @@ export class TessParser extends CstParser {
       ]);
     });
 
-    // ========================================================================
-    //  Object properties
-    // ========================================================================
     $.RULE('propertyDecl', () => {
       $.OR({
         IGNORE_AMBIGUITIES: true,
@@ -379,8 +348,7 @@ export class TessParser extends CstParser {
               $.SUBRULE($.rotateMethod, { LABEL: 'method' });
             },
           },
-          // A text box frame size. `size = 100` is the scale property instead,
-          // so the numbers are what tells the two apart.
+          // Distinguish text bounds from scale assignment by the following number tokens.
           {
             GATE: () => $.LA(1).tokenTypeIdx === idx(kw.size)
               && $.LA(2).tokenTypeIdx === idx(NumberLiteral),
@@ -446,14 +414,13 @@ export class TessParser extends CstParser {
       $.OPTION2(() => $.SUBRULE($.forceId, { LABEL: 'forceId' }));
     });
 
-    // The Entry name a resource actually carries, when it cannot be spelled as
-    // a Tess identifier. Runtime lookups by name ("모양으로 바꾸기") use it.
+    // Preserve resource display names because Entry uses them for runtime lookup.
     $.RULE('displayName', () => {
       $.CONSUME(kw.as);
       $.CONSUME(StringLiteral, { LABEL: 'text' });
     });
 
-    // Pins an asset to a fixed Entry id instead of deriving one from a seed.
+    // Forced IDs preserve hardcoded resource references across recompilation.
     $.RULE('forceId', () => {
       $.CONSUME(kw.force);
       $.CONSUME(kw.id);
@@ -468,9 +435,6 @@ export class TessParser extends CstParser {
       ]);
     });
 
-    // ========================================================================
-    //  Functions, variables and lists
-    // ========================================================================
     $.RULE('functionDecl', () => {
       $.CONSUME(kw.function);
       $.SUBRULE($.identifier, { LABEL: 'name' });
@@ -485,14 +449,12 @@ export class TessParser extends CstParser {
       $.CONSUME(kw.end);
     });
 
-    // A trailing `?` marks a parameter that stays a judgement after compiling.
+    // Keep boolean parameter slots marked with ? after compilation.
     $.RULE('functionParam', () => {
       $.SUBRULE($.identifier, { LABEL: 'name' });
       $.OPTION(() => $.CONSUME(Question, { LABEL: 'boolean' }));
     });
 
-    // `shared` marks an Entry cloud variable, `realtime` a real-time one, and
-    // `store` one the save manager keeps between runs (`@이름`).
     $.RULE('storageScope', () => {
       $.OR([
         { ALT: () => $.CONSUME(kw.shared, { LABEL: 'shared' }) },
@@ -508,18 +470,14 @@ export class TessParser extends CstParser {
       $.OPTION2(() => $.SUBRULE($.displayName, { LABEL: 'displayName' }));
       $.CONSUME(Assign);
       $.SUBRULE($.expr, { LABEL: 'value' });
-      // A range makes it entry's slide variable: its box carries a slider, and
-      // the value it holds is kept between the two ends.
       $.OPTION3({ GATE: () => $.leads(kw.from), DEF: () => {
         $.CONSUME(kw.from);
         $.SUBRULE2($.expr, { LABEL: 'min' });
         $.CONSUME(kw.to);
         $.SUBRULE3($.expr, { LABEL: 'max' });
       } });
-      // 무대에 상자를 띄운 채로 시작하는 변수 — 엔트리의 '변수 보이기' 체크다.
       $.OPTION4({ GATE: () => $.leads(kw.visible), DEF: () => $.CONSUME(kw.visible, { LABEL: 'shown' }) });
-      // 상자가 놓인 자리. 안 적으면 엔트리처럼 알아서 자리를 잡는다. `go x y` 와
-      // 같은 자리 표현이라, 앞의 값이 뒤의 값을 빼앗지 않도록 posExpr 을 쓴다.
+      // Parse each box coordinate separately so the first cannot consume the second.
       $.OPTION5({ GATE: () => $.leads(kw.at), DEF: () => {
         $.CONSUME(kw.at);
         $.SUBRULE($.posExpr, { LABEL: 'atX' });
@@ -540,7 +498,6 @@ export class TessParser extends CstParser {
         $.SUBRULE($.posExpr, { LABEL: 'atX' });
         $.SUBRULE2($.posExpr, { LABEL: 'atY' });
       } });
-      // 상자의 크기(가로 세로). 안 적으면 엔트리의 100 × 120 이다.
       $.OPTION5({ GATE: () => $.leads(kw.size), DEF: () => {
         $.CONSUME(kw.size);
         $.SUBRULE3($.posExpr, { LABEL: 'sizeW' });
@@ -548,9 +505,6 @@ export class TessParser extends CstParser {
       } });
     });
 
-    // ========================================================================
-    //  Events
-    // ========================================================================
     $.RULE('eventHandler', () => {
       $.CONSUME(kw.when);
       $.OR([
@@ -594,9 +548,6 @@ export class TessParser extends CstParser {
       $.CONSUME(kw.end);
     });
 
-    // ========================================================================
-    //  Statements
-    // ========================================================================
     $.RULE('blockOpen', () => {
       $.OR([
         { ALT: () => $.CONSUME(Colon) },
@@ -612,8 +563,7 @@ export class TessParser extends CstParser {
       });
     });
 
-    // Dispatch is by leading keyword. Each gate also lets a keyword fall through
-    // to assignment when it is being used as a variable name (`say = 5`).
+    // Let command keywords become assignment targets when the following syntax permits it.
     $.RULE('statement', () => {
       $.OR({
         IGNORE_AMBIGUITIES: true,
@@ -751,7 +701,6 @@ export class TessParser extends CstParser {
       });
     });
 
-    // `stop` changes meaning entirely with what follows it.
     $.RULE('stopStatement', () => {
       $.CONSUME(kw.stop);
       $.OPTION(() => {
@@ -772,7 +721,6 @@ export class TessParser extends CstParser {
           { ALT: () => $.CONSUME(kw.project, { LABEL: 'what' }) },
           { ALT: () => $.CONSUME(kw.other, { LABEL: 'scope' }) },
           { ALT: () => $.CONSUME(kw.me, { LABEL: 'scope' }) },
-          // 이 오브젝트의 모든 코드 — 복제본까지. 엔트리의 옛 `thisObject` 자리다.
           { ALT: () => $.CONSUME(kw.object, { LABEL: 'scope' }) },
           { ALT: () => $.CONSUME(kw.them, { LABEL: 'scope' }) },
           { ALT: () => $.CONSUME2(kw.all, { LABEL: 'scope' }) },
@@ -815,8 +763,7 @@ export class TessParser extends CstParser {
       $.SUBRULE($.expr, { LABEL: 'signal' });
     });
 
-    // The argument must sit on the same line, or a bare `clone` would swallow
-    // the identifier that starts the next line.
+    // Keep clone arguments on the same line so bare clone cannot consume the next statement.
     $.RULE('cloneStatement', () => {
       $.CONSUME(kw.clone);
       $.OPTION({
@@ -842,8 +789,7 @@ export class TessParser extends CstParser {
 
     $.RULE('jumpStatement', () => {
       $.CONSUME(kw.jump);
-      // `next` and `back` name the two relative scenes, so they win over reading
-      // the same word as a variable holding a scene name.
+      // Relative scene keywords take precedence over variable names.
       $.OR({
         IGNORE_AMBIGUITIES: true,
         DEF: [
@@ -854,9 +800,6 @@ export class TessParser extends CstParser {
       });
     });
 
-    // ========================================================================
-    //  Movement
-    // ========================================================================
     $.RULE('forwardStatement', () => {
       $.CONSUME(kw.forward);
       $.SUBRULE($.expr, { LABEL: 'distance' });
@@ -868,8 +811,7 @@ export class TessParser extends CstParser {
 
     $.RULE('bounceStatement', () => $.CONSUME(kw.bounce));
 
-    // Both coordinates are unary expressions, so `move 50 -30` is two arguments
-    // rather than one subtraction. Wrap in parentheses to do arithmetic.
+    // Unary coordinates keep move 50 -30 as two arguments; parentheses allow arithmetic.
     $.RULE('moveStatement', () => {
       $.CONSUME(kw.move);
       $.SUBRULE($.pointArgs, { LABEL: 'point' });
@@ -880,8 +822,7 @@ export class TessParser extends CstParser {
       $.OR([
         { GATE: () => $.sameLine(), ALT: () => $.SUBRULE2($.posExpr, { LABEL: 'y' }) },
       ]);
-      // `in` only continues the statement on the same line; on the next one it
-      // opens an `in <list> add ...` statement of its own.
+      // An in on the next line starts its own list statement.
       $.OPTION({
         GATE: () => $.sameLine(),
         DEF: () => {
@@ -891,8 +832,7 @@ export class TessParser extends CstParser {
       });
     });
 
-    // `go` takes either a point or a single target, and only trying the point
-    // form first tells them apart — `go a + b` is a target, `go 1 2` is a point.
+    // Try the point form first so go 1 2 is a point and go a + b is a target.
     $.RULE('goStatement', () => {
       $.CONSUME(kw.go);
       $.OR({
@@ -938,9 +878,6 @@ export class TessParser extends CstParser {
       $.SUBRULE($.expr, { LABEL: 'target' });
     });
 
-    // ========================================================================
-    //  Looks and speech
-    // ========================================================================
     $.RULE('showHideStatement', () => {
       $.OR([
         { ALT: () => $.CONSUME(kw.show, { LABEL: 'kind' }) },
@@ -950,8 +887,6 @@ export class TessParser extends CstParser {
         GATE: () => $.sameLine() && $.isIdentLike($.LA(1)),
         DEF: () => $.SUBRULE($.identifier, { LABEL: 'target' }),
       });
-      // `show 표 for 3` closes the table again after N seconds, and
-      // `show 표 chart 1` opens one of the table's saved charts instead.
       $.OPTION2({
         GATE: () => $.sameLine(),
         DEF: () => $.OR2([
@@ -1009,9 +944,6 @@ export class TessParser extends CstParser {
       ]);
     });
 
-    // ========================================================================
-    //  Text box, pen and sound
-    // ========================================================================
     $.RULE('textStatement', () => {
       $.OR([
         { ALT: () => $.CONSUME(kw.write, { LABEL: 'mode' }) },
@@ -1082,9 +1014,6 @@ export class TessParser extends CstParser {
       $.CONSUME3(StringLiteral, { LABEL: 'pitch' });
     });
 
-    // ========================================================================
-    //  Data
-    // ========================================================================
     $.RULE('listAddStatement', () => {
       $.CONSUME(kw.in);
       $.SUBRULE($.identifier, { LABEL: 'list' });
@@ -1123,7 +1052,6 @@ export class TessParser extends CstParser {
       ]);
     });
 
-    /** `row` or `column` — which way a table grows or shrinks. */
     $.RULE('tableLine', () => {
       $.OR([
         { ALT: () => $.CONSUME(kw.row, { LABEL: 'row' }) },
@@ -1156,11 +1084,7 @@ export class TessParser extends CstParser {
       $.SUBRULE($.expr, { LABEL: 'question' });
     });
 
-    /**
-     * `save` · `save async` writes the `store` names out; `save 표` writes the
-     * table's current contents back over the saved one. `async` is IdentLike,
-     * so a table could carry that name — the store form wins there.
-     */
+    // Save async takes precedence over a table named async.
     $.RULE('saveStatement', () => {
       $.CONSUME(kw.save);
       $.OPTION({
@@ -1175,9 +1099,6 @@ export class TessParser extends CstParser {
       });
     });
 
-    // ========================================================================
-    //  Assignment and calls
-    // ========================================================================
     $.RULE('assignOrCall', () => {
       $.OR({
         IGNORE_AMBIGUITIES: true,
@@ -1214,9 +1135,6 @@ export class TessParser extends CstParser {
       $.OR(ASSIGN_OPERATORS.map((token) => ({ ALT: () => $.CONSUME(token) })));
     });
 
-    // ========================================================================
-    //  Expressions, lowest precedence first
-    // ========================================================================
     $.RULE('expr', () => $.SUBRULE($.orExpr));
 
     $.RULE('orExpr', () => {
@@ -1229,8 +1147,7 @@ export class TessParser extends CstParser {
 
     $.RULE('andExpr', () => {
       $.SUBRULE($.notExpr, { LABEL: 'operands' });
-      // `and wait` ends a sound or read command, so `and` only continues the
-      // expression when an operand can follow it.
+      // Treat and as an operator only when an operand follows; otherwise it ends a sound command.
       $.MANY({
         GATE: () => $.LA(1).tokenTypeIdx === idx(kw.and) && $.startsExprAt(2),
         DEF: () => {
@@ -1284,7 +1201,7 @@ export class TessParser extends CstParser {
       });
     });
 
-    // Right associative: 2 ** 3 ** 2 is 2 ** (3 ** 2).
+    // Powers associate to the right: 2 ** 3 ** 2 means 2 ** (3 ** 2).
     $.RULE('powExpr', () => {
       $.SUBRULE($.unaryExpr, { LABEL: 'base' });
       $.OPTION(() => {
@@ -1298,7 +1215,6 @@ export class TessParser extends CstParser {
       $.SUBRULE($.primaryExpr, { LABEL: 'operand' });
     });
 
-    /** The argument form used where a command lists two values separated by space. */
     $.RULE('posExpr', () => $.SUBRULE($.unaryExpr));
 
     $.RULE('primaryExpr', () => {
@@ -1331,8 +1247,7 @@ export class TessParser extends CstParser {
       });
     });
 
-    // Calls only attach to a name, so a `(` after a line break never reads as a
-    // call on the expression above it.
+    // A line break prevents an opening parenthesis from calling the preceding name.
     $.RULE('callExpr', () => {
       $.SUBRULE($.identifier, { LABEL: 'callee' });
       $.CONSUME(LParen);
@@ -1340,8 +1255,6 @@ export class TessParser extends CstParser {
       $.CONSUME(RParen);
     });
 
-    // `표[2, "점수"]` reads a table cell; one index reads a list item or, on a
-    // table, a spreadsheet cell reference such as `표["B2"]`.
     $.RULE('indexSuffix', () => {
       $.CONSUME(LSquare);
       $.SUBRULE($.expr, { LABEL: 'index' });
@@ -1358,9 +1271,6 @@ export class TessParser extends CstParser {
       $.CONSUME(RSquare);
     });
 
-    // ========================================================================
-    //  Terminals
-    // ========================================================================
     $.RULE('identifier', () => $.CONSUME(IdentLike, { LABEL: 'name' }));
 
     $.RULE('booleanLiteral', () => {
@@ -1370,7 +1280,7 @@ export class TessParser extends CstParser {
       ]);
     });
 
-    // Only an attached sign counts, so `- 5` still reads as a subtraction.
+    // A signed literal requires an attached sign; - 5 is subtraction.
     $.RULE('signedNumber', () => {
       $.OPTION({
         GATE: () => {
@@ -1388,11 +1298,6 @@ export class TessParser extends CstParser {
     this.performSelfAnalysis();
   }
 
-  // ==========================================================================
-  //  Lookahead helpers
-  // ==========================================================================
-
-  /** True when the next token still sits on the line the last one ended on. */
   sameLine() {
     return this.LA(1).startLine === this.LA(0).endLine;
   }
@@ -1401,7 +1306,6 @@ export class TessParser extends CstParser {
     return token.tokenType?.CATEGORIES?.includes(IdentLike) ?? false;
   }
 
-  /** True when the token `offset` ahead can begin an expression. */
   startsExprAt(offset: number) {
     const token = this.LA(offset);
     return EXPR_STARTERS.has(token.tokenTypeIdx) || this.isIdentLike(token);
@@ -1411,11 +1315,7 @@ export class TessParser extends CstParser {
     return this.startsExprAt(1);
   }
 
-  /**
-   * True when this keyword introduces its statement here. A keyword that also
-   * works as a variable name gives way to assignment, unless its statement form
-   * can stand alone — those commit before assignment is ever considered.
-   */
+  // Standalone commands commit before assignment; other keywords can be variable names.
   leads(tokenType: TokenType) {
     const token = this.LA(1);
     if (token.tokenTypeIdx !== tokenType.tokenTypeIdx) return false;
@@ -1428,11 +1328,7 @@ export class TessParser extends CstParser {
     return tokenTypes.some((tokenType) => this.leads(tokenType));
   }
 
-  /**
-   * True where a `var`/`list` declaration begins, including one prefixed by a
-   * `shared`/`realtime`/`store` storage scope. Every prefix stays usable as a
-   * name, so they only lead when the declaration keyword follows.
-   */
+  // Storage prefixes remain names unless a declaration keyword follows.
   leadsDecl(tokenType: TokenType) {
     if (this.leads(tokenType)) return true;
     const token = this.LA(1);
@@ -1456,11 +1352,7 @@ export class TessParser extends CstParser {
       .some((type) => token.tokenTypeIdx === idx(type));
   }
 
-  /**
-   * True when a statement can begin here. A name that is not a command must be
-   * followed by `=`, `[` or `(` to start one, which is what lets a block end at
-   * `else` — a word that is otherwise a perfectly good variable name.
-   */
+  // Require assignment, indexing, or a call after ordinary names so else can end a block.
   startsStatement() {
     const token = this.LA(1);
     if (token.tokenTypeIdx === idx(EOF)) return false;

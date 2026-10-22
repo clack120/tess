@@ -1,10 +1,3 @@
-/**
- * tessvm(Tess 실행기)의 실행 규칙이 엔트리와 같은지 검증합니다.
- *
- * 화면 없이 VM 만 돌리므로 스케줄링·값 변환·충돌 판정을 프레임 단위로 확인할 수
- * 있습니다. 각 항목의 기준은 entryjs 의 `src/playground/blocks/block_*.js` 와
- * `class/executor.js` 입니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -86,7 +79,6 @@ test('clones inherit pen settings with an independent new drawing path', () => {
   assert.equal(stopped.brush!.stop, true);
 });
 
-/** Compiles Tess source and hands back a started VM. */
 function runVm(source: string): Vm {
   const result = compileProject(source, { path: 'test.tess' });
   assert.ok(result.project, result.errors[0]?.message ?? '컴파일 실패');
@@ -314,10 +306,7 @@ end`);
   }
 });
 
-/**
- * 변수 값을 숫자로 읽습니다. 엔트리의 `변수 바꾸기`·`정하기` 는 값을 문자열로
- * 담아 두므로(`toFixed` 의 결과), 비교는 숫자로 맞춰서 합니다.
- */
+// Convert stored numeric text for value-only comparisons.
 function valueOf(vm: Vm, name: string): number {
   const variable = vm.variables.find((item) => item.name === name);
   assert.ok(variable, `변수 ${name} 을 찾지 못했습니다`);
@@ -336,9 +325,6 @@ ${body
   end
 end`;
 
-// ---------------------------------------------------------------------------
-//  값 변환과 10진 산술
-// ---------------------------------------------------------------------------
 test('숫자 변환은 parseFloat 뒤 0 으로 떨어진다', () => {
   assert.equal(cast.num('12abc'), 12);
   assert.equal(cast.num('abc'), 0);
@@ -361,10 +347,7 @@ test('사칙연산은 엔트리처럼 10진으로 계산한다', () => {
   assert.equal(cast.divNum(1, 4), 0.25);
 });
 
-/**
- * 자리를 세어 반올림하는 자리와 그럴 필요가 없는 자리를 함께 봅니다. 배정밀도의
- * 이웃 간격보다 촘촘한 눈금은 결과를 바꾸지 못하므로 값이 그대로 나와야 합니다.
- */
+// Decimal grids finer than the spacing between doubles must leave results unchanged.
 test('10진 반올림은 배정밀도가 담아내는 자리까지만 움직인다', () => {
   const sin30 = Math.sin(Math.PI / 6);
   assert.equal(cast.mulNum(sin30, 30), sin30 * 30);
@@ -387,10 +370,7 @@ test('숫자 판별은 지수 표기를 받아들이고 앞의 점과 불완전�
   assert.equal(cast.isNumber(null), false);
 });
 
-/**
- * 값 칸은 `parseFloat(v) || 0` 이므로, 앞 블록이 내놓은 `NaN` 은 그 값을 읽는 다음
- * 블록에서 0 이 됩니다. 변수에 그대로 담으면 `NaN` 이 남는 것과 다릅니다.
- */
+// Entry converts NaN to zero at the next number slot, but raw variable assignment retains it.
 test('NaN 은 값 칸을 지날 때 0 이 된다', () => {
   const vm = runVm(
     wrap('a = (z / z)\nb = ((z / z) * 1000)\nc = ((z / z) + 5)', 'var z = 0\nvar a = 0\nvar b = 0\nvar c = 0'),
@@ -419,9 +399,6 @@ test('나머지는 나누는 수의 부호를 따른다', () => {
   assert.equal(cast.mod(370, 360), 10);
 });
 
-// ---------------------------------------------------------------------------
-//  스케줄링 — 엔트리의 프레임 경계
-// ---------------------------------------------------------------------------
 test('반복은 한 바퀴마다 프레임을 넘긴다', () => {
   const vm = runVm(wrap('repeat 3:\n  count += 1\nend\ndone = 1', 'var count = 0\nvar done = 0'));
   vm.tick();
@@ -431,7 +408,6 @@ test('반복은 한 바퀴마다 프레임을 넘긴다', () => {
   assert.equal(valueOf(vm, 'count'), 2);
   vm.tick();
   assert.equal(valueOf(vm, 'count'), 3);
-  // 마지막 바퀴 다음 프레임에 반복을 빠져나오고 그 프레임에서 뒤를 잇는다.
   vm.tick();
   assert.equal(valueOf(vm, 'count'), 3);
   assert.equal(valueOf(vm, 'done'), 1);
@@ -466,7 +442,6 @@ test('continue 는 한 바퀴를 접고 다음 프레임으로 넘긴다', () =>
 
 test('skip 은 프레임을 넘기지 않고 바로 다음 바퀴로 간다', () => {
   const vm = runVm(wrap('repeat 3:\n  n += 1\n  skip\n  m += 1\nend\ndone = 1', 'var n = 0\nvar m = 0\nvar done = 0'));
-  // 세 바퀴와 그 뒤 문장까지 한 프레임에 끝난다.
   vm.tick();
   assert.equal(valueOf(vm, 'n'), 3);
   assert.equal(valueOf(vm, 'm'), 0);
@@ -523,8 +498,7 @@ test('값 함수가 멈춰도 호출한 쪽은 이어서 실행된다', () => {
 });
 
 test('신호 보내기는 그 프레임이 끝난 뒤에 받는 쪽을 깨운다', () => {
-  // `message_cast` 는 `setTimeout` 으로 신호를 올립니다. 보낸 블록 다음 블록이
-  // 같은 프레임 안에서 도는 동안에는 받는 스크립트가 아직 없습니다.
+  // Ordinary messages start receivers after the sender's current frame finishes.
   const vm = runVm(`
 var a = 0
 scene "sc":
@@ -547,9 +521,7 @@ end`);
 });
 
 test('신호를 보낸 뒤 같은 장면을 다시 시작해도 받는 쪽은 살아남는다', () => {
-  // 장면 시작하기는 그 장면의 스크립트를 모두 멈추지만, 아직 올라가지 않은
-  // 신호까지 되돌리지는 못합니다 — 엔트리에서 3D 작품이 시작할 때 모델을
-  // 쌓아 두는 방식이 이것입니다.
+  // Scene restart cannot cancel a message that has not been delivered yet.
   const vm = runVm(`
 var a = 0
 scene "sc":
@@ -574,8 +546,7 @@ end`);
 });
 
 test('신호 보내고 기다리기는 그 자리에서 받는 쪽을 깨운다', () => {
-  // `message_cast_wait` 는 `raiseMessage` 를 바로 부르므로, 보낸 프레임 안에서
-  // 이미 받는 스크립트가 서 있습니다.
+  // Send-and-wait starts receivers immediately in the sending frame.
   const vm = runVm(`
 var a = 0
 scene "sc":
@@ -643,16 +614,14 @@ end`);
   }
   assert.equal(target.clones.length, 6);
 
-  // 지우는 복제본의 스레드를 그 자리에서 빼내면, 뒤에 있던 스레드가 앞으로
-  // 당겨지면서 그 프레임을 건너뛴다 — 그러면 한 프레임에 절반씩만 사라진다.
+  // Removing threads in place can skip later clone scripts in the same frame.
   vm.variables.find((item) => item.name === '지워')!.setValue(1);
   vm.tick();
   assert.equal(target.clones.length, 0);
 });
 
 test("'stop other' 로 앞선 스크립트가 멈춰도 뒤의 복제본은 그 프레임을 돈다", () => {
-  // 스레드 차례는 [본체1, 본체2, 복제본] 이다. 본체2 가 본체1 을 그 자리에서
-  // 빼내면 복제본이 한 칸 앞으로 당겨져 그 프레임을 통째로 건너뛴다.
+  // Stopping the earlier entity must not shift a later clone past the active iteration.
   const vm = runVm(`var 돎 = 0
 
 scene "s":
@@ -675,16 +644,12 @@ scene "s":
     end
   end
 end`);
-  // 복제본은 'stop other' 와 같은 프레임에 생겨나 그 프레임부터 돈다.
   vm.tick();
   assert.equal(valueOf(vm, '돎'), 1);
   vm.tick();
   assert.equal(valueOf(vm, '돎'), 2);
 });
 
-// ---------------------------------------------------------------------------
-//  글상자
-// ---------------------------------------------------------------------------
 test('글자 효과 블록은 엔트리가 쓰는 이름 그대로 걸린다', () => {
   const vm = runVm(`scene "s":
   text "t":
@@ -719,10 +684,6 @@ end`);
   assert.equal(vm.targets[0]!.entity.fontBold, false);
 });
 
-/**
- * `var x = 2 from 0 to 4` 는 엔트리의 슬라이드 변수입니다. 상자에 슬라이더가 붙고,
- * 값은 두 끝 사이로 붙잡힙니다.
- */
 test('범위를 준 변수는 슬라이드 변수가 되고 값이 그 사이에 머문다', () => {
   const vm = runVm(wrap('a = depth', 'var depth = 2 from 0 to 4\nvar a = 0'));
   const depth = vm.variables.find((item) => item.name === 'depth')!;
@@ -747,9 +708,7 @@ test('범위가 없는 변수는 그대로 보통 변수다', () => {
 });
 
 test('붓과 채우기 층은 작품이 먼저 집어 든 순서대로 쌓인다', () => {
-  // 엔트리는 붓·채우기를 처음 쓰는 순간에 그 도형을 만들어 오브젝트 바로 아래에
-  // 끼우므로, 나중에 집어 든 쪽이 앞에 옵니다. 판을 먼저 긋고 돌을 채우는 작품은
-  // 이 순서가 뒤집히면 돌이 판 밑으로 들어가 사라집니다.
+  // Pen layers follow first-use order, so later fills must not be buried under earlier strokes.
   const first = runVm(wrap('start draw\nstart fill'));
   first.tick();
   const one = first.targets[0]!.entity;
@@ -763,9 +722,7 @@ test('붓과 채우기 층은 작품이 먼저 집어 든 순서대로 쌓인다
 });
 
 test('붓은 점마다가 아니라 프레임마다 한 번만 다시 그린다', () => {
-  // 붓이 점 하나마다 자기 획을 통째로 다시 그리면 한 프레임이 점 개수의 제곱만큼
-  // 든다 — 한 프레임에 점 수천 개를 찍는 작품이 몇 초마다 끊기던 자리다. PixiRenderer
-  // 는 화면 없이 만들 수 없으므로 그 약속을 소스에서 지킨다.
+  // Check deferred pen drawing in source because PixiRenderer needs a browser.
   const source = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/renderer.ts'),
     'utf-8',
@@ -782,7 +739,6 @@ test('붓은 점마다가 아니라 프레임마다 한 번만 다시 그린다'
     'flush 가 프레임마다 한 번 몰아서 그린다',
   );
 
-  // 층을 만드는 순서가 곧 쌓이는 순서다 — 고정된 차례로 돌면 안 된다.
   const redraw = source.slice(source.indexOf('  private redrawPen(entity: Entity): void {'));
   assert.match(
     redraw.slice(0, redraw.indexOf('\n  }')),
@@ -792,9 +748,7 @@ test('붓은 점마다가 아니라 프레임마다 한 번만 다시 그린다'
 });
 
 test('도장은 모양의 제 크기로 찍힌다 — 텍스처가 구워진 크기가 아니라', () => {
-  // 벡터 모양은 자기 크기보다 촘촘하게 구워지므로, 텍스처 한 픽셀이 무대에서
-  // 얼마인지를 곱해야 작품이 그리는 크기가 나온다. 오브젝트 배율로 덮어써 버리면
-  // 구운 배율만큼 어긋난다. PixiRenderer 는 화면 없이 만들 수 없으므로 소스에서 본다.
+  // Vector stamp scale must combine texture scale with entity scale.
   const source = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/renderer.ts'),
     'utf-8',
@@ -806,8 +760,7 @@ test('도장은 모양의 제 크기로 찍힌다 — 텍스처가 구워진 크
 });
 
 test('변수 상자는 자리를 정하지 않았어도 무대 안에 놓인다', () => {
-  // `generateView` 는 값 상자와 리스트 상자를 따로 세어 한 줄에 11개씩 쌓는다.
-  // 전체 개수로 세면 뒤쪽 상자가 무대 아래로 밀려나 보이지 않는다.
+  // Count variable and list monitors separately so later boxes do not fall below the stage.
   const source = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/overlay.ts'),
     'utf-8',
@@ -818,9 +771,6 @@ test('변수 상자는 자리를 정하지 않았어도 무대 안에 놓인다'
   assert.match(body, /index \* 24 \+ 20 - 135/, '엔트리와 같은 간격으로 쌓는다');
 });
 
-// ---------------------------------------------------------------------------
-//  JIT 컴파일 결과
-// ---------------------------------------------------------------------------
 test('리터럴 연산은 컴파일할 때 접어 둔다', () => {
   const result = compileProject(wrap('forward 10'), { path: 'test.tess' });
   const vm = new Vm({ renderer: null, audio: null });
@@ -861,7 +811,6 @@ test('모르는 블록은 실행을 멈추지 않고 보고만 한다', () => {
   assert.ok(vm.unknownBlocks.has('get_cur_weather'));
 });
 
-/** A one-object project made straight from entry blocks, with no Tess in between. */
 function rawProject(blocks: unknown[], variables: unknown[] = []) {
   return {
     objects: [
@@ -942,13 +891,13 @@ test('프레임 안에서 난 예외는 실행을 멈추고 알린다 — 화면
   vm.advance(16);
   vm.advance(32);
   assert.equal(vm.state, 'stop');
-  // Reported once: the run ends rather than throwing again every frame.
+  // Report once and stop the work instead of throwing again every frame.
   assert.deepEqual(reported, ['webgl 컨텍스트를 잃었습니다']);
   assert.equal(vm.errors.length, 1);
 });
 
 test('글상자·벡터 모양의 텍스처는 webgl 상한(4096px)을 넘지 않는다', () => {
-  // Full screen on a retina display asks for far more than a texture can hold.
+  // Retina fullscreen can request more pixels than a texture allows.
   const full = 8;
   const wide = textSharpness(full, 4, 900);
   assert.ok(wide * 900 <= 4096, `글상자 텍스처가 ${wide * 900}px 입니다`);
@@ -958,11 +907,8 @@ test('글상자·벡터 모양의 텍스처는 webgl 상한(4096px)을 넘지 �
   assert.ok(big * 1600 * (big * 1200) <= 2048 * 2048 + 1, '벡터 텍스처의 넓이 상한');
 });
 
-// ---------------------------------------------------------------------------
-//  색
-// ---------------------------------------------------------------------------
 test('읽을 수 없는 색은 엔트리와 같이 검정으로 떨어진다 (오류가 아니다)', () => {
-  // `Entry.hex2rgb` — # 을 붙이고, 세 자리는 늘리고, 그 밖은 전부 #000000.
+  // Entry expands short hex and returns black for other invalid colors.
   assert.equal(cast.hexColor('#ff8000'), '#ff8000');
   assert.equal(cast.hexColor('ff8000'), '#ff8000');
   assert.equal(cast.hexColor('#f80'), '#ff8800');
@@ -996,17 +942,13 @@ end`);
   assert.equal(vm.state, 'run');
 
   const brush = vm.targets.find((target) => target.name === '붓')!.entity;
-  // 붓은 엔트리와 같이 hex2rgb 를 거친 값을 들고 있다.
   assert.equal(brush.brush?.color, '#000000');
   assert.equal(brush.paint?.color, '#000000');
-  // 글상자는 엔트리와 같이 적힌 그대로 들고 있고, 거르는 것은 그리는 쪽이다.
+  // Text boxes keep the original color text; rendering validates it later.
   const board = vm.targets.find((target) => target.name === '판')!.entity;
   assert.equal(board.colour, '#검정');
 });
 
-// ---------------------------------------------------------------------------
-//  공유 · 실시간 변수
-// ---------------------------------------------------------------------------
 const SHARED_SOURCE = `shared list 명예 = []
 realtime list 실시간 = []
 list 보통 = []
@@ -1025,7 +967,6 @@ scene "s":
   end
 end`;
 
-/** 저장소를 흉내 낸다 — 실제 실행기는 브라우저의 localStorage 를 쓴다. */
 function fakeStore() {
   const box = new Map<string, unknown>();
   return {
@@ -1056,7 +997,6 @@ test('공유 · 실시간 리스트와 변수는 다시 시작해도 값을 잃�
   assert.deepEqual(listOf(vm, '명예'), ['1']);
   assert.deepEqual(listOf(vm, '보통'), ['3']);
 
-  // 두 번째 실행: 공유·실시간은 그대로 이어지고, 보통 리스트만 선언값으로 돌아간다.
   vm.start();
   for (let i = 0; i < 10; i += 1) vm.tick(16);
   vm.stop();
@@ -1080,7 +1020,6 @@ test('공유 · 실시간 변수만 저장소에 남고, 다시 불러오면 그
   assert.ok(stored.has(idOf('최고')), '공유 변수는 저장된다');
   assert.ok(!stored.has(idOf('보통')), '보통 리스트는 저장하지 않는다');
 
-  // 새 실행기가 같은 저장소를 읽으면 지난 실행이 남긴 값에서 이어진다.
   const second = loadShared(store);
   assert.deepEqual(listOf(second, '명예'), ['1']);
   assert.deepEqual(listOf(second, '보통'), []);
@@ -1101,21 +1040,18 @@ test('저장소가 없어도 공유 · 실시간 값은 실행기가 살아 있�
 });
 
 test('벡터가 많은 작품은 텍스처 예산에 맞춰 함께 낮춰 굽는다', () => {
-  // 한두 장은 예산에 닿지 않으니 화면이 요구하는 그대로 굽는다.
   const one = svgSharpness(3, 960, 540);
   assert.equal(svgBudgetScale(960 * 540 * one * one), 1);
   assert.equal(svgSharpness(3, 960, 540, 1), one);
 
-  // 무대 전체 크기의 벡터 백 장은 예산을 훌쩍 넘으므로 배율을 함께 내린다.
   const many = 100 * 960 * 540 * one * one;
   const budget = svgBudgetScale(many);
   assert.ok(budget < 1, `예산 배율이 ${budget} 입니다`);
   assert.ok(svgSharpness(3, 960, 540, budget) < one);
 
-  // 예산을 몇 번 조여도 1배 아래로는 내려가지 않는다 — 그 아래는 옆의 래스터와 같다.
+  // Budget scaling never drops below the equivalent raster's scale.
   assert.equal(svgSharpness(3, 960, 540, 0.001), 1);
 
-  // 예산 안에서 실제로 차지하는 크기가 예산 언저리로 내려온다.
   let scale = 1;
   for (let pass = 0; pass < 8; pass += 1) {
     const sharp = svgSharpness(3, 960, 540, scale);
@@ -1132,40 +1068,29 @@ test('벡터가 많은 작품은 텍스처 예산에 맞춰 함께 낮춰 굽는
 });
 
 test('화질은 화면이 요구하는 만큼 따라 올라가고, 하한 아래로는 내려가지 않는다', () => {
-  // 4/3 (stage) × 1 (resolution): a plain window at the default size.
+  // Default rendering uses a 4/3 stage scale and renderer resolution of 1.
   assert.equal(textSharpness(4 / 3, 1, 100), 2, '작게 그려도 하한 2배');
-  // 긴 변 하한(`MIN_SVG_SIDE`)이 걸리지 않는 그림이면, 성긴 화면에서는 배율 하한 3배가 걸립니다.
+  // Without a minimum-side constraint, low-resolution vectors use the minimum scale.
   assert.equal(svgSharpness(4 / 3, 400, 400), 3);
-  // A retina window, then the same text box scaled to twice its size.
   assert.equal(textSharpness(3, 1, 100), 3);
   assert.equal(textSharpness(3, 2, 100), 6);
-  // 벡터에는 고정 상한이 없습니다 — 화면이 요구하는 만큼 따라가고 픽셀 상한이 잡습니다.
   assert.equal(svgSharpness(6, 200, 200), 6);
   assert.equal(textSharpness(6, 1, 100), 6);
 });
 
-/**
- * 배율만으로 정하면 작게 저장된 그림은 4배를 줘도 성깁니다 — 20×20 아이콘은 80px 이라
- * 작품이 조금만 키워도 뭉갭니다. 긴 변이 `MIN_SVG_SIDE` 는 되게 끌어올립니다.
- */
+// Give tiny icons a minimum texture side so moderate enlargement stays sharp.
 test('작게 저장된 벡터는 긴 변이 하한을 채울 만큼 촘촘히 굽는다', () => {
   for (const [width, height] of [[20, 20], [100, 100], [60, 30]] as const) {
     const sharp = svgSharpness(4 / 3, width, height);
     const longest = Math.max(width, height) * sharp;
     assert.ok(longest >= MIN_SVG_SIDE, `${width}x${height} → ${longest}px`);
   }
-  // 이미 큰 그림은 긴 변 하한이 건드리지 않고, 배율 하한 3배만 걸립니다.
   assert.equal(svgSharpness(4 / 3, 480, 270), 3);
-  // 하한도 작품 전체 예산에 함께 걸립니다.
+  // Apply the shared budget to minimum-side sizes too.
   assert.ok(svgSharpness(4 / 3, 20, 20, 0.1) < svgSharpness(4 / 3, 20, 20));
 });
 
-/**
- * `함수 정의하기` is a hat block: playentry's own project data (and entry's
- * runner) keep the body as the rest of the define block's stack, while saving a
- * work to `.ent` nests that same body in the block's statement slot. Both have
- * to run, or every function on a work loaded from playentry is an empty shell.
- */
+// Accept both inline function bodies and bodies nested in saved definition slots.
 function functionProject(content: unknown[][]) {
   return {
     objects: [
@@ -1196,7 +1121,6 @@ const bodyBlock = {
 };
 
 test('함수 본문은 정의 블록 다음에 이어 붙은 것도 읽는다 (playentry 작품 형태)', () => {
-  // The shape playentry hands over: the body is the rest of the define's stack.
   const vm = new Vm({ renderer: null, audio: null });
   vm.load(functionProject([[defineHat, bodyBlock]]) as unknown as never);
   vm.start();
@@ -1214,10 +1138,6 @@ test('함수 본문은 정의 블록 안에 든 것도 읽는다 (.ent 로 저�
   assert.equal(String(vm.variables.find((v) => v.name === '지은것')!.value), '42');
 });
 
-// ---------------------------------------------------------------------------
-//  충돌 판정
-// ---------------------------------------------------------------------------
-/** A square of solid pixels, as one costume's alpha mask. */
 function squareMask(size: number) {
   const pixels = new Uint8Array(size * size * 4);
   for (let i = 3; i < pixels.length; i += 4) {
@@ -1226,7 +1146,6 @@ function squareMask(size: number) {
   return maskFromPixels(pixels, size, size);
 }
 
-/** A mask whose left half is opaque and right half fully transparent. */
 function halfMask(size: number) {
   const pixels = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y += 1) {
@@ -1282,7 +1201,7 @@ end`;
   }
   const entity = vm.targets[0]!.entity;
   vm.collision.beginFrame();
-  // entry's canvas pointer starts at the canvas's top left, not at the stage middle
+  // Before pointer entry, use the canvas's top-left corner rather than the stage center.
   assert.equal((vm as any).ops.touching(entity, 'mouse'), false);
   vm.pointerSeen = true;
   vm.collision.beginFrame();
@@ -1302,12 +1221,10 @@ test('겹치는 사각형은 닿은 것으로, 떨어지면 아닌 것으로 본
 test('투명한 부분만 겹치면 닿지 않은 것이다', () => {
   const { vm, collision } = collisionVm(() => halfMask(20));
   const [a, b] = vm.targets.map((target) => target.entity);
-  // a 의 불투명한 왼쪽 절반과 b 의 투명한 오른쪽 절반이 겹치도록 민다.
   a!.setX(0);
   b!.setX(-10);
   collision.beginFrame();
   assert.equal(collision.touchingEntity(a!, b!, 0.2), false);
-  // 반대로 밀면 불투명한 부분끼리 겹친다.
   b!.setX(2);
   collision.beginFrame();
   assert.equal(collision.touchingEntity(a!, b!, 0.2), true);
@@ -1329,7 +1246,7 @@ test('경계 상자는 무대 픽셀 좌표로 나온다', () => {
   const a = vm.targets[0]!.entity;
   const box = { x: 0, y: 0, width: 0, height: 0 };
   entityBounds(a, box);
-  // 20×20 그림이 4/3 배로 그려지므로 무대 좌표에서 가운데 26.67px 사각형이다.
+  // A 20 by 20 costume spans 26.67 collision pixels at Entry's 4/3 stage scale.
   assert.ok(Math.abs(box.width - (20 * 4) / 3) < 1e-6);
   assert.ok(Math.abs(box.x - (stage.worldWidth / 2 - (20 * 4) / 3 / 2)) < 1e-6);
 });
@@ -1351,7 +1268,6 @@ end`;
   const collision = new CollisionSystem(new MaskStore(() => null));
   const box = { x: 0, y: 0, width: 0, height: 0 };
 
-  // 기본 (가운데 정렬)
   entity.textAlign = 0;
   entityBounds(entity, box);
   const centerX = stage.worldWidth / 2;
@@ -1363,7 +1279,6 @@ end`;
   assert.equal(collision.touchingMouse(entity, centerX, centerY), true);
   assert.equal(collision.touchingMouse(entity, centerX + scaledW / 2 + 5, centerY), false);
 
-  // 왼쪽 정렬 (left = 1): 오브젝트 x에서 오른쪽으로 자람
   entity.textAlign = 1;
   entityBounds(entity, box);
   assert.ok(Math.abs(box.x - centerX) < 1e-6);
@@ -1371,7 +1286,6 @@ end`;
   assert.equal(collision.touchingMouse(entity, centerX - 10, centerY), false);
   assert.equal(collision.touchingMouse(entity, centerX + 10, centerY), true);
 
-  // 오른쪽 정렬 (right = 2): 오브젝트 x에서 왼쪽으로 자람
   entity.textAlign = 2;
   entityBounds(entity, box);
   assert.ok(Math.abs(box.x - (centerX - scaledW)) < 1e-6);
@@ -1379,7 +1293,6 @@ end`;
   assert.equal(collision.touchingMouse(entity, centerX + 10, centerY), false);
   assert.equal(collision.touchingMouse(entity, centerX - 10, centerY), true);
 
-  // 줄바꿈이 켜져 있으면 정렬과 무관하게 상자 중심 유지
   entity.lineBreak = true;
   entity.textAlign = 1;
   entityBounds(entity, box);
@@ -1395,7 +1308,6 @@ test('무대 크기를 바꾸면 벽과 좌표계가 같이 움직인다', () =>
   try {
     setStageSize(960, 540);
     collision.beginFrame();
-    // 무대가 넓어졌으니 같은 자리는 이제 벽에서 멀다.
     assert.equal(collision.touchingWall(a, 'wall_right', 0.2), false);
     a.setX(478);
     collision.beginFrame();
@@ -1421,7 +1333,6 @@ test('작품이 정한 speed 가 곧 프레임 속도다', () => {
 
 test('초시계는 시작하기 전까지 0 이고, 멈춘 채 초기화하면 꺼진다', () => {
   const vm = runVm(wrap('wait 0.1'));
-  // 엔트리의 `resetTimer` 는 한 번도 시작하지 않은 초시계에는 아무 일도 안 한다.
   vm.resetTimer();
   for (let i = 0; i < 10; i += 1) {
     vm.tick();
@@ -1434,7 +1345,6 @@ test('초시계는 시작하기 전까지 0 이고, 멈춘 채 초기화하면 �
   }
   assert.ok(Math.abs(vm.timerValue() - 30 / vm.frameRate) < 1e-6);
 
-  // 멈춘 뒤에는 시간이 흐르지 않는다.
   vm.pauseTimer();
   const held = vm.timerValue();
   for (let i = 0; i < 30; i += 1) {
@@ -1442,7 +1352,6 @@ test('초시계는 시작하기 전까지 0 이고, 멈춘 채 초기화하면 �
   }
   assert.equal(vm.timerValue(), held);
 
-  // 멈춘 채로 초기화하면 '한 번도 시작하지 않은' 상태로 돌아간다.
   vm.resetTimer();
   vm.tick();
   assert.equal(vm.timerValue(), 0);
@@ -1466,9 +1375,6 @@ test('돌고 있는 초시계를 초기화하면 0 부터 다시 센다', () => 
   assert.ok(Math.abs(vm.timerValue() - 15 / vm.frameRate) < 1e-6);
 });
 
-// ---------------------------------------------------------------------------
-//  붓
-// ---------------------------------------------------------------------------
 test('붓의 투명도는 선과 채우기에 함께 걸린다', () => {
   const vm = runVm(wrap([
     'draw_alpha = 70',
@@ -1499,10 +1405,7 @@ test('붓의 투명도 바꾸기도 선과 채우기를 함께 옮긴다', () =>
   assert.equal(entity.paint!.opacity, 50);
 });
 
-/**
- * `updateTextbox` 는 `setWidth` 만 부릅니다 — 글을 써도 상자가 높아지지는 않고, 작품이
- * 담고 있던 높이가 그대로 남습니다. 높이가 따라가는 것은 글꼴이 바뀔 때뿐입니다.
- */
+// Text changes update width only; font changes may update both dimensions.
 test('글상자 폭은 글을 쓰는 그 순간 다시 재어지고, 높이는 그대로다', () => {
   const result = compileProject(
     `scene "s":
@@ -1517,7 +1420,7 @@ end`,
   );
   assert.ok(result.project, result.errors[0]?.message ?? '컴파일 실패');
   const vm = new Vm({ renderer: null, audio: null });
-  // 재는 일은 렌더러가 하지만, VM 은 프레임을 넘기지 않고 그 자리에서 물어본다.
+  // Ask the renderer to measure immediately without yielding a frame.
   const measured: string[] = [];
   vm.renderer = {
     addEntity() {},
@@ -1559,11 +1462,7 @@ test('글꼴 문자열은 굵기·기울임·소수점 크기를 모두 읽는�
   });
 });
 
-/**
- * 글꼴 크기가 비어 저장된 글상자에는 `"NaNpx …"` 가 남는다. 엔트리는 그 크기를
- * NaN 그대로 들고 있고, 캔버스는 그런 선언을 통째로 거절한 뒤 자기 기본 글꼴로
- * 그린다(그래서 엔트리가 재어 둔 높이가 10 이다). 20px 로 읽으면 글자가 두 배가 된다.
- */
+// Invalid saved font sizes use the canvas fallback, including its smaller measured height.
 test('읽을 수 없는 글꼴 크기는 캔버스 기본 글꼴이 된다', () => {
   assert.deepEqual(parseFont('NaNpx Nanum Gothic'), {
     size: 10,
@@ -1571,14 +1470,12 @@ test('읽을 수 없는 글꼴 크기는 캔버스 기본 글꼴이 된다', () 
     bold: false,
     italic: false,
   });
-  // 굵기·기울임도 같은 선언 안에 있으므로 함께 버려진다.
   assert.deepEqual(parseFont('bold italic NaNpx D2 Coding'), {
     size: 10,
     family: 'sans-serif',
     bold: false,
     italic: false,
   });
-  // 글꼴이 아예 없는 것은 다른 이야기다 — 엔트리의 기본값을 그대로 쓴다.
   assert.deepEqual(parseFont(''), {
     size: 20,
     family: 'Nanum Gothic',
@@ -1587,14 +1484,7 @@ test('읽을 수 없는 글꼴 크기는 캔버스 기본 글꼴이 된다', () 
   });
 });
 
-// ---------------------------------------------------------------------------
-//  예제 작품
-// ---------------------------------------------------------------------------
-/**
- * deltarune 의 초상화 애니메이션이 이 값에 걸려 있었다 — 소수 자릿수를 글자로
- * 읽어 쓰는 작품에서 0.1 과 0.09999999999999787 은 완전히 다른 결과가 된다.
- * 엔트리의 빼기는 BigNumber 라 정확히 0.1 이고, 나머지 블록은 그렇지 않다.
- */
+// Use decimal subtraction because digit-sensitive code distinguishes 0.1 from its binary remainder.
 test('소수 부분은 빼기로 구하면 10진으로 딱 떨어진다', () => {
   const vm = runVm(
     wrap(`
@@ -1605,7 +1495,7 @@ test('소수 부분은 빼기로 구하면 10진으로 딱 떨어진다', () => 
   vm.tick();
   const value = (name: string) => String(vm.variables.find((item) => item.name === name)!.getValue());
   assert.equal(value('정확한'), '0.1');
-  /** 나머지 블록은 엔트리와 똑같이 2진 부동소수 그대로다 (`l - r * floor(l / r)`). */
+  // Entry modulo keeps binary arithmetic: l - r * floor(l / r).
   assert.equal(value('나머지로'), String(49.1 - 1 * Math.floor(49.1 / 1)));
 });
 
@@ -1653,22 +1543,19 @@ end`;
 
   assert.equal(target.getPicture('두번째')?.name, '두번째');
   assert.equal(target.getPicture(target.pictures[2]!.id)?.name, '세번째');
-  // 번호는 1부터. 엔트리의 `모양을 2로 바꾸기` 가 이 길로 온다.
   assert.equal(target.getPicture('2')?.name, '두번째');
   assert.equal(target.getPicture(3)?.name, '세번째');
-  // 없는 것은 첫 모양이 아니라 아무것도 아니어야 한다.
+  // Missing costumes must stay absent instead of selecting the first image.
   assert.equal(target.getPicture('없는이름'), null);
   assert.equal(target.getPicture('9'), null);
   assert.equal(target.getPicture('0'), null);
 
-  // 다음/이전 모양은 번호로 준 값에서도 이어진다.
   assert.equal(target.getNextPicture('2')?.name, '세번째');
   assert.equal(target.getNextPicture('3')?.name, '첫번째');
   assert.equal(target.getPrevPicture('1')?.name, '세번째');
 });
 
 test('아이디 블록은 로그인한 사람의 아이디를 그대로 돌려준다', () => {
-  // A runner with no user answers a space, as entry does.
   const source = `
 var 아이디_값 as "아이디 값" = 0
 var 닉_값 as "닉 값" = 0
@@ -1701,10 +1588,6 @@ end`;
   );
 });
 
-// ---------------------------------------------------------------------------
-//  번역 (파파고)
-// ---------------------------------------------------------------------------
-/** 번역 서비스를 흉내 냅니다 — 무엇을 물어봤는지도 들고 있습니다. */
 function fakeTranslator(answer: string | null = null) {
   const asked: Array<{ text: string; source: string; target: string }> = [];
   return {
@@ -1719,7 +1602,7 @@ function fakeTranslator(answer: string | null = null) {
   };
 }
 
-/** 번역은 답을 기다리는 동안 프레임을 넘기므로, 약속이 풀릴 틈을 주고 돌립니다. */
+// Let promises settle between frames while translation waits.
 async function runTranslating(source: string, translator: unknown): Promise<Vm> {
   const result = compileProject(source, { path: 'test.tess' });
   assert.ok(result.project, result.errors[0]?.message ?? '컴파일 실패');
@@ -1746,7 +1629,6 @@ test('번역 블록은 엔트리 서비스가 준 글을 그대로 쓴다', asyn
   assert.deepEqual(translator.asked, [{ text: '안녕', source: 'ko', target: 'en' }]);
 });
 
-/** 엔트리는 두 쪽이 같은 언어면 서비스를 부르지 않고 받은 글을 그대로 돌려줍니다. */
 test('출발어와 도착어가 같으면 부르지 않는다', async () => {
   const translator = fakeTranslator();
   const machine = await runTranslating(
@@ -1820,13 +1702,7 @@ end`,
   assert.equal(translated(machine), '안녕하세요');
 });
 
-// ---------------------------------------------------------------------------
-//  클릭은 그려진 순서를 따른다
-// ---------------------------------------------------------------------------
-/**
- * 화면 없이 쌓는 순서만 흉내 냅니다 — 앞에 있는 것이 먼저 오는 목록 하나입니다.
- * 복제본은 엔트리처럼 원본 바로 뒤에 들어갑니다.
- */
+// Simulate only flat display order, with clones inserted directly below their source.
 function fakeStage() {
   const order: Array<{ id: string }> = [];
   return {
@@ -1853,7 +1729,6 @@ function fakeStage() {
   };
 }
 
-/** 겹쳐 놓은 글상자 둘 — 앞의 것이 클릭을 가져간다. */
 const COVERED = `scene "s":
   text "가림막":
     text_content = "가림막"
@@ -1874,10 +1749,7 @@ const COVERED = `scene "s":
   end
 end`;
 
-/**
- * `오브젝트 순서 바꾸기` 는 그리기 순서만 바꾸고 작품이 선언한 순서는 그대로입니다.
- * 클릭을 선언 순서로 찾으면, 맨 앞으로 올라온 복제본이 여전히 가림막에 가려집니다.
- */
+// Click lookup must follow changed display order rather than the project's declaration order.
 test('맨 앞으로 보낸 복제본이 클릭을 가져간다', () => {
   const result = compileProject(COVERED, { path: 'test.tess' });
   assert.ok(result.project, result.errors[0]?.message ?? '컴파일 실패');
@@ -1892,7 +1764,6 @@ test('맨 앞으로 보낸 복제본이 클릭을 가져간다', () => {
   assert.ok(clone, '복제본이 만들어져야 합니다');
   assert.equal(view.order[0], clone as never, '복제본이 맨 앞으로 옵니다');
 
-  // 무대 한가운데는 둘 다 덮고 있는 자리다.
   const hit = machine.entityAtPoint(stage.worldWidth / 2, stage.worldHeight / 2);
   assert.equal(hit, clone, '클릭은 맨 앞의 복제본에게 갑니다');
 
@@ -1915,7 +1786,6 @@ test('순서를 바꾸지 않으면 먼저 선언한 오브젝트가 클릭을 �
   assert.equal(hit, cover.entity, '앞에 선 것은 여전히 가림막입니다');
 });
 
-/** 그릴 것이 없는 실행기(headless)에서는 작품이 선언한 순서가 그대로 선다. */
 test('렌더러가 없으면 선언한 순서로 찾는다', () => {
   const machine = runVm(COVERED.replace('      order first\n', ''));
   machine.tick();
@@ -1926,12 +1796,7 @@ test('렌더러가 없으면 선언한 순서로 찾는다', () => {
   );
 });
 
-/**
- * 말풍선은 오버레이가 엔티티별로 들고 있습니다. 복제본이 사라질 때 오버레이에
- * 말하지 않으면 주인 없는 말풍선이 남아, 작품을 껐다 켜도 화면에 그대로 섭니다.
- * 복제본을 지우는 길(정지·복제본 삭제·장면 바꾸기)은 모두 `removeEntity` 로 모이므로
- * 거기서 한 번 치웁니다. PixiRenderer 는 화면 없이 만들 수 없으므로 소스에서 봅니다.
- */
+// Check clone bubble cleanup through removeEntity because PixiRenderer needs a browser.
 test('복제본을 지우면 그 말풍선도 함께 지운다', () => {
   const renderer = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/renderer.ts'),
@@ -1955,12 +1820,7 @@ test('복제본을 지우면 그 말풍선도 함께 지운다', () => {
   assert.match(forgetBody, /this\.dialogs\.delete\(entity\)/, '들고 있던 자리도 비운다');
 });
 
-/**
- * `new Entry.Dialog` 는 그 오브젝트의 기존 말풍선을 버리고 새 말풍선을 무대에 얹습니다.
- * 그래서 말하기를 한 번 더 하면 — 같은 말이라도 — 그 말풍선이 다른 말풍선들 앞에 섭니다.
- * 글이 바뀔 때만 손대면 계속 말하는 쪽이 먼저 만들어진 순서에 눌려 뒤에 깔립니다.
- * Overlay 는 화면 없이 만들 수 없으므로 그 약속을 소스에서 지킵니다.
- */
+// Repeated speech moves its bubble to the front even when the text is unchanged.
 test('다시 말하면 그 말풍선이 맨 앞으로 온다', () => {
   const overlay = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/overlay.ts'),
@@ -1983,11 +1843,7 @@ test('다시 말하면 그 말풍선이 맨 앞으로 온다', () => {
   );
 });
 
-/**
- * 누르면 무언가 도는 자리라는 것은 커서로 알려 줍니다. 무엇이 눌리는지는 클릭과
- * 같은 규칙(그려진 순서 · 제 픽셀)으로 고르고, 돌고 있지 않은 작품은 눌러도 아무
- * 일이 없으므로 알려 줄 것도 없습니다.
- */
+// Use the same pixel and display-order rules for the cursor as for clicks.
 const CLICKABLE = `scene "s":
   text "버튼":
     text_content = "버튼"
@@ -2005,7 +1861,6 @@ test('클릭을 받는 오브젝트 위에서는 손가락 커서를 알린다',
   assert.equal(machine.clickableAt(...middle()), true);
 });
 
-/** 누르고 떼는 것도 그 오브젝트를 누르는 일이므로 같이 알립니다. */
 test('클릭을 뗐을 때만 받는 오브젝트 위에서도 알린다', () => {
   const machine = runVm(CLICKABLE.replace('when click do', 'when click up do'));
   machine.tick();
@@ -2031,7 +1886,6 @@ test('빈 자리에서는 알리지 않는다', () => {
   assert.equal(machine.clickableAt(0, 0), false, '무대 왼쪽 위 구석에는 아무것도 없습니다');
 });
 
-/** 앞에 있는 것이 클릭을 가져가므로, 커서도 앞에 있는 것을 따라야 합니다. */
 test('클릭을 받지 않는 오브젝트가 가리고 있으면 알리지 않는다', () => {
   const source = `scene "s":
   text "가림막":
@@ -2053,15 +1907,11 @@ end`;
   machine.tick();
   assert.equal(machine.clickableAt(...middle()), false, '앞에 선 가림막이 클릭을 가져갑니다');
 
-  // 버튼을 맨 앞으로 올리면 그때부터는 버튼이 받는다.
   const button = machine.targets.find((item) => item.name === '버튼')!;
   view.moveEntity(button.entity as never, 'FRONT');
   assert.equal(machine.clickableAt(...middle()), true);
 });
 
-// ---------------------------------------------------------------------------
-//  표 창과 변수 상자
-// ---------------------------------------------------------------------------
 const TABLE_WORK = `table 점수표 as "점수 표":
   columns "이름", "점수"
   row "철수", 90
@@ -2076,7 +1926,6 @@ scene "s":
   end
 end`;
 
-/** 표 창이 열리고 닫힌 자국을 남기는 무대. */
 function tableStage() {
   const shown: Array<string | null> = [];
   return {
@@ -2106,16 +1955,12 @@ test('테이블 창 열기는 그 표를 띄운다', () => {
   assert.deepEqual(view.shown.slice(-1), ['점수 표']);
 });
 
-/**
- * `Entry.engine.setTimeout` — 엔트리는 창을 띄우고 시간을 걸어 둘 뿐, 스크립트를
- * 붙잡지 않습니다. 아래 블록은 곧바로 이어집니다.
- */
+// Opening timed table windows must not hold the script.
 test('초를 준 표 창은 스크립트를 붙잡지 않고 그 시간 뒤에 닫힌다', () => {
   const { machine, view } = runWithTable('show 점수표 for 1\n      결과 = 1');
   machine.tick();
   assert.deepEqual(view.shown.slice(-1), ['점수 표'], '창이 열렸습니다');
 
-  // 1초가 차기 전까지는 열려 있다.
   for (let i = 0; i < 50; i += 1) machine.tick();
   assert.equal(view.shown.filter((name) => name === null).length, 1, '아직 닫히지 않았습니다');
   for (let i = 0; i < 20; i += 1) machine.tick();
@@ -2131,11 +1976,7 @@ test('작품을 처음부터 시작하면 열려 있던 표 창은 닫힌다', (
   assert.deepEqual(view.shown.slice(-1), [null]);
 });
 
-/**
- * 엔트리는 표를 두 벌로 듭니다 — `data` 는 지금 값, `origin` 은 처음 값 — 그리고
- * 정지할 때마다 `data` 를 `origin` 으로 되돌립니다. 그래서 실행이 보는 것은
- * `origin` 이고, `data` 만 보면 저장될 때 비워져 있던 표가 통째로 사라집니다.
- */
+// Restore origin because saved data may be empty even when original rows remain.
 test('표는 처음 값(origin)을 읽는다', () => {
   const table = Table.from({
     id: 't', name: '표', fields: ['A', 'B'],
@@ -2146,7 +1987,6 @@ test('표는 처음 값(origin)을 읽는다', () => {
   assert.equal(table.getValue(1, 1), 0, 'A1');
   assert.equal(table.getValue(2, 2), 3, 'B2');
 
-  // 사이트가 붙인 줄 번호가 함께 담겨 와도 칸만 읽는다.
   const keyed = Table.from({
     id: 't', name: '표', fields: ['A'],
     data: [{ key: 'r1', value: [7] }],
@@ -2154,11 +1994,7 @@ test('표는 처음 값(origin)을 읽는다', () => {
   assert.equal(keyed.getValue(1, 1), 7);
 });
 
-/**
- * 슬라이더 손잡이는 단색이 아닙니다 — 엔트리의 9x20 그림은 파란 바탕 가운데에
- * 짙은 파랑 세로 두 줄을 쥠자리로 둡니다. Overlay 는 화면 없이 만들 수 없으므로
- * 그 약속을 소스에서 지킵니다.
- */
+// Check Entry's two slider grip lines in source because Overlay needs a browser.
 test('슬라이더 손잡이는 바탕과 쥠자리 두 색으로 그린다', () => {
   const overlay = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/overlay.ts'),
@@ -2173,11 +2009,7 @@ test('슬라이더 손잡이는 바탕과 쥠자리 두 색으로 그린다', ()
   assert.match(body, /fill\(\{ color: SLIDE_GRIP_COLOR \}\)/);
 });
 
-/**
- * `_adjustSingleViewBox` — 보통 변수 상자는 이름과 값이 차지하는 만큼입니다. 최소
- * 너비(90)는 슬라이더가 달린 상자에만 있고, 그것을 모두에 걸면 값 오른쪽에 빈
- * 자리가 남습니다. Overlay 는 화면 없이 만들 수 없으므로 소스에서 봅니다.
- */
+// Only slider monitors have a minimum width of 90; ordinary boxes fit their contents.
 test('변수 상자는 이름과 값이 차지하는 만큼만 넓다', () => {
   const overlay = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/overlay.ts'),
@@ -2196,7 +2028,6 @@ test('변수 상자는 이름과 값이 차지하는 만큼만 넓다', () => {
   );
 });
 
-/** `updateView` — 오브젝트에 딸린 변수는 `오브젝트명:변수명` 으로 섭니다. */
 test('오브젝트 변수 상자는 오브젝트 이름을 앞에 붙인다', () => {
   const overlay = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/overlay.ts'),
@@ -2205,11 +2036,9 @@ test('오브젝트 변수 상자는 오브젝트 이름을 앞에 붙인다', ()
   const named = overlay.slice(overlay.indexOf('  private monitorName('));
   const body = named.slice(0, named.indexOf('\n  }'));
   assert.match(body, /owner \? `\$\{owner\}:\$\{variable\.name\}` : variable\.name/);
-  // 세 가지 상자가 모두 같은 이름을 쓴다 — 값·슬라이더·목록.
   assert.equal(overlay.split('this.monitorName(variable)').length - 1, 3);
 });
 
-/** 엔트리의 목록 상자에는 오른쪽 아래에 크기를 바꾸는 손잡이가 있습니다. */
 test('목록 상자에는 크기 조절 손잡이가 있다', () => {
   const overlay = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/overlay.ts'),
@@ -2224,10 +2053,7 @@ test('목록 상자에는 크기 조절 손잡이가 있다', () => {
   assert.match(boot, /Math\.max\(LIST_MIN_SIZE, point\.x - resizing\.fromX\)/, '끌면 커진다');
 });
 
-/**
- * `테이블 차트 창 열기` — 엔트리는 차트 번호를 0부터 세고, Tess 는 다른 번호들처럼
- * 1부터 셉니다. 창은 표 창과 같은 자리에 열리고, 같은 자리에서 닫힙니다.
- */
+// Convert one-based Tess chart numbers to zero-based Entry indices.
 test('차트 창은 고른 번호의 차트를 띄운다', () => {
   const source = `table 판매:
   columns "분기", "서울"
@@ -2259,11 +2085,7 @@ end`;
   );
 });
 
-/**
- * 차트는 캔버스가 아니라 창으로 띄웁니다 — 엔트리도 모달(`DataTable.createChart`)로
- * 올립니다. 그리는 것은 `test/tessvm-chart.test.ts` 가 직접 확인하므로, 여기서는 실행
- * 페이지가 그 창에 차트를 넘기고 캔버스는 표만 맡는 자리를 지킵니다.
- */
+// Chart rendering is checked separately; verify only the page-to-view wiring here.
 test('차트 창은 캔버스가 아니라 HTML 로 띄운다', () => {
   const overlay = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/overlay.ts'),
@@ -2278,7 +2100,6 @@ test('차트 창은 캔버스가 아니라 HTML 로 띄운다', () => {
   assert.match(boot, /mountChartWindow\(frame, \(\) => vm\.openTable\(null\)\)/, '창을 무대 옆에 올린다');
   assert.match(boot, /chartWindow\.show\(table, chart\)/);
   assert.match(boot, /chartWindow\.hide\(\)/);
-  // 창의 모양은 실행 페이지와 확장이 함께 가져다 씁니다.
   for (const file of ['packages/tessvm/src/node/page.ts', 'packages/extension/src/page/player.ts']) {
     assert.match(
       fs.readFileSync(path.join(root, file), 'utf-8'),
@@ -2288,18 +2109,7 @@ test('차트 창은 캔버스가 아니라 HTML 로 띄운다', () => {
   }
 });
 
-// ---------------------------------------------------------------------------
-//  함수 재귀 — 엔트리처럼 스택이 넘쳐도 작품은 멈추지 않는다
-// ---------------------------------------------------------------------------
-/**
- * 엔트리는 함수 호출을 자바스크립트 스택에 쌓으므로 끝없는 재귀가 `RangeError` 로
- * 끝납니다. 그 오류는 함수 호출 안에서 잡혀 사라지고, 부르던 자리는 다음 블록으로
- * 그대로 이어집니다(`executor.js` 의 `isFuncExecutor` 갈래). 합치기 도구가 만든
- * 작품이 `__entryMergy_throwCallStackError` 하나로 기대는 것이 이 동작입니다.
- *
- * playentry.org 의 `6aa53c18aac9c815d91518dd` 를 엔트리에서 직접 돌려 확인한 결과도
- * 같습니다 — 오류가 나도 실행 상태는 `run` 이고 장면이 계속 넘어갑니다.
- */
+// Entry catches function stack overflow inside the call and lets the caller continue.
 test('끝없는 재귀는 엔트리처럼 오류로 멈춘다', () => {
   const vm = runVm(
     wrap(
@@ -2344,10 +2154,6 @@ end`,
   assert.equal(valueOf(vm, '횟수'), 3, '깊이는 함수가 끝날 때마다 되돌아옵니다');
 });
 
-// ---------------------------------------------------------------------------
-//  tessvm 확장 이름 — 엔트리에는 없고, 엔트리에서도 작품이 깨지지 않는 것
-// ---------------------------------------------------------------------------
-/** `$TESSVM` 등 확장 이름을 모두 가진 작품. */
 const EXTRA_WORK = `var TESSVM as "$TESSVM" = 0
 var CLIPBOARD as "$CLIPBOARD" = ""
 var CURSOR as "$CURSOR" = ""
@@ -2370,7 +2176,6 @@ scene "s":
   end
 end`;
 
-/** 확장 이름이 붙은 작품과, 그 호출을 받아 적는 가짜 페이지. */
 function extrasVm(): { vm: Vm; calls: string[][] } {
   const vm = runVm(EXTRA_WORK);
   const calls: string[][] = [];
@@ -2433,7 +2238,7 @@ test('$CURSOR 는 css 가 아는 이름만 넘긴다', () => {
 });
 
 test('엔트리 이름 길이에 맞춘 $M_LOCK 도 같은 자리로 읽는다', () => {
-  // 엔트리의 변수 이름 칸은 열 글자까지라 `$MOUSE_LOCK` 은 들어가지 않습니다.
+  // Short aliases keep extension names usable inside Entry's ten-character name limit.
   const vm = runVm(EXTRA_WORK.replace('"$MOUSE_LOCK"', '"$M_LOCK"'));
   const calls: string[][] = [];
   vm.extras.host = {
@@ -2463,7 +2268,7 @@ test('$MOUSE_LOCK 은 페이지에 맡기고, 놓친 것은 다시 0 이 된다'
   assert.equal(extraValue(vm, '$DELTA_Y'), -3);
   vm.tick();
   assert.equal(extraValue(vm, '$DELTA_X'), 0, '움직이지 않은 프레임은 0 입니다');
-  // `Esc` 로 놓친 자리 — 작품이 쓴 것이 아니므로 페이지에 되묻지 않습니다.
+  // Escape releases pointer lock without counting as another work request.
   vm.extras.lockChanged(false);
   vm.tick();
   assert.equal(extraValue(vm, '$MOUSE_LOCK'), 0);
@@ -2486,10 +2291,7 @@ test('작품이 멈추면 페이지가 빌려준 것을 돌려받는다', () => 
   assert.deepEqual(calls, [['release']]);
 });
 
-/**
- * `작품 정지하기`(`stop_run`)는 `Entry.engine.toggleStop` 입니다 — 정지 단추와 같아서
- * 스크립트만 끝내는 `stop all` 과 달리 실행기가 멈추고 작품이 처음 상태로 돌아갑니다.
- */
+// Stop-project resets the player; stop-all-scripts leaves it running.
 test('stop project 는 실행기를 멈추고 처음 상태로 되돌린다', () => {
   const vm = runVm(
     wrap(
@@ -2517,10 +2319,7 @@ test('확장 플레이어에는 우클릭 메뉴가 있다', () => {
   assert.match(css, /\.tessvm-menu button \{/, '메뉴 단추 모양은 페이지의 button 초기화를 이깁니다');
 });
 
-/**
- * 허용 창은 무대 안에 그리는 것이 아니라 실행기가 보는 사람에게 말하는 자리이므로
- * 무대 크기를 따라가지 않습니다 — 확장처럼 무대가 작으면 단추가 몇 픽셀로 납작해집니다.
- */
+// Permission dialogs need their own readable size instead of shrinking with the stage.
 test('허용 창 크기는 무대 폭을 따라가지 않는다', () => {
   const style = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/web/extras.ts'),
@@ -2534,12 +2333,7 @@ test('허용 창 크기는 무대 폭을 따라가지 않는다', () => {
   assert.match(block, /padding: 9px 16px;/, '단추는 고정 픽셀입니다');
 });
 
-/**
- * `skip` 으로 끝나는 반복은 한 바퀴에 프레임을 쓰지 않습니다 — 되돌리기가 미로 수업의
- * 반복 블록(`ai_repeat_until_reach`)을 적는 형태입니다. 안쪽이 바퀴마다 프레임을 쓰면
- * 그것을 부르는 바깥 반복의 한 바퀴에 안쪽 바퀴 수만큼 프레임이 들어, 매 프레임 움직여야
- * 할 값이 그 배수로 끊깁니다.
- */
+// Frameless inner loops must not multiply the outer loop's frame cost.
 test('프레임을 쓰지 않는 반복은 바깥 반복의 한 바퀴를 늦추지 않는다', () => {
   const vm = runVm(`
 var 높이 = 0
@@ -2572,11 +2366,6 @@ end`);
   }
 });
 
-// ---------------------------------------------------------------------------
-//  붓 채우기의 감김 규칙
-// ---------------------------------------------------------------------------
-
-/** 사다리꼴 목록 안에 그 점이 들어 있는가. 사다리꼴은 볼록하므로 외적 부호로 봅니다. */
 function fillCovers(parts: number[][], x: number, y: number): boolean {
   for (const quad of parts) {
     let negative = false;
@@ -2595,12 +2384,7 @@ function fillCovers(parts: number[][], x: number, y: number): boolean {
   return false;
 }
 
-/**
- * 엔트리의 채우기는 캔버스의 `ctx.fill()` 이라 nonzero 감김 규칙을 따릅니다. 가로
- * 왕복과 세로 왕복을 한 경로에 이어 붙이면 겹친 칸의 감김 수가 0 이 되어 체커보드가
- * 나오고, `3dcheese.ent` 의 바닥판이 그 위에 서 있습니다. PIXI 는 폴리곤을 단순
- * 외곽선으로 보므로(earcut) 이 경로를 계단 모양으로 뭉갭니다.
- */
+// Canvas uses nonzero winding for intersecting paths; PIXI's outline triangulation differs.
 test('스스로 가로지르는 채우기 경로는 nonzero 로 풀린다', () => {
   const cell = 24;
   const size = 8;
@@ -2633,7 +2417,6 @@ test('스스로 가로지르는 채우기 경로는 nonzero 로 풀린다', () =
   }
 });
 
-/** 가로지르지 않는 경로는 어느 쪽으로 칠해도 같으므로 모양이 그대로 나옵니다. */
 test('가로지르지 않는 채우기 경로는 모양이 그대로다', () => {
   const parts = nonzeroParts([0, 0, 10, 0, 10, 10, 0, 10]);
   assert.ok(parts);
@@ -2646,7 +2429,7 @@ test('가로지르지 않는 채우기 경로는 모양이 그대로다', () => 
   }
 });
 
-/** 나비 넥타이는 두 날개의 감김 수가 각각 ±1 이라 둘 다 칠해집니다. */
+// Both bow-tie wings have nonzero winding and must be filled.
 test('꼬인 사각형은 두 날개가 모두 칠해진다', () => {
   const parts = nonzeroParts([0, 0, 20, 20, 20, 0, 0, 20]);
   assert.ok(parts);
@@ -2656,13 +2439,8 @@ test('꼬인 사각형은 두 날개가 모두 칠해진다', () => {
   assert.equal(fillCovers(parts, 10, 17), false, '가운데 위아래는 바깥');
 });
 
-/**
- * 엔트리에서 부스트 모드는 **WebGL 렌더러를 고르는 스위치**입니다. 켜면 채우기가 PIXI 로
- * 가서 자기교차 경로를 단순 외곽선으로 뭉개고, 끄면 캔버스로 가서 nonzero 로 칠합니다 —
- * 값을 돌려주기만 하고 그리는 방식이 그대로면 두 모드가 같은 그림을 냅니다.
- */
+// Boost changes Entry's fill rule as well as its reported boolean value.
 test('부스트 모드는 채우기를 칠하는 방식까지 고른다', () => {
-  // 가로 왕복과 세로 왕복을 이어 붙인, 체커보드가 되는 경로.
   const cell = 24;
   const size = 4;
   const points: number[] = [];
@@ -2690,11 +2468,7 @@ test('부스트 모드는 채우기를 칠하는 방식까지 고른다', () => 
   assert.deepEqual(canvas, nonzeroParts(points));
 });
 
-/**
- * 부스트를 끈 엔트리는 글상자를 `textBaseline: middle` 로 `y = 0` 에 놓아 첫 줄이 상자
- * 가운데에 오고, 폭은 줄을 쪼개지 않고 글 전체를 잰 값입니다. 켠 엔트리는 `anchor.y`
- * 가 0.5 라 글 덩어리 전체가 가운데에 옵니다.
- */
+// Canvas centers the first line; boost centers the whole text block.
 test('글상자의 세로 정렬과 폭도 부스트 모드를 따라간다', () => {
   const source = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/renderer.ts'),
@@ -2713,12 +2487,7 @@ test('글상자의 세로 정렬과 폭도 부스트 모드를 따라간다', ()
   assert.match(measure, /this\.options\.boost === false/, '폭도 부스트를 봅니다');
 });
 
-/**
- * 부스트 모드는 값이자 렌더러를 고르는 스위치이므로, 돌아가는 중에 바뀌면 렌더러도
- * 알아야 합니다 — 확장의 부스트 토글은 `vm.boost` 하나만 건드립니다
- * (`packages/extension/src/page/player.ts`). 알리지 않으면 값만 바뀌고 그림은 그대로라
- * 켜고 꺼도 아무 일이 없습니다.
- */
+// Notify the renderer when VM boost changes so drawing rules update too.
 test('돌아가는 중에 부스트를 바꾸면 렌더러도 다시 그린다', () => {
   const told: boolean[] = [];
   const vm = new Vm({
@@ -2745,51 +2514,31 @@ test('돌아가는 중에 부스트를 바꾸면 렌더러도 다시 그린다',
   assert.deepEqual(told, [false, true]);
 });
 
-/**
- * 벡터 모양은 이름 크기에서 구워지므로, 키워서 그리는 모양은 그만큼 더 촘촘히 구워야
- * 화면에서 같은 선명도가 납니다. 이 배율을 보지 않으면 150% 로 키운 모양이 텍스처를
- * 늘려 쓰게 되어 흐려집니다.
- */
+// Include drawn costume scale when choosing vector texture sharpness.
 test('벡터 모양의 굽는 배율은 실제로 그리는 크기를 따라간다', () => {
-  // 긴 변 하한도 픽셀 상한도 걸리지 않는 크기로, 배율만 보이게 합니다.
+  // Keep minimum-side and maximum-pixel limits inactive to isolate scale behavior.
   const plain = svgSharpness(3, 400, 400);
   const bigger = svgSharpness(3, 400, 400, 1, 1.5);
   assert.ok(bigger > plain, `${bigger} > ${plain}`);
   assert.equal(bigger, plain * 1.5);
 
-  // 줄여 그리는 모양은 이름 크기 아래로 내려가지 않습니다 — 하한이 그대로 걸립니다.
   assert.equal(svgSharpness(3, 400, 400, 1, 0.25), plain);
 
-  // 픽셀 상한은 배율보다 뒤에 걸립니다.
   const huge = svgSharpness(3, 2048, 2048, 1, 4);
   assert.ok(huge <= MAX_TEXTURE_SIDE / 2048, String(huge));
 });
 
-/**
- * 벡터에 "몇 배까지" 라는 고정 상한을 두면, 화면이 그보다 촘촘할 때 텍스처가 화면보다
- * 성겨집니다 — 전체 화면에서는 무대 배율만 8배에 가까운데 4배로 잘라 두면 화면 픽셀의
- * 절반만 담게 되어 옆의 png 와 다를 바 없이 보입니다(`play.ent` 의 단추).
- */
+// Follow screen sharpness rather than a fixed SVG scale ceiling.
 test('벡터 화질은 화면이 요구하는 만큼 따라 올라간다', () => {
   for (const display of [4, 6, 8]) {
-    // 278×109 는 픽셀 상한에 한참 못 미치므로 화면을 그대로 따라갑니다.
     assert.equal(svgSharpness(display, 278, 109), display, `displayScale ${display}`);
   }
-  // 픽셀 상한은 그 위에 그대로 걸립니다.
   const huge = svgSharpness(8, 960, 540);
   assert.ok(960 * huge <= MAX_TEXTURE_SIDE && 960 * huge * 540 * huge <= 2048 * 2048 * 1.01, String(huge));
-  // 화면이 성겨도 하한 3배 아래로는 내려가지 않습니다.
   assert.equal(svgSharpness(1, 480, 480), 3);
 });
 
-/**
- * PIXI 의 `loadSvg` 는 svg 를 `<img>` 로 불러와 `drawImage` 로 옮겨 그립니다. `<img>` 는
- * **그림이 말하는 자기 크기**로 먼저 래스터화되는데, 엔트리 벡터에는 `width`·`height` 가
- * 없고 `viewBox` 만 있어서 브라우저 기본값(300px 폭)으로 그려집니다. 그것을 목표 크기로
- * 늘리니 몇 배로 구우라고 해도 가장자리가 계단으로 남았습니다(`play.ent` 의 단추는
- * 278×109 인데 `<img>` 고유 크기가 300×118 이었습니다). 뿌리 `<svg>` 에 목표 픽셀 크기를
- * 박아 브라우저가 처음부터 그 크기로 그리게 합니다.
- */
+// Set SVG dimensions before image loading so the browser rasterizes at the requested size.
 test('벡터는 목표 픽셀 크기를 박은 사본으로 굽는다', () => {
   const plain = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 278 109"><path d="M0 0"/></svg>';
   const sized = sizedVector(plain, 834, 327);
@@ -2800,22 +2549,16 @@ test('벡터는 목표 픽셀 크기를 박은 사본으로 굽는다', () => {
   assert.match(markup, /viewBox="0 0 278 109"/, 'viewBox 는 그대로 — 그림은 달라지지 않습니다');
   assert.match(markup, /<path d="M0 0"\/>/, '본문도 그대로입니다');
 
-  // 이미 크기가 박혀 있으면 갈아 끼웁니다.
   const had = sizedVector('<svg width="10" height="4" viewBox="0 0 10 4"></svg>', 100, 40);
   const second = decodeURIComponent(had.slice(had.indexOf(',') + 1));
   assert.match(second, /width="100"/);
   assert.doesNotMatch(second, /width="10"(?!0)/);
 
-  // `<svg>` 가 없으면 빈 문자열 — 부르는 쪽이 원래 주소를 씁니다.
+  // Fall back to the original URL when no root SVG element exists.
   assert.equal(sizedVector('그림이 아님', 10, 10), '');
 });
 
-/**
- * PIXI 필터는 대상을 중간 텍스처에 한 번 그린 뒤 거기에 행렬을 씁니다. 그 텍스처의 배율
- * 기본값이 **1** 이라(`Filter.defaultOptions.resolution`), 캔버스가 3배로 그리고 있어도
- * 효과가 걸린 오브젝트만 1배로 그려져 확대됩니다 — 마우스를 한 번 대면 밝기 효과가 붙고
- * 그때부터 가장자리가 계단이 되던 자리입니다(`play.ent` 의 단추).
- */
+// Filter resolution must follow the renderer or effects blur high-resolution sprites.
 test('효과 필터는 캔버스 배율을 그대로 따라간다', () => {
   const source = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/renderer.ts'),
@@ -2829,20 +2572,12 @@ test('효과 필터는 캔버스 배율을 그대로 따라간다', () => {
   assert.match(block, /antialias: 'inherit'/, '앤티에일리어싱도 물려받습니다');
 });
 
-/**
- * 붓 무리는 획 하나가 자랄 때마다 통째로 다시 그려집니다. 끝난 획을 프레임마다 다시
- * 자르면 그림이 길어질수록 한 프레임의 값이 같이 늘어나(획 수에 비례) 결국 제곱이
- * 됩니다 — 400 프레임을 도는 작품에서 자르기 호출이 80,200번이었습니다. 한 번 `strokes`
- * 에 들어간 획은 `startStroke` 가 새 배열로 갈아 끼우므로 다시 바뀌지 않아, 잘라 둔 것을
- * 그대로 쓸 수 있습니다(400번으로 줄었습니다).
- */
+// Cache finished stroke splits because redrawing growing groups otherwise repeats quadratic work.
 test('끝난 획은 프레임마다 다시 자르지 않는다', () => {
   const source = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/renderer.ts'),
     'utf-8',
   );
-  // 자르기는 무리 하나를 긋는 `tracePenGroup` 이 하고, 한 무리짜리와 여러 무리를
-  // 한 마디에 담는 쪽이 그것을 같이 씁니다.
   const block = source.slice(
     source.indexOf('private drawPenRun'),
     source.indexOf('private stopObject'),
@@ -2850,20 +2585,13 @@ test('끝난 획은 프레임마다 다시 자르지 않는다', () => {
   assert.match(block, /this\.fillCache\.get\(piece\)/, '잘라 둔 것을 먼저 찾습니다');
   assert.match(block, /this\.fillCache\.set\(piece,/, '새로 자른 것은 붙들어 둡니다');
   assert.match(block, /known\.boost === boost/, '부스트가 바뀌면 다시 자릅니다');
-  // 선만 긋는 획은 점 배열을 새로 만들지 않고 그 자리에서 뒤집습니다.
   assert.match(block, /traceFlipped\(piece\.points\)/);
 
   const boostBlock = source.slice(source.indexOf('setBoost(on: boolean)'), source.indexOf('setScene(sceneId'));
   assert.match(boostBlock, /this\.fillCache = new WeakMap\(\)/, '부스트가 바뀌면 버립니다');
 });
 
-/**
- * PIXI 의 `TextStyle` 은 값이 같으면 그냥 넘어가지만 `fill` 만은 **객체 동일성**으로
- * 거릅니다(`value === this._originalFill`). 그래서 같은 색이라도 새 객체를 넣으면 글을
- * 통째로 다시 재고 다시 그립니다 — 글이 길수록 그 값이 커져서, 2만 자짜리 글상자를 여러
- * 벌 복제하는 작품(`dizzy.ent` 의 장면 2)은 프레임이 평균 64ms·최대 691ms 까지 갔습니다
- * (색이 달라질 때만 넣으면 7ms 로 평평해집니다).
- */
+// Reuse unchanged fill objects because PIXI checks their identity and rebakes text on replacement.
 test('글상자 색은 달라질 때만 PIXI 에 넣는다', () => {
   const source = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/renderer.ts'),
@@ -2879,20 +2607,13 @@ test('글상자 색은 달라질 때만 PIXI 에 넣는다', () => {
   assert.match(block, /view\.colour = entity\.colour;/, '넣은 색을 적어 둡니다');
 });
 
-/**
- * PIXI 의 에셋 칸은 페이지에 하나뿐이라, 실행기가 둘이면 같은 모양을 **같은 텍스처**로
- * 받습니다. 벡터 모양은 화면이 커지면 더 진하게 다시 구워지고 그 전 것을 `Assets.unload`
- * 로 놓아 주는데, 그것이 옆 실행기가 그리고 있는 바로 그 텍스처였습니다 — 한쪽이 화질을
- * 올리자 두 실행기의 체스말이 함께 사라지고 `alphaMode of null` 로 멎었습니다. 도장도
- * 같은 텍스처를 그대로 들고 있어서, 실행기가 하나여도 다시 굽는 순간 도장 84개가 빈
- * 텍스처가 됐습니다. 그래서 구운 사본은 **쥔 수를 세어** 마지막 하나가 놓을 때만 내립니다.
- */
+// Reference-count shared rasterizations so another runner or stamp cannot lose its texture.
 test('구운 벡터 모양은 마지막으로 쥔 쪽이 놓을 때만 내린다', () => {
   const source = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/render/renderer.ts'),
     'utf-8',
   );
-  // 내리는 자리는 쥔 수를 세는 함수 안 한 군데뿐이다.
+  // Unload textures only through the reference-counted release helper.
   const unloads = source.match(/Assets\.unload\(/g) ?? [];
   assert.equal(unloads.length, 1, '내리는 자리는 한 군데입니다');
   const release = source.slice(
@@ -2902,13 +2623,13 @@ test('구운 벡터 모양은 마지막으로 쥔 쪽이 놓을 때만 내린다
   assert.match(release, /if \(held > 1\)/, '남이 쥐고 있으면 수만 줄입니다');
   assert.match(release, /Assets\.unload\(src\)/, '마지막 하나일 때만 내립니다');
 
-  // 쥐는 자리는 셋 — 처음 구울 때, 다시 구울 때, 그리고 도장을 찍을 때.
+  // Acquire references on initial rasterization, rerasterization, and stamping.
   const holds = source.match(/holdBaked\(/g) ?? [];
   assert.equal(holds.length, 3, '쥐는 자리는 세 군데입니다');
   assert.match(source, /private keepBaked\(id: string, baked: Baked\): void \{/);
   assert.match(source, /sprite\.__baked = baked\.src;/, '도장은 쥔 것을 적어 둡니다');
 
-  // 도장은 언제나 `dropStamp` 를 지나야 쥔 것을 놓는다.
+  // Release stamps through dropStamp on every removal path.
   assert.doesNotMatch(source, /\bstamp\.destroy\(\)/, '도장을 바로 없애지 않습니다');
   const drops = source.match(/this\.dropStamp\(stamp\)/g) ?? [];
   assert.equal(drops.length, 4, '도장을 없애는 자리는 모두 그리로 갑니다');
@@ -2942,13 +2663,11 @@ test('tessvm - 시작 장면을 정하면 그 장면에서 실행을 시작한�
   const project = result.project as unknown as EntryProject;
   const second = project.scenes[1]!;
 
-  // 정하지 않으면 엔트리처럼 첫 장면에서 시작한다.
   const first = new Vm({ renderer: null, audio: null });
   first.load(project as unknown as never);
   first.start();
   assert.equal(first.currentSceneId, project.scenes[0]!.id);
 
-  // 이름으로도 id 로도 고를 수 있고, 다시 시작해도 그 장면을 지킨다.
   const vm = new Vm({ renderer: null, audio: null });
   vm.load(project as unknown as never);
   vm.setStartScene(second.name);
@@ -2959,7 +2678,6 @@ test('tessvm - 시작 장면을 정하면 그 장면에서 실행을 시작한�
   vm.start();
   assert.equal(vm.currentSceneId, second.id);
 
-  // 없는 장면을 넣으면 첫 장면으로 돌아간다.
   vm.stop();
   vm.setStartScene('없는 장면');
   vm.start();

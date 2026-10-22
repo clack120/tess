@@ -1,36 +1,14 @@
-/**
- * 소리 파일에서 재생 길이(초)를 읽어옵니다.
- * 디코딩 없이 헤더 정보만 읽어 길이를 계산합니다.
- */
 import { latin1, u16le, u32be, u32le, u64be, u64le } from './bytes.ts';
 
 
-/**
- * 소리 길이를 소수점 첫째 자리까지 반올림합니다.
- *
- * @param seconds 원본 시간(초)
- * @returns 반올림된 시간(초)
- * @example
- * const rounded = round(1.234); // 1.2
- */
 const round = (seconds: number) => Math.round(seconds * 10) / 10;
 
-/**
- * 소리 파일의 재생 길이(초)를 측정합니다.
- * 측정할 수 없는 경우 null을 반환합니다.
- *
- * @param bytes 소리 파일의 바이트 데이터
- * @param ext 파일 확장자 (예: '.mp3')
- * @returns 소리 파일의 재생 길이 또는 null
- * @example
- * const duration = audioDuration(buffer, '.mp3');
- */
 export function audioDuration(bytes: Uint8Array, ext: string): number | null {
   try {
     const seconds = measure(bytes, ext);
     return seconds !== null && Number.isFinite(seconds) && seconds > 0 ? round(seconds) : null;
   } catch {
-    return null; // 파일 하나가 깨졌다고 컴파일이 멈추지는 않는다
+    return null; // A damaged sound file should not stop compilation.
   }
 }
 
@@ -39,15 +17,11 @@ function measure(bytes: Uint8Array, ext: string): number | null {
   if (ext === '.ogg') return oggDuration(bytes);
   if (ext === '.m4a' || ext === '.mp4') return mp4Duration(bytes);
   if (ext === '.mp3') return mp3Duration(bytes);
-  // 확장자를 믿을 수 없으면 파일 내용으로 형식을 알아본다
   if (bytes.length > 12 && latin1(bytes, 0, 4) === 'RIFF') return wavDuration(bytes);
   if (bytes.length > 4 && latin1(bytes, 0, 4) === 'OggS') return oggDuration(bytes);
   return mp3Duration(bytes);
 }
 
-// ---------------------------------------------------------------------------
-//  WAV — fmt 청크의 초당 바이트 수로 data 청크를 나눈다
-// ---------------------------------------------------------------------------
 function wavDuration(bytes: Uint8Array): number | null {
   if (bytes.length < 12 || latin1(bytes, 8, 12) !== 'WAVE') return null;
 
@@ -60,22 +34,20 @@ function wavDuration(bytes: Uint8Array): number | null {
     if (id === 'fmt ' && body + 16 <= bytes.length) byteRate = u32le(bytes, body + 8);
     if (id === 'data') {
       if (!byteRate) return null;
-      // 크기 칸이 0 이거나 잘못된 파일(스트리밍으로 기록한 것)은 남은 바이트를 모두 센다
+      // Streaming WAV files may leave the data size unset; use the remaining bytes.
       const dataSize = size > 0 && body + size <= bytes.length ? size : bytes.length - body;
       return dataSize / byteRate;
     }
-    offset = body + size + (size % 2); // 청크 크기는 짝수 바이트로 맞춰져 있다
+    offset = body + size + (size % 2); // WAV chunks are padded to an even byte count.
   }
   return null;
 }
 
-// ---------------------------------------------------------------------------
-//  Ogg (Vorbis · Opus) — 마지막 페이지의 granule position 이 총 샘플 수다
-// ---------------------------------------------------------------------------
+// The last Ogg page's granule position gives the total sample count.
 function oggDuration(bytes: Uint8Array): number | null {
   if (latin1(bytes, 0, 4) !== 'OggS') return null;
 
-  // 첫 페이지의 식별 헤더에서 표본율을 읽는다. Opus 는 언제나 48kHz 를 기준으로 센다.
+  // Opus granule positions always use 48 kHz.
   const head = latin1(bytes, 0, Math.min(bytes.length, 4096));
   let rate = null;
   let preSkip = 0;
@@ -90,7 +62,6 @@ function oggDuration(bytes: Uint8Array): number | null {
   }
   if (!rate) return null;
 
-  // 파일 끝에서부터 거슬러 올라가 마지막 페이지를 찾는다
   for (let offset = bytes.length - 14; offset >= 0; offset -= 1) {
     if (latin1(bytes, offset, offset + 4) !== 'OggS') continue;
     const granule = (u64le(bytes, offset + 6));
@@ -100,21 +71,18 @@ function oggDuration(bytes: Uint8Array): number | null {
   return null;
 }
 
-// ---------------------------------------------------------------------------
-//  MP4 · M4A — moov > mvhd 의 duration / timescale
-// ---------------------------------------------------------------------------
 function mp4Duration(bytes: Uint8Array, start = 0, end = bytes.length): number | null {
   let offset = start;
   while (offset + 8 <= end) {
     let size = u32be(bytes, offset);
     const type = latin1(bytes, offset + 4, offset + 8);
     let body = offset + 8;
-    if (size === 1) { // 크기가 1 이면 뒤에 64비트 크기가 따로 온다
+    if (size === 1) { // An MP4 size of 1 means a 64-bit size follows.
       if (body + 8 > end) return null;
       size = (u64be(bytes, body));
       body += 8;
     }
-    if (size === 0) size = end - offset; // 크기가 0 이면 파일 끝까지가 이 아톰이다
+    if (size === 0) size = end - offset; // An MP4 size of 0 extends to the end of the file.
 
     if (type === 'moov') return mp4Duration(bytes, body, Math.min(end, offset + size));
     if (type === 'mvhd') {
@@ -130,11 +98,6 @@ function mp4Duration(bytes: Uint8Array, start = 0, end = bytes.length): number |
   return null;
 }
 
-// ---------------------------------------------------------------------------
-//  MP3 — 첫 프레임 헤더를 읽고, VBR 표(Xing/VBRI)가 있으면 프레임 수로,
-//  없으면 고정 비트레이트로 나눈다
-// ---------------------------------------------------------------------------
-/** One mp3 frame header, as far as the duration needs it. */
 interface Mp3Frame {
   version: number;
   layer: number;
@@ -146,7 +109,7 @@ interface Mp3Frame {
 }
 
 const MP3_BITRATES: Record<number, Record<number, number[]>> = {
-  // [MPEG 버전][레이어] 별 비트레이트 표(kbps). 인덱스 0 은 free, 15 는 예약값이라 쓰지 않는다.
+  // Bitrate indices 0 and 15 are free-format and reserved, respectively.
   1: {
     1: [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
     2: [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
@@ -160,13 +123,12 @@ const MP3_BITRATES: Record<number, Record<number, number[]>> = {
 };
 const MP3_RATES: Record<number, number[]> = { 1: [44100, 48000, 32000], 2: [22050, 24000, 16000], 2.5: [11025, 12000, 8000] };
 
-/** 파일 앞에 붙은 ID3v2 태그를 건너뛴 위치 */
 function skipId3(bytes: Uint8Array): number {
   if (bytes.length < 10 || latin1(bytes, 0, 3) !== 'ID3') return 0;
-  // 태그 크기는 바이트마다 7비트만 쓰는 synchsafe 정수로 적혀 있다
+  // ID3v2 sizes use only seven bits per byte.
   const size = ((bytes[6]! & 0x7f) << 21) | ((bytes[7]! & 0x7f) << 14)
     | ((bytes[8]! & 0x7f) << 7) | (bytes[9]! & 0x7f);
-  return 10 + size + (bytes[5]! & 0x10 ? 10 : 0); // 꼬리말(footer)이 있으면 10 바이트를 더 건너뛴다
+  return 10 + size + (bytes[5]! & 0x10 ? 10 : 0); // An ID3v2 footer adds ten bytes.
 }
 
 function mp3FrameHeader(bytes: Uint8Array, offset: number): Mp3Frame | null {
@@ -175,7 +137,7 @@ function mp3FrameHeader(bytes: Uint8Array, offset: number): Mp3Frame | null {
 
   const versionBits = (bytes[offset + 1]! >> 3) & 0x03;
   const layerBits = (bytes[offset + 1]! >> 1) & 0x03;
-  if (versionBits === 1 || layerBits === 0) return null; // 쓰지 않는 예약값이다
+  if (versionBits === 1 || layerBits === 0) return null;
 
   const version = ({ 0: 2.5, 2: 2, 3: 1 } as Record<number, number>)[versionBits];
   const layer = ({ 1: 3, 2: 2, 3: 1 } as Record<number, number>)[layerBits];
@@ -186,7 +148,7 @@ function mp3FrameHeader(bytes: Uint8Array, offset: number): Mp3Frame | null {
 
   const padding = (bytes[offset + 2]! >> 1) & 0x01;
   const mono = ((bytes[offset + 3]! >> 6) & 0x03) === 3;
-  // 레이어 I 은 한 프레임이 384 표본이고 슬롯이 4바이트다. 레이어 III 은 MPEG2·2.5 에서 표본이 절반이다.
+  // Layer I uses 384 samples and four-byte slots; MPEG 2/2.5 halves Layer III samples.
   const samples = layer === 1 ? 384 : (layer === 2 || version === 1 ? 1152 : 576);
   const size = layer === 1
     ? Math.floor((12000 * bitrate) / sampleRate + padding) * 4
@@ -198,7 +160,7 @@ function mp3FrameHeader(bytes: Uint8Array, offset: number): Mp3Frame | null {
 function mp3Duration(bytes: Uint8Array): number | null {
   const start = skipId3(bytes);
 
-  // 첫 프레임을 찾는다. 태그 뒤에 알 수 없는 바이트가 조금 붙어 있는 파일도 있다.
+  // Tags may be followed by extra bytes before the first MP3 frame.
   let frame = null;
   let offset = start;
   for (const limit = Math.min(bytes.length, start + 65536); offset < limit; offset += 1) {
@@ -207,11 +169,10 @@ function mp3Duration(bytes: Uint8Array): number | null {
   }
   if (!frame) return null;
 
-  // VBR 표가 있으면 전체 프레임 수가 그대로 적혀 있다
   const vbrFrames = xingFrames(bytes, offset, frame) ?? vbriFrames(bytes, offset);
   if (vbrFrames) return (vbrFrames * frame.samples) / frame.sampleRate;
 
-  // 없으면 고정 비트레이트로 계산한다. 파일 뒤에 붙은 ID3v1 태그(128바이트)는 빼고 센다.
+  // Without a VBR frame count, estimate from bitrate and exclude the ID3v1 tag.
   const hasId3v1 = bytes.length >= 128
     && latin1(bytes, bytes.length - 128, bytes.length - 125) === 'TAG';
   const audioBytes = (bytes.length - (hasId3v1 ? 128 : 0)) - offset;
@@ -219,7 +180,7 @@ function mp3Duration(bytes: Uint8Array): number | null {
 }
 
 function xingFrames(bytes: Uint8Array, frameStart: number, frame: Mp3Frame): number | null {
-  // Xing/Info 표는 프레임 헤더 뒤의 side info 다음에 온다. 그 자리는 버전과 채널 수에 따라 다르다.
+  // Xing/Info follows side info, whose size depends on MPEG version and channel count.
   const skip = frame.version === 1 ? (frame.mono ? 21 : 36) : (frame.mono ? 13 : 21);
   const at = frameStart + skip;
   if (at + 12 > bytes.length) return null;

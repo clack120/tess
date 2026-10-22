@@ -1,12 +1,4 @@
-/**
- * @fileoverview Style for the answer field `ask` puts on the stage.
- *
- * `Entry.stage.showInputField` draws it into the 640×360 canvas: a 546×50 box at
- * (15, 275) and a 54×54 submit button just after it, so every measurement here is
- * that fraction of the stage. Sizes that are not fractions — the text, the corner
- * radius, the border — read `--tessvm-stage-width`, which the runner writes with
- * the canvas' own width whenever it lays out.
- */
+// Scale Entry's ask-field geometry with the stage; use CSS pixels for text and borders.
 export const ASK_FIELD_STYLE = `
 .tessvm-ask {
   --ask-unit: calc(var(--tessvm-stage-width, 640px) / 640);

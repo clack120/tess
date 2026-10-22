@@ -1,26 +1,10 @@
 import { BLOCK_PARAM_COUNTS } from './block-params.ts';
 import type { EntryProject } from './types.ts';
 
-/**
- * 컴파일된 엔트리 프로젝트 구조가 올바른지 검증하기 위해 사용되는 범용 블록 타입입니다.
- * 구조가 완전하지 않을 수 있는 프로젝트를 다루기 위해 `EntryBlock` 대신 사용됩니다.
- */
 type AnyBlock = Record<string, any>;
 
-/** 엔트리 블록 내 매개변수가 참조할 수 있는 대상의 종류를 나타냅니다. */
 type ReferenceKind = 'variable' | 'list' | 'message' | 'scene' | 'picture' | 'sound' | 'objectOrSelf';
 
-/** 
- * 특정 블록을 소유한 오브젝트가 가지고 있는 모양(picture)과 소리(sound)의 ID 집합입니다. 
- *
- * @example
- * ```ts
- * const owner: BlockOwner = {
- *   pictures: new Set(["pic_1", "pic_2"]),
- *   sounds: new Set(["sound_1"])
- * };
- * ```
- */
 interface BlockOwner {
   pictures: Set<string>;
   sounds: Set<string>;
@@ -32,15 +16,6 @@ const PROJECT_KEYS = [
   'objects', 'scenes', 'variables', 'messages', 'functions', 'speed', 'interface',
 ];
 
-/**
- * 블록 타입에 따른 참조 무결성 규칙을 정의합니다.
- * 각 배열의 요소는 [파라미터 인덱스, 참조 종류] 쌍으로 구성됩니다.
- *
- * @example
- * ```ts
- * const rules = REFERENCES["get_variable"]; // [[0, "variable"]]
- * ```
- */
 const REFERENCES: Record<string, Array<[number, ReferenceKind]>> = {
   get_variable: [[0, 'variable']],
   set_variable: [[0, 'variable']],
@@ -68,21 +43,6 @@ const REFERENCES: Record<string, Array<[number, ReferenceKind]>> = {
   text_read: [[0, 'objectOrSelf']],
 };
 
-/**
- * 주어진 엔트리 프로젝트의 구조적 오류를 검사하고 발견된 문제 목록을 반환합니다.
- * 반환된 배열이 비어있다면 프로젝트 구조가 정상임을 의미합니다.
- *
- * @param project 검사할 엔트리 프로젝트 객체
- * @returns 발견된 문제점들에 대한 설명이 담긴 문자열 배열
- *
- * @example
- * ```ts
- * const problems = verifyEntryProject(project);
- * if (problems.length > 0) {
- *   console.error("프로젝트에 오류가 있습니다:", problems);
- * }
- * ```
- */
 export function verifyEntryProject(project: EntryProject): string[] {
   const problems: string[] = [];
   const add = (message: string) => problems.push(message);
@@ -102,7 +62,7 @@ export function verifyEntryProject(project: EntryProject): string[] {
   }
   const objectIds = new Set(project.objects.map((object) => object.id));
 
-  /** 블록 ID는 개별 오브젝트나 함수 내에서만 고유하면 됩니다. */
+  // Block IDs only need to be unique within each object or function.
   let blockIds = new Set<string>();
 
   const checkBlock = (block: AnyBlock | null | undefined, owner: BlockOwner | null, path: string) => {
@@ -123,7 +83,6 @@ export function verifyEntryProject(project: EntryProject): string[] {
     if (!Array.isArray(block.params)) add(`${path}: params 가 배열이 아닙니다.`);
     if (!Array.isArray(block.statements)) add(`${path}: statements 가 배열이 아닙니다.`);
 
-    // 엔트리가 저장하는 파라미터 자리 개수와 맞는지
     const expected = BLOCK_PARAM_COUNTS[block.type];
     if (expected !== undefined && block.params?.length !== expected) {
       add(`${path}: ${block.type} 의 params 가 ${block.params?.length}개입니다. (엔트리는 ${expected}개)`);
@@ -138,7 +97,7 @@ export function verifyEntryProject(project: EntryProject): string[] {
       const value = block.params?.[index];
       if (value === null || value === undefined) continue;
       if (typeof value !== 'string') continue;
-      // 함수 안의 모양·소리는 호출한 오브젝트의 것이라 여기서 확인할 수 없다
+      // Function resources belong to the calling object and cannot be checked here.
       if (!owner && (kind === 'picture' || kind === 'sound')) continue;
       const checks: Record<ReferenceKind, () => boolean> = {
         variable: () => variableIds.has(value),
@@ -223,7 +182,6 @@ export function verifyEntryProject(project: EntryProject): string[] {
     }
     checkBlock(create, null, `함수 '${fn.id}'`);
 
-    // 본문에서 쓰는 매개변수 블록이 정의부에 선언되어 있는지
     const declared = new Set();
     let field = create.params?.[0];
     while (field && typeof field === 'object') {

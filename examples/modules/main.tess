@@ -1,4 +1,4 @@
-# spec 3.3 — use 로 파일을 쪼개서 관리하기
+# Split a project with use declarations.
 use "common/settings.tess"
 use "common/math_helper.tess"
 

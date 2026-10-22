@@ -1,9 +1,3 @@
-/**
- * 모양(그림) 및 소리 리소스 처리 모듈입니다.
- * 
- * 엔트리 프로젝트는 리소스를 `temp/<앞2자>/<다음2자>/image|sound/<파일명>.<확장자>` 경로에 저장하며,
- * `project.json`의 `fileurl` 속성이 이 경로를 가리킵니다.
- */
 import { includesText, u16be, u16le, u32be } from './bytes.ts';
 import { EMPTY_HOST, basename, extname } from './host.ts';
 import { seedFrom } from './ids.ts';
@@ -12,27 +6,11 @@ import type { Node } from '@tess/parser';
 import type { Context } from './context.ts';
 import type { EntryAsset } from './types.ts';
 
-/**
- * 이미지나 소리 파일의 크기 정보를 나타내는 인터페이스입니다.
- * 
- * @example
- * ```typescript
- * const size: Size = { width: 100, height: 100 };
- * ```
- */
 interface Size {
   width: number;
   height: number;
 }
 
-/**
- * `costume` 또는 `sound` 선언에서 지정된 파일의 정보를 나타냅니다.
- * 
- * @example
- * ```typescript
- * const decl: AssetDecl = { id: 'abc', file: 'image.png', width: 100, height: 100 };
- * ```
- */
 interface AssetDecl {
   id: string;
   file: string;
@@ -47,7 +25,6 @@ const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const IMAGE_TYPES: Record<string, string> = { '.png': 'png', '.jpg': 'jpg', '.jpeg': 'jpg', '.gif': 'gif', '.svg': 'svg', '.bmp': 'bmp' };
 const SOUND_TYPES = new Set(['.mp3', '.wav', '.ogg', '.m4a']);
 
-/** Media types a `data:` address may carry, as the extension a file of that kind has. */
 const DATA_TYPES: Record<string, string> = {
   'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/gif': '.gif',
   'image/svg+xml': '.svg', 'image/bmp': '.bmp',
@@ -55,26 +32,13 @@ const DATA_TYPES: Record<string, string> = {
   'audio/wave': '.wav', 'audio/ogg': '.ogg', 'audio/mp4': '.m4a', 'audio/x-m4a': '.m4a',
 };
 
-/**
- * The extension that says what an asset is. A `data:` address (an editor keeping
- * files in memory) says it with its media type instead of a file name.
- */
+// Data URLs carry their type in the MIME header, not a file extension.
 function assetExt(file: string): string {
   const data = /^data:([^;,]+)/i.exec(file);
   if (data) return DATA_TYPES[data[1]!.toLowerCase()] ?? '';
   return extname(file).toLowerCase();
 }
 
-/** 
- * 엔트리 리소스 파일명(32자)을 리소스의 키(내용/경로 등)를 기반으로 결정적으로 생성합니다.
- * 
- * @param key 파일명을 생성할 기준이 되는 문자열 키
- * @returns 32자 길이의 결정적인 영숫자 파일명
- * @example
- * ```typescript
- * const filename = assetFilename('image:my_image.png:1024');
- * ```
- */
 export function assetFilename(key: string): string {
   let state = seedFrom(key) || 1;
   let name = '';
@@ -85,35 +49,10 @@ export function assetFilename(key: string): string {
   return name;
 }
 
-/**
- * 주어진 리소스 정보를 바탕으로 엔트리 프로젝트 내의 파일 경로(`fileurl`)를 생성합니다.
- * 
- * @param kind 리소스의 종류 ('image' 또는 'sound')
- * @param filename 32자로 생성된 리소스 파일명
- * @param ext 리소스의 파일 확장자 (예: '.png', '.mp3')
- * @returns 엔트리 프로젝트 구조에 맞는 파일 경로 문자열
- * @example
- * ```typescript
- * const url = fileUrlFor('image', 'abcdefghijklmnopqrstuvwxyz012345', '.png');
- * // 'temp/ab/cd/image/abcdefghijklmnopqrstuvwxyz012345.png'
- * ```
- */
 export function fileUrlFor(kind: string, filename: string, ext: string): string {
   return `temp/${filename.slice(0, 2)}/${filename.slice(2, 4)}/${kind}/${filename}${ext}`;
 }
 
-/** 
- * PNG, JPEG, GIF, SVG 파일의 바이너리 데이터에서 원본 이미지의 가로/세로 크기를 읽어옵니다.
- * 
- * @param buffer 이미지 파일의 바이너리 데이터
- * @returns 이미지의 크기 객체, 파싱할 수 없는 경우 `null`
- * @example
- * ```typescript
- * const buffer = new Uint8Array(await file.arrayBuffer());
- * const size = imageSize(buffer);
- * if (size) console.log(size.width, size.height);
- * ```
- */
 export function imageSize(buffer: Uint8Array): Size | null {
   if (buffer.length >= 24 && u32be(buffer, 0) === 0x89504e47) {
     return { width: u32be(buffer, 16), height: u32be(buffer, 20) };
@@ -137,18 +76,6 @@ export function imageSize(buffer: Uint8Array): Size | null {
   return null;
 }
 
-/**
- * SVG 파일의 바이너리 데이터에서 이미지의 가로/세로 크기를 읽어옵니다.
- * `width`/`height` 속성을 우선적으로 확인하며, 없는 경우 `viewBox` 속성을 사용하여 크기를 계산합니다.
- * 
- * @param buffer SVG 파일의 바이너리 데이터
- * @returns SVG 이미지의 크기 객체, 파싱할 수 없는 경우 `null`
- * @example
- * ```typescript
- * const buffer = new TextEncoder().encode('<svg width="100" height="200"></svg>');
- * const size = svgSize(buffer); // { width: 100, height: 200 }
- * ```
- */
 function svgSize(buffer: Uint8Array): Size | null {
   const text = new TextDecoder('utf-8').decode(buffer);
   const tag = text.match(/<svg\b[^>]*>/i)?.[0];
@@ -157,7 +84,7 @@ function svgSize(buffer: Uint8Array): Size | null {
   const length = (attr: string): number | null => {
     const raw = tag.match(new RegExp(`\\b${attr}\\s*=\\s*["']([^"']+)["']`, 'i'))?.[1]?.trim();
     if (!raw) return null;
-    const match = raw.match(/^([\d.]+)(px)?$/i); // % 나 다른 단위는 픽셀 크기를 못 정하니 무시한다
+    const match = raw.match(/^([\d.]+)(px)?$/i); // Relative units cannot determine a pixel size.
     const value = match ? Number(match[1]) : null;
     return value !== null && Number.isFinite(value) && value > 0 ? value : null;
   };
@@ -176,21 +103,6 @@ function svgSize(buffer: Uint8Array): Size | null {
   return null;
 }
 
-/**
- * 선언된 리소스 파일을 실제 시스템에서 찾아 엔트리 프로젝트용 리소스 객체를 생성합니다.
- * 파일이 존재하는 경우 파일에서 직접 크기나 길이를 측정하며, 명시적으로 선언된 `size`나 `for` 값이 있으면 그 값을 우선합니다.
- * 파일을 찾을 수 없고 선언된 정보도 없을 경우에만 경고를 발생시킵니다.
- * 
- * @param kind 리소스의 종류 ('image' 또는 'sound')
- * @param decl 리소스 선언 정보 객체
- * @param ctx 컴파일러 컨텍스트
- * @param node 원본 AST 노드 (경고 발생 시 위치 정보용)
- * @returns 생성된 엔트리 에셋 객체
- * @example
- * ```typescript
- * const asset = makeAsset('image', { id: 'img1', file: 'cat.png' }, ctx, node);
- * ```
- */
 export function makeAsset(
   kind: 'image' | 'sound',
   { id, file, name, width, height, duration }: AssetDecl,
@@ -203,8 +115,7 @@ export function makeAsset(
   if (isImage && !IMAGE_TYPES[ext]) ctx.warn(node, `'${file}' 은(는) 엔트리가 아는 이미지 형식이 아닙니다.`);
   if (!isImage && !SOUND_TYPES.has(ext)) ctx.warn(node, `'${file}' 은(는) 엔트리가 아는 소리 형식이 아닙니다.`);
 
-  // `assetUrls` means the path already is the address the work loads from, so
-  // nothing is looked up and nothing is packed.
+  // Asset URLs are already loadable, so skip lookup and packing.
   if (ctx.options.assetUrls) return urlAsset(kind, { id, file, name, width, height, duration }, ext);
 
   const resolved = findAsset(file, ctx);
@@ -244,8 +155,7 @@ export function makeAsset(
 
   if (resolved) ctx.assetFiles.push({ source: resolved, target: asset.fileurl });
 
-  // 벡터 모양 옆에 같은 이름의 그림판 사본이 있으면 그것도 함께 싣는다.
-  // 엔트리는 벡터로 그린 모양을 두 벌로 보관하고 실행기는 사본 쪽을 쓴다.
+  // Entry keeps vector and raster copies; the player uses the raster copy.
   if (isImage && resolved && ext === '.svg') {
     const twin = resolved.replace(/\.svg$/i, '.png');
     if (host(ctx).isFile(twin)) {
@@ -257,17 +167,6 @@ export function makeAsset(
   return asset;
 }
 
-/** 
- * 소스 파일과 같은 디렉터리 또는 컴파일 옵션으로 지정된 에셋 디렉터리들에서 파일을 찾습니다.
- * 
- * @param file 찾을 파일의 상대 경로
- * @param ctx 컴파일러 컨텍스트
- * @returns 찾은 파일의 절대 경로, 찾지 못한 경우 `null`
- * @example
- * ```typescript
- * const path = findAsset('image.png', ctx);
- * ```
- */
 function findAsset(file: string, ctx: Context): string | null {
   const files = host(ctx);
   for (const dir of ctx.options.assetDirs ?? []) {
@@ -277,15 +176,12 @@ function findAsset(file: string, ctx: Context): string | null {
   return null;
 }
 
-/** Where the compiler reads files from; nowhere unless the caller says. */
+// File access is disabled unless the caller supplies a host.
 function host(ctx: Context) {
   return ctx.options.host ?? EMPTY_HOST;
 }
 
-/**
- * The asset for a costume or sound that already has an address. Its size and
- * length come from the source, since there is no file here to measure.
- */
+// URL assets need declared dimensions and duration because there is no local file.
 function urlAsset(
   kind: 'image' | 'sound',
   { id, file, name, width, height, duration }: AssetDecl,
@@ -302,8 +198,7 @@ function urlAsset(
     asset.imageType = IMAGE_TYPES[ext] ?? 'png';
     asset.dimension = { width: width || 100, height: height || 100 };
     delete asset.ext;
-    // Entry keeps a vector costume twice and names the raster the same way, so
-    // the runner has both and picks the one worth drawing.
+    // Keep the raster copy beside its vector costume for the player.
     if (ext === '.svg') asset.pngurl = `${file.slice(0, -4)}.png`;
   } else {
     asset.duration = duration ?? 1;

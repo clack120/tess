@@ -1,12 +1,4 @@
-/**
- * @fileoverview 엔트리의 픽셀 단위 충돌 판정을 그대로, 훨씬 빠르게 계산합니다.
- *
- * 엔트리(`ndgmr.checkPixelCollision`)는 겹치는 사각형만큼 캔버스를 두 장 만들어 두
- * 스프라이트를 다시 그린 뒤 알파를 비교합니다. 여기서는 같은 사각형을 같은 좌표계
- * (640×360 무대 픽셀)에서 훑되, 그림을 다시 그리지 않고 미리 만들어 둔 알파 마스크를
- * 역변환으로 찾아봅니다. 판정 결과는 프레임 안에서 재사용하고, 서로 멀리 있는 것은
- * 격자로 먼저 걸러 냅니다.
- */
+// Cache alpha masks and scan them in Entry's 640 by 360 collision space.
 import { COLLISION, stage, type Entity, type Target } from '../runtime/model.ts';
 import type { AlphaMask, MaskStore } from './mask.ts';
 
@@ -17,14 +9,13 @@ export interface Rect {
   height: number;
 }
 
-/** `reach_something` compares alpha against 0.2; `bounce_wall` against 0. */
+// Touch tests use an alpha threshold of 0.2; wall bounces use zero.
 export const TOUCH_THRESHOLD = 0.2;
 export const BOUNCE_THRESHOLD = 0;
 
-/** Entry's walls are 30 stage units thick, sitting just outside the stage. */
+// Entry walls are 30 stage units thick, just outside the stage.
 const WALL_DEPTH = 30;
 
-/** One of the four wall bands, in world pixels, for the stage as it is now. */
 export function wallRect(side: string): Rect | null {
   const depth = WALL_DEPTH * stage.scale;
   const width = stage.worldWidth;
@@ -49,7 +40,6 @@ const boundsA: Rect = { x: 0, y: 0, width: 0, height: 0 };
 const boundsB: Rect = { x: 0, y: 0, width: 0, height: 0 };
 const intersection: Rect = { x: 0, y: 0, width: 0, height: 0 };
 
-/** Axis-aligned box of a rect transformed by a 2×3 matrix. */
 function transformedBounds(
   m: Float64Array,
   x0: number,
@@ -83,7 +73,7 @@ function transformedBounds(
   return out;
 }
 
-/** Shifts the horizontal hitbox for single-line aligned text boxes. */
+// Shift hitboxes for aligned single-line text.
 function textBoxOffset(entity: Entity): number {
   if (entity.lineBreak) {
     return 0;
@@ -95,7 +85,6 @@ function textBoxOffset(entity: Entity): number {
       : 0;
 }
 
-/** World-space box of an entity, matching what entry asks PIXI for. */
 export function entityBounds(entity: Entity, out: Rect): Rect {
   const m = entity.worldMatrix(matrixA);
   if (entity.type === 'textBox') {
@@ -107,7 +96,6 @@ export function entityBounds(entity: Entity, out: Rect): Rect {
   return transformedBounds(m, 0, 0, entity.width, entity.height, out);
 }
 
-/** `ndgmr.calculateIntersection` — the overlap, or null when the boxes miss. */
 function intersect(r1: Rect, r2: Rect, out: Rect): Rect | null {
   const hw1 = r1.width / 2;
   const hh1 = r1.height / 2;
@@ -125,7 +113,7 @@ function intersect(r1: Rect, r2: Rect, out: Rect): Rect | null {
   return null;
 }
 
-/** `_collisionDistancePrecheck` — plain box overlap, kept for identical edges. */
+// Keep Entry's box-overlap rule at identical edges.
 function closeEnough(r1: Rect, r2: Rect): boolean {
   return (
     Math.abs(r2.x - r1.x) < (r1.x < r2.x ? r1.width : r2.width) &&
@@ -133,14 +121,14 @@ function closeEnough(r1: Rect, r2: Rect): boolean {
   );
 }
 
-/** `Entry.checkCollisionRect` — used when either side is a text box. */
+// Entry uses rectangle tests when either object is a text box.
 export function rectsOverlap(r1: Rect, r2: Rect): boolean {
   return intersect(r1, r2, intersection) !== null;
 }
 
 export class CollisionSystem {
   private readonly masks: MaskStore;
-  /** Bumped every tick so cached answers never outlive the frame. */
+  // Invalidate collision results every tick.
   private frame = 0;
   private readonly memo = new Map<string, boolean>();
 
@@ -167,7 +155,6 @@ export class CollisionSystem {
     );
   }
 
-  /** Entity against one other entity, with entry's pixel rule. */
   touchingEntity(a: Entity, b: Entity, threshold: number): boolean {
     if (a === b) {
       return false;
@@ -203,7 +190,6 @@ export class CollisionSystem {
     return pixelOverlap(a, maskA, b, maskB, rect, threshold);
   }
 
-  /** Entity against every visible entity (and clone) of another object. */
   touchingTarget(a: Entity, target: Target, threshold: number): boolean {
     if (!a.visible) {
       return false;
@@ -225,7 +211,6 @@ export class CollisionSystem {
     return false;
   }
 
-  /** Entity against one of the four stage walls. */
   touchingWall(entity: Entity, side: string, threshold: number): boolean {
     if (side === 'wall') {
       return (
@@ -268,7 +253,6 @@ export class CollisionSystem {
     return pixelInRect(entity, mask, rect, threshold);
   }
 
-  /** `GEHelper.hitTestMouse` — the sprite's own pixel under the pointer. */
   touchingMouse(entity: Entity, worldX: number, worldY: number): boolean {
     if (!entity.visible || entity.effect.alpha < 0.001) {
       return false;
@@ -309,7 +293,7 @@ export class CollisionSystem {
   }
 }
 
-/** Inverse of the entity's world matrix, written into `out` as `[a,b,c,d,tx,ty]`. */
+// Write the inverse world matrix as [a, b, c, d, tx, ty].
 function inverseInto(entity: Entity, scratch: Float64Array, out: Float64Array): boolean {
   const m = entity.worldMatrix(scratch);
   const det = m[0]! * m[3]! - m[1]! * m[2]!;
@@ -328,10 +312,7 @@ function inverseInto(entity: Entity, scratch: Float64Array, out: Float64Array): 
 const inverseA = new Float64Array(6);
 const inverseB = new Float64Array(6);
 
-/**
- * Walks the overlap one world pixel at a time, stepping the two local-space
- * coordinates by constant increments instead of multiplying a matrix per pixel.
- */
+// Step local coordinates across each scanline instead of multiplying matrices per pixel.
 function pixelOverlap(
   a: Entity,
   maskA: AlphaMask,
@@ -432,7 +413,7 @@ function pixelOverlap(
   return false;
 }
 
-/** Same walk against a solid rectangle — the stage walls have no texture holes. */
+// Walls are solid rectangles and need no texture alpha lookup.
 function pixelInRect(entity: Entity, mask: AlphaMask, rect: Rect, threshold: number): boolean {
   if (!inverseInto(entity, matrixA, inverseA)) {
     return false;

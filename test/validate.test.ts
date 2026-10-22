@@ -1,6 +1,3 @@
-/**
- * 단순한 구문(Syntax) 분석만으로는 확인할 수 없는 언어 명세(Spec) 상의 의미론적(Semantic) 규칙을 검증합니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { lineAndColumn, parse, validate } from '@tess/parser';
@@ -70,7 +67,6 @@ end`);
   assert.match(errors[0], /글상자\(text\) 전용 속성/);
 });
 
-/** 글상자의 틀 크기(`size 가로 세로`)는 글상자 객체에만 존재합니다. 일반 오브젝트의 크기는 적용된 모양(이미지)의 크기에 의존합니다. */
 test('size 가로 세로 는 object 에서 쓸 수 없다', () => {
   const errors = messages(`object "o":
   size 300 50
@@ -89,7 +85,6 @@ end`);
   assert.ok(result.ok);
 });
 
-/** 중심점(center) 좌표는 모양 이미지에 정의되는 속성이므로 글상자 객체에는 존재하지 않습니다. */
 test('center 가로 세로 는 text 에서 쓸 수 없다', () => {
   const errors = messages(`text "t":
   center 10 20
@@ -292,7 +287,6 @@ test('문법 에러도 같은 형태로 돌려준다', () => {
   assert.equal(result.ast, null);
   assert.equal(typeof result.errors[0].line, 'number');
   assert.equal(typeof result.errors[0].column, 'number');
-  /** `detail` 필드는 오류가 발생한 소스 코드의 해당 줄을 시각적으로 짚어주는 코드 프레임 정보를 포함해야 합니다. */
   assert.match(result.errors[0]!.detail!, /^\s*2 \|\s+when start do$/m);
   assert.match(result.errors[0]!.detail!, /\^/);
 });

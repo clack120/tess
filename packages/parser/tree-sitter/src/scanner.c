@@ -1,20 +1,4 @@
-/*
- * External scanner for the Tess grammar.
- *
- * _same_line  zero-width; present only when the next token sits on the line the
- *             previous one ended on (the Chevrotain grammar's `sameLine()`).
- * color       `#` and a run of name characters that spells a colour.
- * comment     any other `#` to the end of the line.
- * _call_open  `(` right after a name that may be called (the Chevrotain
- * _index_open `[` right after a name that may be indexed  `LA(2)` gates).
- * string      a string literal; here because the generated lexer reads U+0000
- *             as the end of input.
- *
- * Colour against comment is decided without context, as the Chevrotain lexer
- * does (`@tess/core` colorLiteralLength): a colour where none may stand is a
- * parse error, never a comment. The scanner owns comments so that it is asked
- * at every position.
- */
+/* Handle strings here because the generated lexer treats a NUL character as end of input. */
 #include "tree_sitter/parser.h"
 
 #include <stdbool.h>
@@ -37,13 +21,13 @@ void tree_sitter_tess_external_scanner_deserialize(void *payload, const char *bu
 
 static bool is_line_break(int32_t c) { return c == '\n' || c == '\r' || c == 0x2028 || c == 0x2029; }
 
-/* JavaScript's `\s` without the line breaks. */
+/* Match JavaScript whitespace except line breaks. */
 static bool is_space(int32_t c) {
   return c == ' ' || c == '\t' || c == '\v' || c == '\f' || c == 0xA0 || c == 0xFEFF || c == 0x1680 ||
          (c >= 0x2000 && c <= 0x200A) || c == 0x202F || c == 0x205F || c == 0x3000;
 }
 
-/* Letters as `\p{L}` sees them, over the scripts Tess sources are written in. */
+/* Match Unicode letters used by Tess sources. */
 static bool is_letter(int32_t c) {
   if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) return true;
   if (c < 0x80) return false;
@@ -76,12 +60,12 @@ static bool is_hex(int32_t c) {
 
 static int32_t lower(int32_t c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
 
-/* COLOR_NAMES / COLOR_NAME_COUNT: `@tess/core` NAMED_COLORS, UTF-32, lower case. */
+/* Generated lowercase UTF-32 color names from @tess/core. */
 #include "colors.h"
 
 #define MAX_BODY 64
 
-/* `"(?:\\[\s\S]|[^"\\\n\r\u2028\u2029])*"`, as the Chevrotain lexer reads it. */
+/* Match Chevrotain strings, including escapes and all four forbidden line endings. */
 static bool scan_string(TSLexer *lexer) {
   lexer->advance(lexer, false);
   for (;;) {
@@ -102,7 +86,7 @@ static bool scan_string(TSLexer *lexer) {
   return true;
 }
 
-/* `=`, `+=`, `-=`, `*=`, `/=`, `%=` or `**=` ahead; reads past the marked end. */
+/* Look ahead past the marked end to detect simple and compound assignment operators. */
 static bool starts_assignment(TSLexer *lexer) {
   int32_t c = lexer->lookahead;
   if (c == '=') {
@@ -139,10 +123,10 @@ bool tree_sitter_tess_external_scanner_scan(void *payload, TSLexer *lexer, const
     if (is_line_break(lexer->lookahead)) newline = true;
     lexer->advance(lexer, true);
   }
-  // Zero-width tokens end here, before anything is read.
+  // Mark zero-width tokens before consuming input.
   lexer->mark_end(lexer);
 
-  // Error recovery marks every symbol valid; leave it to the internal lexer.
+  // During error recovery every token is valid; let the internal lexer handle it.
   bool recovering = valid_symbols[SAME_LINE] && valid_symbols[CALL_OPEN] && valid_symbols[INDEX_OPEN] &&
                     valid_symbols[COLOR];
 
@@ -162,7 +146,7 @@ bool tree_sitter_tess_external_scanner_scan(void *payload, TSLexer *lexer, const
   bool same_line = valid_symbols[SAME_LINE] && !recovering && !newline && !lexer->eof(lexer);
 
   if (lexer->lookahead != '#') {
-    // An assignment operator ends a name used as a target (`save = 1`).
+    // Assignment ends a target name even when it could start a command argument.
     if (same_line && starts_assignment(lexer)) return false;
     if (same_line) {
       lexer->result_symbol = SAME_LINE;
@@ -185,7 +169,7 @@ bool tree_sitter_tess_external_scanner_scan(void *payload, TSLexer *lexer, const
   bool color = length > 0 && (hex || is_named_color(body, length));
 
   if (color) {
-    // A colour on the same line: the zero-width token comes first.
+    // Emit the zero-width same-line token before the color token.
     if (same_line) {
       lexer->result_symbol = SAME_LINE;
       return true;

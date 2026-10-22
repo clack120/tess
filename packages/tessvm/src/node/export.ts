@@ -1,16 +1,3 @@
-/**
- * @fileoverview 작품 하나를 혼자 도는 한 덩어리로 내보냅니다.
- *
- * 두 가지 모양이 있습니다.
- *
- * - **zip** — 실행 서버가 내주던 것을 그대로 파일로 펼쳐 담습니다. 풀어서 아무 정적
- *   서버에나 올리면 돕니다.
- * - **단일 html** — 모듈·작품·모양·소리·커널을 전부 글 안에 넣고, 페이지가 열릴 때
- *   `Blob` 으로 되살려 붙입니다. 파일 하나로 끝나므로 주고받기 좋습니다.
- *
- * 두 모양 모두 실행기는 같은 `src/web/boot.ts` 이고, 서버가 하던 일(모듈 내주기·작품
- * 내주기·커널 내주기)을 링크만 바꿔 대신합니다. 디버그 패널은 개발 도구이므로 빠집니다.
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { stripTypes } from '@tess/core/strip-types';
@@ -27,13 +14,10 @@ const SRC_DIR = fileURLToPath(new URL('../', import.meta.url));
 const PIXI_FILE = fileURLToPath(new URL('../../node_modules/pixi.js/dist/pixi.mjs', import.meta.url));
 const DEXIE_FILE = fileURLToPath(new URL('../../node_modules/dexie/dist/modern/dexie.mjs', import.meta.url));
 
-/** Where the runner's own modules sit inside the archive. */
 const VM_PREFIX = 'vm/';
 
-/** The bare name the single file maps each module to, through an import map. */
 const BARE_PREFIX = 'tessvm/';
 
-/** Media types the work's files come as. */
 const MEDIA: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
   '.svg': 'image/svg+xml', '.bmp': 'image/bmp', '.webp': 'image/webp',
@@ -51,31 +35,19 @@ export interface ExportOptions {
   autoStart?: boolean;
   boost?: boolean;
   svg?: boolean;
-  /** Off leaves every function on the block runner's own path. */
   kernel?: boolean;
 }
 
 export interface ExportResult {
-  /** The bytes to write out. */
   data: Buffer;
-  /** What went in, for the line the cli prints. */
   modules: number;
   assets: number;
-  /** Whether the page runs numeric functions in the kernel; off is `--no-kernel`. */
   kernel: boolean;
 }
 
-// ---------------------------------------------------------------------------
-//  The runner's modules
-// ---------------------------------------------------------------------------
-/** `import … from '…'` and `export … from '…'`, plus `import('…')`. */
 const SPECIFIER = /(\bfrom\s*|\bimport\s*\(\s*)(['"])([^'"]+)\2/g;
 
-/**
- * Every module the page needs, keyed by its path under `src/`. Types are
- * stripped the way the run server strips them, so the lines still line up with
- * the repository when the page is opened in a debugger.
- */
+// Strip module types the same way as the run server.
 function collectModules(entries: string[]): Map<string, string> {
   const found = new Map<string, string>();
   const queue = [...entries];
@@ -112,10 +84,6 @@ function resolveFrom(relative: string, specifier: string): string {
   return path.posix.normalize(path.posix.join(path.posix.dirname(relative), specifier));
 }
 
-/**
- * Rewrites one module's relative specifiers through `name`, which is handed the
- * path under `src/` it points at and the specifier as it was written.
- */
 function rewriteSpecifiers(
   relative: string,
   code: string,
@@ -127,12 +95,9 @@ function rewriteSpecifiers(
       : whole);
 }
 
-/** A browser serves `.ts` as a type it refuses to run, so the archive says `.js`. */
+// Emit .js because browsers reject the content type static servers assign to .ts.
 const asJs = (name: string) => name.replace(/\.ts$/, '.js');
 
-// ---------------------------------------------------------------------------
-//  The page
-// ---------------------------------------------------------------------------
 const STYLE = `
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -176,10 +141,6 @@ const BODY = `<div id="stage">
 </div>
 <div id="tessvm-error"></div>`;
 
-/**
- * The module the page ends up running. `boot` names where the runner is imported
- * from and `project` how the work is read; `prelude` is what only one shape needs.
- */
 function bootModule(
   links: { boot: string; project: string; prelude?: string },
   config: unknown,
@@ -216,9 +177,8 @@ try {
     stageHeight: config.stageHeight,
     kernel: config.kernel,
   });
-  // The page has no controls of its own; this is where a console reaches the run.
   window.tessvm = handle;
-  // 엔트리처럼, 시작 단추를 누르기 전에는 돌지 않습니다.
+  // Wait for the viewer to start, matching Entry.
   document.getElementById('tessvm-start').onclick = () => handle.start();
   setInterval(() => { cover.hidden = handle.vm.state !== 'stop'; }, 100);
   cover.hidden = config.autoStart;
@@ -253,7 +213,7 @@ function escapeHtml(text: string): string {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
 }
 
-/** A value inside a `<script>`; `</script` in a string would end the block. */
+// Escape script terminators because HTML escaping cannot protect a JavaScript literal.
 function literal(value: unknown): string {
   return JSON.stringify(value ?? null)
     .replaceAll('<', '\\u003c')
@@ -261,9 +221,6 @@ function literal(value: unknown): string {
     .replaceAll(' ', '\\u2029');
 }
 
-// ---------------------------------------------------------------------------
-//  Putting it together
-// ---------------------------------------------------------------------------
 interface Asset {
   /** The address the work itself uses. */
   target: string;
@@ -307,12 +264,6 @@ function build(options: ExportOptions): Built {
   };
 }
 
-/**
- * Everything as files under one archive, laid out the way the run server serves
- * them. The work's own file addresses are pointed at `assets/`, and the modules
- * are written as `.js` because a static server hands a `.ts` to the browser
- * under a type it will not run.
- */
 export function exportZip(options: ExportOptions): ExportResult {
   const built = build(options);
   const rewrites = new Map(built.assets.map((asset) => [asset.target, `assets/${asset.target}`]));
@@ -356,19 +307,7 @@ export function exportZip(options: ExportOptions): ExportResult {
   };
 }
 
-/**
- * One file that carries everything.
- *
- * A plain script makes a `Blob` for each module, hands the import map their
- * addresses and only then writes the module script — a blob url has no folder
- * for `../` to point at, so every specifier is rewritten to a bare name on the
- * way in, and that also lets modules that import each other all exist before
- * any of them runs.
- *
- * The work's own file addresses are left exactly as they were: the runner picks
- * a costume by what its address ends with, so the files answer from memory
- * through `fetch` instead of being swapped for blob or data addresses.
- */
+// Map modules to blob URLs, but keep asset URLs intact so costume type detection still works.
 export function exportHtml(options: ExportOptions): ExportResult {
   const built = build(options);
   const sources: Record<string, string> = {};
@@ -391,8 +330,7 @@ export function exportHtml(options: ExportOptions): ExportResult {
     {
       boot: literal(`${BARE_PREFIX}web/boot.ts`),
       project: 'window.__tessProject',
-      // The costumes are answered from this page's memory, and a worker of its own
-      // cannot be reached from here, so the textures are read on this thread.
+      // Read textures on this thread because workers cannot access the page's in-memory assets.
       prelude: `import { loadTextures } from 'pixi.js';\nloadTextures.config.preferWorkers = false;`,
     },
     config,
@@ -404,8 +342,7 @@ const FILES = ${literal(files)};
 const PROJECT = ${literal(JSON.stringify(options.project))};
 const RUNNER = ${literal(runner)};
 
-// 담아 둔 파일을 주소 대신 fetch 가 바로 내줍니다. 마지막 조각으로 찾으므로,
-// 브라우저가 상대 주소를 절대 주소로 바꾼 뒤에도 같은 파일에 닿습니다.
+// Match asset paths by suffix so both relative and browser-resolved absolute URLs reach memory files.
 const bytesOf = (base64) => {
   const raw = atob(base64);
   const out = new Uint8Array(raw.length);

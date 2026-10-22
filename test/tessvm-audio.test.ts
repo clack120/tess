@@ -1,16 +1,4 @@
-/**
- * 소리 재생기(`packages/tessvm/src/audio/sound.ts`)와 VM 의 소리 처리 규칙이
- * 엔트리와 같은지 확인합니다.
- *
- * 기준은 entryjs 의 `Entry.Utils.playSound`·`playBGM`·`forceStopSounds`·
- * `forceStopBGM` 과 `block_sound.js`, 그리고 `Entry.scene.selectScene` 입니다.
- * 엔트리는 소리(`Entry.soundInstances`)와 배경음악(`Entry.bgmInstances`)을 서로
- * 다른 목록에 담아 두고, 소리 크기·재생 속도·소리 멈추기 블록은 앞의 목록만
- * 훑습니다.
- *
- * 재생기는 브라우저 모듈이라 노드 타입 검사에서 빠져 있으므로, 디버그 패널
- * 테스트와 같은 방식으로 타입만 지운 원본을 가짜 `AudioContext` 위에 올립니다.
- */
+// Compare sound behavior with Entry's sound and BGM helpers using fake browser audio.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -70,10 +58,6 @@ function fakeSource(): FakeSource {
   return node;
 }
 
-/**
- * 재생기가 쓰는 만큼의 WebAudio 를 흉내 냅니다. 만들어진 소스를 모두 들고 있어
- * 무엇이 어디에 이어졌고 무엇이 멈췄는지 확인할 수 있습니다.
- */
 function fakeAudio() {
   const sources: FakeSource[] = [];
   const resumed = { count: 0 };
@@ -97,7 +81,6 @@ function fakeAudio() {
   return { context, sources, resumed };
 }
 
-/** 타입만 지운 재생기 원본을 가짜 브라우저 위에 올립니다. */
 function loadEngine(context: unknown) {
   const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/audio/sound.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = {
@@ -112,7 +95,6 @@ function loadEngine(context: unknown) {
 
 const sound = (id: string) => ({ id, name: id, fileurl: `/${id}.mp3`, duration: 1 });
 
-/** 파일이 이미 와 있는 상태에서 시작하도록 미리 받아 둡니다. */
 async function ready(ids: string[]) {
   const { context, sources, resumed } = fakeAudio();
   const Engine = loadEngine(context);
@@ -203,11 +185,6 @@ test('일시정지를 푼 뒤에야 소리 요청이 오디오를 되살린다',
   assert.ok(resumed.count > before, '풀린 뒤에는 되살립니다');
 });
 
-// ---------------------------------------------------------------------------
-//  VM
-// ---------------------------------------------------------------------------
-
-/** 무엇이 불렸는지만 적어 두는 재생기입니다. 오브젝트 아이디는 매번 달라지므로 적지 않습니다. */
 function recorder() {
   const calls: string[] = [];
   return {
@@ -364,10 +341,6 @@ end`);
   assert.equal(machine.pendingAnswer, null);
 });
 
-// ---------------------------------------------------------------------------
-//  읽어주기 — 엔트리의 TTS 서비스
-// ---------------------------------------------------------------------------
-/** 읽어주기가 낸 소리 하나. */
 interface FakeSpeech {
   src: string;
   volume: number;
@@ -375,10 +348,7 @@ interface FakeSpeech {
   fire(name: string): void;
 }
 
-/**
- * `Audio` 를 흉내 냅니다. `how` 는 재생을 걸었을 때 벌어질 일입니다 — 끝까지
- * 나거나(end), 파일을 못 받거나(error), 브라우저가 막거나(blocked), 계속 나거나(hold).
- */
+// Simulate audio completion, network errors, autoplay refusal, and a pending playback.
 function fakeSpeaker(how: 'end' | 'error' | 'blocked' | 'hold') {
   const made: FakeSpeech[] = [];
   function FakeAudio(this: unknown, src: string) {
@@ -404,7 +374,6 @@ function fakeSpeaker(how: 'end' | 'error' | 'blocked' | 'hold') {
   return { FakeAudio, made };
 }
 
-/** 읽어주기를 가짜 브라우저 위에 올립니다. */
 function loadTts(how: 'end' | 'error' | 'blocked' | 'hold', origin = 'https://example.test') {
   const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/audio/sound.ts'), 'utf-8'));
   const { FakeAudio, made } = fakeSpeaker(how);
@@ -439,10 +408,6 @@ function loadTts(how: 'end' | 'error' | 'blocked' | 'hold', origin = 'https://ex
 
 const VOICE = { speaker: 'sally', speed: 0, pitch: 5, volume: 1 };
 
-/**
- * 엔트리의 목소리는 서버가 만든 mp3 이고, 블록이 고른 목소리·속도·높낮이가
- * 주소에 그대로 실려 갑니다(`AI_UTILIZE_BLOCK.tts.read`).
- */
 test('읽어주기는 엔트리의 TTS 주소를 부른다', async () => {
   const { engine, made, spoken } = loadTts('end');
   await engine.speak('안녕', VOICE);
@@ -507,7 +472,6 @@ test('빈 문장과 2500 자를 넘는 문장은 읽지 않는다', async () => 
   assert.deepEqual(spoken, []);
 });
 
-/** 서버에 닿지 못하는 실행기에서도 작품은 계속 읽혀야 합니다. */
 test('TTS 서버에 닿지 못하면 브라우저 목소리로 읽는다', async () => {
   for (const how of ['error', 'blocked'] as const) {
     const { engine, spoken } = loadTts(how);
@@ -517,10 +481,7 @@ test('TTS 서버에 닿지 못하면 브라우저 목소리로 읽는다', async
   }
 });
 
-/**
- * 엔트리의 속도·높낮이는 5(느리게 · 낮게) … -5(빠르게 · 높게) 입니다. 부호를
- * 뒤집어 읽으면 가장 낮은 목소리가 가장 높은 목소리로 나옵니다.
- */
+// Positive Entry codes mean slower speech and lower pitch.
 test('대신 읽을 때 속도와 높낮이는 엔트리와 같은 방향으로 간다', async () => {
   const { engine, spoken } = loadTts('error');
   await engine.speak('안녕', { speaker: 'kyuri', speed: 5, pitch: 5, volume: 1 });
@@ -531,7 +492,7 @@ test('대신 읽을 때 속도와 높낮이는 엔트리와 같은 방향으로 
   assert.ok(slow!.pitch < fast!.pitch, '5 가 -5 보다 낮아야 합니다');
 });
 
-/** `읽어주고 기다리기` 가 멈춘 작품에서 영영 기다리면 스크립트가 살아남습니다. */
+// Stopping the work must also finish a pending TTS wait.
 test('작품을 멈추면 읽어주기를 기다리던 자리가 풀린다', async () => {
   const { engine, made } = loadTts('hold');
   let done = false;

@@ -1,10 +1,3 @@
-/**
- * @fileoverview 컴파일된 코드가 부르는 블록 동작 모음입니다.
- *
- * 이름 하나가 엔트리 블록 하나에 대응하고, 계산과 부작용은 entryjs 의
- * `src/playground/blocks/block_*.js` 에 있는 것을 그대로 옮겼습니다. 프레임을 넘겨야
- * 하는 블록은 제너레이터이며, 컴파일된 코드가 `yield*` 로 이어 받습니다.
- */
 import { BOUNCE_THRESHOLD, TOUCH_THRESHOLD } from '../collision/detect.ts';
 import * as cast from './cast.ts';
 import {
@@ -24,12 +17,7 @@ import { RuntimeBlockError } from './diagnostics.ts';
 
 export type Ops = ReturnType<typeof createOps>;
 
-/**
- * Thrown to unwind a script that was told to stop from inside itself. Entry
- * ends the executor and its `execute` loop bails out at the very next check,
- * so nothing after the stopping block runs — including the rest of a function
- * the block was called from.
- */
+// Unwind immediately when a block stops the script so no following function statements run.
 export class ThreadStop extends Error {
   constructor() {
     super('thread stopped');
@@ -40,7 +28,7 @@ export class ThreadStop extends Error {
 const SQRT3 = Math.sqrt(3);
 const HALF_SQRT2 = Math.SQRT2 / 2;
 
-/** `Entry.preciseTrig` — exact values on the angles people actually type. */
+// Use exact trig values for Entry's common angles.
 const TRIG: Record<string, Record<number, number>> = {
   sin: {
     0: 0, 30: 0.5, 45: HALF_SQRT2, 60: SQRT3 / 2, 90: 1, 120: SQRT3 / 2, 135: HALF_SQRT2,
@@ -68,28 +56,19 @@ function preciseTrig(degrees: number, operator: 'sin' | 'cos' | 'tan'): number {
   return Math[operator]((angle * Math.PI) / 180);
 }
 
-/**
- * 번역 블록이 엔트리처럼 답하도록 두는 값들입니다 (`Lang.Blocks`, `checkText`).
- */
 const TRANSLATE_MAX_CHARS = 3000;
 const NO_SENTENCE = '문장이 없습니다';
 const SENTENCE_TOO_LONG = '3000자까지만 입력할 수 있습니다.';
 const UNKNOWN_SENTENCE = '알 수 없는 문장입니다.';
 
-/**
- * `언어 감지` 가 답하는 이름들. 엔트리가 화면에 쓰는 말 그대로이며, 베트남어가
- * `베트남` 인 것도 엔트리의 표기입니다(`Lang.Blocks.vietnamese`).
- */
+// Preserve Entry's displayed language names, including its Vietnamese label.
 const LANGUAGE_NAMES: Record<string, string> = {
   ko: '한국어', en: '영어', ja: '일본어', 'zh-CN': '중국어간체', 'zh-TW': '중국어번체',
   es: '스페인어', fr: '프랑스어', de: '독일어', ru: '러시아어', pt: '포르투갈어',
   th: '태국어', vi: '베트남', id: '인도네시아어', hi: '힌디어',
 };
 
-/**
- * A language as papago names it. Works written by hand (or by an older editor)
- * may give the name people read (`한국어`, `중국어 간체`); those become the code.
- */
+// Accept readable language names as well as Papago codes from older or hand-written projects.
 function languageCode(value: string): string {
   const name = value.replace(/\s+/g, '');
   if (name === '베트남어') return 'vi';
@@ -99,10 +78,7 @@ function languageCode(value: string): string {
   return value;
 }
 
-/**
- * Holds the script across frames until `answer` settles, the way entry's async
- * blocks hold theirs. A refused answer reads as the fallback.
- */
+// Yield across frames until the promise settles; use the fallback if it rejects.
 function* settle(answer: Promise<string>, fallback: string): Generator<number, string> {
   let value: string | null = null;
   let done = false;
@@ -124,7 +100,7 @@ function factorial(n: number): number {
   return result;
 }
 
-/** `Entry.convertToRoundedDecimals` — dialogs round long decimals before showing. */
+// Round long decimals before displaying speech bubbles, matching Entry.
 function roundedDecimals(value: unknown, decimals: number): unknown {
   if (!cast.isNumber(value) || !/\d+\.\d+$/.test(String(value))) {
     return value;
@@ -132,7 +108,6 @@ function roundedDecimals(value: unknown, decimals: number): unknown {
   return Number(`${Math.round(Number(`${value}e${decimals}`))}e-${decimals}`);
 }
 
-/** `Entry.setBasicBrush` / `setBasicPaint` — made idle so it draws nothing yet. */
 function ensureBrush(entity: Entity, which: 'brush' | 'paint'): BrushState {
   let state = entity[which];
   if (!state) {
@@ -144,7 +119,6 @@ function ensureBrush(entity: Entity, which: 'brush' | 'paint'): BrushState {
 }
 
 export function createOps(vm: Vm) {
-  /** Extends the pen trail after the entity moved. */
   function pen(entity: Entity): void {
     const brush = entity.brush;
     if (brush && !brush.stop) {
@@ -183,11 +157,7 @@ export function createOps(vm: Vm) {
       blockType, { list: list.name, length: list.array.length, ...inputs });
   }
 
-  /**
-   * `Entry.getListRealIndex`. The three keywords are the only indices that are
-   * not a number and none of them parses as one, so naming them is the same
-   * test as asking whether the index is numeric first.
-   */
+  // Resolve the three list index keywords before numeric index conversion.
   function listIndex(raw: unknown, list: Variable): number {
     if (typeof raw === 'number') return raw;
     if (typeof raw === 'string') {
@@ -223,9 +193,6 @@ export function createOps(vm: Vm) {
   }
 
   const ops = {
-    // -----------------------------------------------------------------------
-    //  Moving
-    // -----------------------------------------------------------------------
     moveDirection(entity: Entity, value: number): void {
       const radians = ((entity.rotation + entity.direction - 90) / 180) * Math.PI;
       entity.setX(entity.x + value * Math.cos(radians));
@@ -417,7 +384,7 @@ export function createOps(vm: Vm) {
       }
     },
 
-    /** `bounce_wall` — flips the heading once per contact, per entry's state machine. */
+    // Bounce once per wall contact, matching Entry's state machine.
     bounceWall(entity: Entity): void {
       const method = entity.target.rotateMethod;
       const angle =
@@ -478,9 +445,6 @@ export function createOps(vm: Vm) {
       }
     },
 
-    // -----------------------------------------------------------------------
-    //  Looks
-    // -----------------------------------------------------------------------
     dialog(entity: Entity, message: unknown, mode: string): void {
       entity.dialog = { message: dialogText(message), mode: mode as 'speak' | 'think' };
       entity.dirty = true;
@@ -537,17 +501,14 @@ export function createOps(vm: Vm) {
       entity.applyEffects();
     },
 
-    /**
-     * `크기를 N% 로 정하기` — the size block of ten years ago. It reads the scale
-     * the work was saved with, so 100 is that size however big it is now.
-     */
+    // Legacy size setters use the saved scale, so 100 always means the original size.
     setScalePercent(entity: Entity, percent: number): void {
       const scale = percent / 100;
       entity.setScaleX(scale * entity.scaleOriginX);
       entity.setScaleY(scale * entity.scaleOriginY);
     },
 
-    /** `크기를 N% 만큼 바꾸기` — multiplies both axes by `(N + 100)%`. */
+    // Legacy size changes multiply both axes by (N + 100) percent.
     changeScalePercent(entity: Entity, percent: number): void {
       const scale = (percent + 100) / 100;
       entity.setScaleX(entity.getScaleX() * scale);
@@ -566,9 +527,6 @@ export function createOps(vm: Vm) {
       vm.renderer?.moveEntity?.(entity, location);
     },
 
-    // -----------------------------------------------------------------------
-    //  Flow
-    // -----------------------------------------------------------------------
     *waitSecond(seconds: number) {
       const until = vm.clock + (60 / vm.frameRate) * seconds * 1000;
       yield 0;
@@ -577,10 +535,7 @@ export function createOps(vm: Vm) {
       }
     },
 
-    /**
-     * `save` — writes the `store` names out and waits for the write to land.
-     * `save async` calls `saveStore` instead and carries straight on.
-     */
+    // Wait for save completion here; asynchronous saves continue immediately.
     *saveStoreWait() {
       let done = false;
       void vm.save.write().then(() => {
@@ -591,12 +546,11 @@ export function createOps(vm: Vm) {
       }
     },
 
-    /** `save async` — hands the write over without waiting for it. */
     saveStore(): void {
       void vm.save.write();
     },
 
-    /** Ends the running script here and now; nothing after this call runs. */
+    // Unwind the running script immediately so no following statements execute.
     die(): never {
       throw new ThreadStop();
     },
@@ -622,7 +576,7 @@ export function createOps(vm: Vm) {
       target.threads = [];
     },
 
-    // Marked, not spliced — see `Vm.stopThreadsOf`.
+    // Mark threads stopped without splicing the active iteration.
     stopOtherThreads(entity: Entity, current: unknown): void {
       for (const thread of entity.target.threads) {
         if (thread !== current && thread.entity === entity) {
@@ -648,10 +602,7 @@ export function createOps(vm: Vm) {
       vm.start();
     },
 
-    /**
-     * `작품 정지하기`. `Entry.engine.toggleStop` — the stop button, not
-     * `stop all`: every script ends and the work goes back to its start screen.
-     */
+    // Stop-project also resets the player, unlike stop-all-scripts.
     stopRun(): void {
       vm.stop();
       vm.reset();
@@ -674,9 +625,6 @@ export function createOps(vm: Vm) {
       }
     },
 
-    // -----------------------------------------------------------------------
-    //  Events and scenes
-    // -----------------------------------------------------------------------
     castMessage(id: string): void {
       vm.queueMessage(id);
     },
@@ -707,9 +655,6 @@ export function createOps(vm: Vm) {
       return entityFor(id);
     },
 
-    // -----------------------------------------------------------------------
-    //  Variables and lists
-    // -----------------------------------------------------------------------
     getVariable(entity: Entity, index: number): string | number | boolean {
       return variable(entity, index)?.getValue() ?? 0;
     },
@@ -718,7 +663,7 @@ export function createOps(vm: Vm) {
       variable(entity, index)?.setValue(value as string | number);
     },
 
-    /** Adds when both sides read as numbers, joins as text otherwise. */
+    // Add numeric values and concatenate other values, matching Entry.
     changeVariable(entity: Entity, index: number, value: unknown): void {
       if (value === false) {
         throw new RuntimeBlockError('변수 증가량으로 판단값 false를 사용할 수 없습니다 (숫자 0은 허용됩니다)',
@@ -730,7 +675,7 @@ export function createOps(vm: Vm) {
       }
       const current = target.getValue();
       if (cast.isNumber(value) && target.isNumber()) {
-        // Entry stores the result of `toFixed`, so a counter holds "1", not 1.
+        // Keep toFixed results as text because their decimal formatting affects later changes.
         const increment = cast.parseNumber(value) as string | number;
         const places = maxFloatPoint([increment, current as string | number]);
         target.setValue(cast.addNum(Number(increment), Number(current)).toFixed(places));
@@ -783,7 +728,7 @@ export function createOps(vm: Vm) {
       if (!cast.isNumber(raw) || Number(raw) > list.array.length) {
         listError('remove_value_from_list', list, { index: raw });
       }
-      // Entry passes zero, negatives and fractions through to Array.splice.
+      // Entry passes zero, negative, and fractional indices through to Array.splice.
       list.array.splice(Number(raw) - 1, 1);
       list.touch();
     },
@@ -830,15 +775,11 @@ export function createOps(vm: Vm) {
       vm.answerVisible = visible;
     },
 
-    // -----------------------------------------------------------------------
-    //  Text boxes
-    // -----------------------------------------------------------------------
     readText(entity: Entity, targetId: string): string {
       const source = targetId === 'self' ? entity : entityFor(targetId);
       return (source?.text ?? '').replace(/\n/gim, ' ');
     },
 
-    /** `EntityObject.applyEffectByNameAndValue` — the field carries entry's own name. */
     textEffect(entity: Entity, effect: string, mode: string): void {
       const on = mode === 'on';
       if (effect === 'fontBold') {
@@ -870,9 +811,6 @@ export function createOps(vm: Vm) {
       entity.touch();
     },
 
-    // -----------------------------------------------------------------------
-    //  Sound
-    // -----------------------------------------------------------------------
     playSound(entity: Entity, id: string, startSeconds = 0, durationSeconds = 0): void {
       const sound = entity.target.getSound(id);
       if (sound) {
@@ -960,8 +898,7 @@ export function createOps(vm: Vm) {
       } else {
         vm.audio?.stopAll();
       }
-      // `읽어주기` is a sound instance too, and entry files it under `global`
-      // rather than under an object, so every target but `thisOnly` reaches it.
+      // TTS is a global sound instance, so every stop target except thisOnly reaches it.
       vm.speech?.stop();
     },
 
@@ -980,9 +917,6 @@ export function createOps(vm: Vm) {
       return entity.target.getSound(id)?.duration ?? 0;
     },
 
-    // -----------------------------------------------------------------------
-    //  Pen
-    // -----------------------------------------------------------------------
     startDrawing(entity: Entity): void {
       if (entity.brush) {
         entity.brush.stop = false;
@@ -1020,7 +954,7 @@ export function createOps(vm: Vm) {
     setPenColor(entity: Entity, colour: string): void {
       const brush = ensureBrush(entity, 'brush');
       startStroke(entity, 'brush');
-      // `set_color` keeps `Entry.hex2rgb(colour)`, not the text it was given.
+      // Store Entry's parsed RGB value rather than the original color text.
       brush.color = cast.hexColor(colour);
     },
 
@@ -1053,8 +987,7 @@ export function createOps(vm: Vm) {
       brush.thickness = Math.max(1, value);
     },
 
-    // Both transparency blocks move the pen and the fill together, unlike the
-    // colour and thickness blocks which each touch only their own state.
+    // Transparency affects both pen and fill; color and thickness affect only their own state.
     changePenOpacity(entity: Entity, value: number): void {
       for (const which of ['brush', 'paint'] as const) {
         const state = ensureBrush(entity, which);
@@ -1099,9 +1032,6 @@ export function createOps(vm: Vm) {
       vm.renderer?.stamp?.(entity);
     },
 
-    // -----------------------------------------------------------------------
-    //  Data tables
-    // -----------------------------------------------------------------------
     tableAppend(index: number, property: string): void {
       const table = vm.tables[index];
       if (!table) {
@@ -1192,12 +1122,12 @@ export function createOps(vm: Vm) {
       return table.getValue(row, col);
     },
 
-    /** `테이블 창 열기` — entry keeps running while the window stands. */
+    // Opening a table window does not hold the running script.
     showTable(index: number, seconds?: number): void {
       vm.openTable(vm.tables[index] ?? null, seconds);
     },
 
-    /** `테이블 차트 창 열기` — 엔트리는 차트 번호를 0부터 센다. */
+    // Entry chart indices start at zero.
     showChart(index: number, chart: unknown): void {
       vm.openTable(vm.tables[index] ?? null, undefined, Math.max(0, Math.floor(Number(chart) || 0)));
     },
@@ -1260,9 +1190,6 @@ export function createOps(vm: Vm) {
       return null;
     },
 
-    // -----------------------------------------------------------------------
-    //  Text to speech
-    // -----------------------------------------------------------------------
     speak(entity: Entity, text: string): void {
       vm.speech?.speak(text, entity.voice);
     },
@@ -1285,20 +1212,17 @@ export function createOps(vm: Vm) {
       entity.voice = { speaker, speed: Number(speed) || 0, pitch: Number(pitch) || 0, volume: 1 };
     },
 
-    // -----------------------------------------------------------------------
-    //  Translation
-    // -----------------------------------------------------------------------
     *translate(sourceName: string, text: string, targetName: string): Generator<number, string> {
       const source = languageCode(String(sourceName));
       const target = languageCode(String(targetName));
-      // `checkText` — entry answers with the reason rather than a translation.
+      // Invalid translation text returns Entry's reason rather than an API result.
       if (!text) {
         return NO_SENTENCE;
       }
       if (text.length > TRANSLATE_MAX_CHARS) {
         return SENTENCE_TOO_LONG;
       }
-      // Entry does not call out when both ends name the same language.
+      // Skip the API call when source and target languages match.
       if (String(source) === String(target)) {
         return text;
       }
@@ -1324,9 +1248,6 @@ export function createOps(vm: Vm) {
       return LANGUAGE_NAMES[code] ?? UNKNOWN_SENTENCE;
     },
 
-    // -----------------------------------------------------------------------
-    //  Timer
-    // -----------------------------------------------------------------------
     timerAction(action: string): void {
       if (action === 'START') {
         vm.startTimer();
@@ -1345,14 +1266,10 @@ export function createOps(vm: Vm) {
       return vm.timerValue();
     },
 
-    /** Ticks since the run began. A script that has given up a frame sees a new one. */
     frame(): number {
       return vm.frame;
     },
 
-    // -----------------------------------------------------------------------
-    //  Calculation
-    // -----------------------------------------------------------------------
     random(left: string, right: string): number | string {
       const low = Math.min(Number(left), Number(right));
       const high = Math.max(Number(left), Number(right));
@@ -1468,9 +1385,9 @@ export function createOps(vm: Vm) {
       }
     },
 
-    /** Entry throws outside the text, which stops the whole work. */
+    // Out-of-range text access throws and stops the whole work, matching Entry.
     charAt(text: string, index: number): string {
-      // The same comparisons as entry, so NaN or a fraction passes as it does there.
+      // Keep Entry's comparisons so NaN and fractional indices pass the same checks.
       if (index - 1 < 0 || index - 1 > text.length - 1) {
         throw new RuntimeBlockError(`글자 위치 ${index} 이(가) 범위를 벗어났습니다 (글자 수 ${text.length})`, 'char_at', { text, index });
       }
@@ -1506,9 +1423,6 @@ export function createOps(vm: Vm) {
       return rgb[channel as 'r' | 'g' | 'b'] ?? 0;
     },
 
-    // -----------------------------------------------------------------------
-    //  Judgement
-    // -----------------------------------------------------------------------
     isClicked(): boolean {
       return vm.mouseDown;
     },
@@ -1542,7 +1456,7 @@ export function createOps(vm: Vm) {
         return vm.collision.touchingWall(entity, targetId, TOUCH_THRESHOLD);
       }
       if (targetId === 'mouse') {
-        // Before the pointer has been over the stage it is at the canvas's top left (world 0, 0).
+        // Before the pointer enters, use the canvas's top-left corner rather than the stage center.
         if (!vm.pointerSeen) {
           return vm.collision.touchingMouse(entity, 0, 0);
         }
@@ -1574,8 +1488,7 @@ export function createOps(vm: Vm) {
       return vm.touch;
     },
 
-    // Entry answers `window.user.username`/`.nickname`, and a space when nobody
-    // is signed in.
+    // Read the viewer's username and nickname; return a space for each when signed out.
     userId(): string {
       return vm.user ? vm.user.id : GUEST;
     },
@@ -1600,17 +1513,11 @@ function dialogText(message: unknown): string {
   return wrapDialog(String(roundedDecimals(text, 3)));
 }
 
-/**
- * `new Entry.Dialog` — `message.match(/.{1,15}/g).join('\n')`. Every bubble is
- * broken every 15 characters, so a long line never widens the balloon past the
- * stage. The same regex drops the line breaks already in the text, because `.`
- * does not match them.
- */
+// Split bubbles every 15 characters and discard existing line breaks, matching Entry's regex.
 function wrapDialog(text: string): string {
   return text.match(/.{1,15}/g)?.join('\n') ?? text;
 }
 
-/** `Entry.getMaxFloatPoint`. */
 function maxFloatPoint(numbers: Array<string | number>): number {
   let max = 0;
   for (const value of numbers) {

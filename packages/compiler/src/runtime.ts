@@ -1,13 +1,3 @@
-/**
- * 컴파일러가 엔트리 실행 환경(런타임)에 주입하는 특수 함수들입니다.
- *
- * 엔트리에는 크기를 특정 비율로 지정하는 블록이 없고, "크기를 ~만큼 늘리기" 블록만 존재합니다.
- * 크기를 목표 비율로 맞추려면 현재의 가로 및 세로 길이를 알아야 하지만, 엔트리는 가로와 세로가 섞인 단일 "크기" 값만 제공합니다.
- * 
- * 이 모듈의 함수들은 한쪽 축을 크게 늘렸을 때 전체 크기가 얼마나 변하는지 측정하여 각 축의 길이를 역산해냅니다.
- * 이 값을 통해 현재 비율을 파악하고, 원래 크기로 되돌린 후 목표하는 가로/세로 비율에 맞게 정확히 크기를 조절합니다.
- */
-
 import {
   STORE_FLAG_VARIABLE,
   STORE_SAVE_ASYNC_FUNCTION,
@@ -24,7 +14,7 @@ const AXES: Record<string, { setter: string; probe: string; label: string }> = {
   scale_y: { setter: 'HEIGHT', probe: 'WIDTH', label: '[Tess] 세로 비율 정하기' },
 };
 
-/** Select numeric parameters once, without overflow-prone arithmetic identities. */
+// Select numeric parameters once without arithmetic that could overflow.
 export function requireMinMax(kind: 'min' | 'max', ctx: Context): CompiledFunction {
   const cached = ctx.runtimeFunctions.get(kind);
   if (cached) return cached;
@@ -51,21 +41,6 @@ export function requireMinMax(kind: 'min' | 'max', ctx: Context): CompiledFuncti
   return fn;
 }
 
-/**
- * 오브젝트의 가로 또는 세로 크기를 특정 비율로 설정하는 엔트리 함수를 생성하여 등록합니다.
- * 이미 동일한 함수가 생성되어 있다면 기존 함수를 반환합니다.
- *
- * 생성되는 엔트리 함수의 형태: `[Tess] 가로 비율 정하기 (비율) (원래 배율)`
- * - `비율`: 목표로 하는 비율(%)입니다. 100이면 원본 크기를 의미합니다.
- * - `원래 배율`: 해당 오브젝트의 초기 배율입니다. 오브젝트마다 초기값이 다르므로 인자로 받아서 계산합니다.
- *
- * @param property 설정할 속성 이름 (`scale_x` 또는 `scale_y`)
- * @param ctx 컴파일 컨텍스트
- * @returns 생성되거나 캐시된 런타임 함수 객체
- *
- * @example
- * const setterFunc = requireScaleSetter("scale_x", ctx);
- */
 export function requireScaleSetter(property: string, ctx: Context): CompiledFunction {
   const existing = ctx.runtimeFunctions.get(property);
   if (existing) return existing;
@@ -75,7 +50,7 @@ export function requireScaleSetter(property: string, ctx: Context): CompiledFunc
   const params = ['비율', '원래 배율'];
   const paramTypes = new Map(params.map((name) => [name, `stringParam_${ctx.newId()}`]));
 
-  // 지역 변수: 잰 값들을 담아 둔다 (호출마다 따로 생기므로 복제본에서도 안전하다)
+  // Function locals keep measurements separate for each call and clone.
   const locals: Record<string, string> = {};
   const localVariables: FuncLocalVariable[] = ['현재 크기', '지금 축', '원래 크기', '원래 축'].map((name) => {
     const variable = { id: `${id}_${ctx.newId()}`, name, value: 0 };
@@ -91,7 +66,7 @@ export function requireScaleSetter(property: string, ctx: Context): CompiledFunc
   const calc = (left: EntryParam, operator: string, right: EntryParam) => ctx.block('calc_basic', [left, operator, right]);
   const stretch = (dimension: string, value: EntryParam) => ctx.block('stretch_scale_size', [dimension, value, null]);
 
-  //  잰 축 = 2 × 기준크기 × (지금크기 − 기준크기) × 0.00001
+  // Axis measurement: 2 * base size * (stretched size - base size) * 0.00001.
   const measured = (baseline: string) => calc(
     calc(calc(number(2), 'MULTI', local(baseline)), 'MULTI', calc(size(), 'MINUS', local(baseline))),
     'MULTI',
@@ -99,26 +74,25 @@ export function requireScaleSetter(property: string, ctx: Context): CompiledFunc
   );
 
   const body = [
-    // 1. 지금 상태에서 "건드리지 않을 축" 의 길이를 잰다
+    // Measure the axis that must stay unchanged.
     setLocal('현재 크기', size()),
     stretch(axis.probe, number(MEASURE)),
     setLocal('지금 축', measured('현재 크기')),
 
-    // 2. 원래 크기로 되돌린 뒤 같은 축을 잰다 (이때 배율은 인자로 받은 값)
+    // Reset the size and measure that axis at its original scale.
     ctx.block('reset_scale_size', [null]),
     setLocal('원래 크기', size()),
     stretch(axis.probe, number(MEASURE)),
     setLocal('원래 축', measured('원래 크기')),
     ctx.block('reset_scale_size', [null]),
 
-    // 3. 건드리지 않을 축을 원래대로 되돌린다 (크기를 정하면 두 축이 같은 비율로 움직인다)
+    // Restore the unchanged axis because setting size scales both axes.
     ctx.block('set_scale_size', [
       calc(calc(size(), 'MULTI', local('지금 축')), 'DIVIDE', local('원래 축')),
       null,
     ]),
 
-    // 4. 목표 축을 비율에 맞춘다
-    //    늘릴 값 = 지금크기 × (비율 × 원래축 / (100 × 원래배율 × 지금축) − 1)
+    // Adjust the target axis using the measured ratio.
     stretch(axis.setter, calc(
       size(),
       'MULTI',
@@ -163,26 +137,7 @@ export function requireScaleSetter(property: string, ctx: Context): CompiledFunc
 }
 
 
-// ---------------------------------------------------------------------------
-//  거듭제곱 다듬기
-// ---------------------------------------------------------------------------
-
-/**
- * 거듭제곱 연산 시 발생하는 부동소수점 오차를 보정하는 함수를 생성합니다.
- *
- * 무한소수 지수(예: 1/3)를 계산할 때 발생하는 미세한 오차를 엔트리의 자연로그(ln)와 뉴턴-랩슨 법을 활용해 보정합니다.
- * 
- * 계산 공식: `y ≈ x^p` 일 때 `y ← y × (1 + p·ln x − ln y)`
- * 
- * 보정을 거치면 10^-6 수준이던 오차가 10^-13 수준으로 줄어들어 사실상 정확한 값이 됩니다.
- * 엔트리 블록이 불필요하게 두 배로 늘어나는 것을 방지하기 위해, 매개변수로 어림값을 전달받는 별도 함수로 구성됩니다.
- *
- * @param ctx 컴파일 컨텍스트
- * @returns 생성된 거듭제곱 보정 함수 객체
- *
- * @example
- * const powerRefiner = requirePowerRefiner(ctx);
- */
+// Pass the power estimate to a helper so Newton correction does not duplicate its blocks.
 export function requirePowerRefiner(ctx: Context): CompiledFunction {
   const existing = ctx.runtimeFunctions.get('power');
   if (existing) return existing;
@@ -194,7 +149,7 @@ export function requirePowerRefiner(ctx: Context): CompiledFunction {
   const calc = (left: EntryParam, operator: string, right: EntryParam) => ctx.block('calc_basic', [left, operator, right]);
   const ln = (value: EntryParam) => ctx.block('calc_operation', [null, value, null, 'ln']);
 
-  //  어림값 × (1 + 지수 × ln(밑) − ln(어림값))
+  // Newton correction: estimate * (1 + exponent * ln(base) - ln(estimate)).
   const refined = calc(
     param('어림값'),
     'MULTI',
@@ -234,28 +189,14 @@ export function requirePowerRefiner(ctx: Context): CompiledFunction {
 }
 
 
-// ---------------------------------------------------------------------------
-//  저장 (Entry Save Manager)
-// ---------------------------------------------------------------------------
-
-/**
- * `save` · `save async` 가 부르는 빈 함수를 만들어 등록합니다.
- *
- * 세이브 매니저는 작품 안에 있는 `@저장`(기다림) · `@비동기저장`(안 기다림) 함수의
- * 호출을 가로채므로, 컴파일러는 그 이름의 **빈 함수**와 그것을 부르는 블록만 놓습니다.
- * 확장이 없는 곳에서는 아무 일도 하지 않는 함수 호출이 됩니다.
- *
- * @param async 기다리지 않는 저장인지 여부
- * @param ctx 컴파일 컨텍스트
- * @returns 만들어졌거나 이미 있던 저장 함수
- */
+// The save extension intercepts these empty functions; without it they do nothing.
 export function requireSaveFunction(async: boolean, ctx: Context): CompiledFunction {
   const key = async ? 'save-async' : 'save';
   const cached = ctx.runtimeFunctions.get(key);
   if (cached) return cached;
 
   const name = async ? STORE_SAVE_ASYNC_FUNCTION : STORE_SAVE_FUNCTION;
-  // 작품이 그 함수를 이미 들고 있으면(되돌린 작품 등) 그것을 부릅니다.
+  // Reuse save functions already present in decompiled projects.
   const declared = ctx.functions.find((fn) => fn.name === name);
   if (declared) {
     ctx.runtimeFunctions.set(key, declared);
@@ -286,13 +227,7 @@ export function requireSaveFunction(async: boolean, ctx: Context): CompiledFunct
   return fn;
 }
 
-/**
- * `can_save` 가 읽는 `@확장프로그램` 변수를 만들어 등록합니다. 세이브 매니저가 있으면
- * 이 변수를 1 로 만들고, 없으면 작품이 저장한 값(0) 그대로 남습니다.
- *
- * @param ctx 컴파일 컨텍스트
- * @returns 만들어졌거나 이미 있던 변수
- */
+// The save manager changes this flag to 1; without it the saved value stays 0.
 export function requireStoreFlag(ctx: Context): EntryVariable {
   const existing = ctx.variables.find(
     (variable) => variable.name === STORE_FLAG_VARIABLE && variable.object === null,

@@ -1,13 +1,3 @@
-/**
- * 툴바 단추 뒤의 설정 창(`packages/extension/src/popup`)을 확인합니다.
- *
- * 실행기는 단추 하나입니다 — 누르면 켜지고 다시 누르면 꺼지며, 그때마다 저장소에
- * 그 값을 씁니다(열려 있는 작품 페이지가 같은 키를 보고 있습니다). 나머지 스위치는
- * 그 실행기의 설정입니다.
- *
- * 브라우저 모듈이라 노드 타입 검사에서 빠져 있어, 다른 확장 테스트와 같은 방식으로
- * 타입만 지운 원본을 jsdom 위에 올립니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,7 +10,6 @@ import { JSDOM } from 'jsdom';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const POPUP = path.join(root, 'packages/extension/src/popup');
 
-/** 설정 창을 jsdom 에 올린다. 저장소 대신 받아 적는 자리를 놓아 둔다. */
 async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknown[] = []) {
   const html = fs.readFileSync(path.join(POPUP, 'popup.html'), 'utf-8');
   const dom = new JSDOM(html, { pretendToBeVisual: true });
@@ -41,7 +30,6 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
     ENABLED_KEY: 'enabled',
     SVG_KEY: 'svg',
     Intl: globalThis.Intl,
-    // 저장된 데이터는 확장 자신의 IndexedDB 에 있다 (`src/store-db.ts`).
     listWorks: () => Promise.resolve(rows.slice()),
     exportName: () => 'tessvm-save-2026-09-14.json',
     exportAll: () => Promise.resolve({ size: 884 }),
@@ -60,7 +48,7 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
       return Promise.resolve();
     },
   };
-  // jsdom 에는 blob 주소가 없다 — 내보내기가 만든 것을 여기서 받아 적는다.
+  // Capture blob downloads because jsdom has no object-URL implementation.
   const downloads: string[] = [];
   sandbox.URL = { createObjectURL: () => 'blob:tessvm', revokeObjectURL: () => undefined };
   sandbox.setTimeout = (run: () => void, delay: number) =>
@@ -70,9 +58,8 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  // `import` 으로 시작하는 이름(importButton)까지 지우지 않도록 뒤에 공백을 요구한다.
+  // Require whitespace after import so identifiers such as importButton are not stripped.
   vm.runInContext(source.replace(/^import\s[\s\S]*?;$/gm, ''), sandbox);
-  // 저장소를 읽고 화면을 칠하는 일은 프로미스 뒤에 있습니다.
   await new Promise((done) => setTimeout(done, 0));
 
   const find = (id: string) => dom.window.document.getElementById(id)!;
@@ -81,7 +68,6 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
     dropped,
     downloads,
     find,
-    /** 파일 칸에 하나 고른 것처럼 만들고 알린다. */
     pick(name: string) {
       const input = find('file') as HTMLInputElement;
       Object.defineProperty(input, 'files', { value: [{ name }], configurable: true });
@@ -91,7 +77,6 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
       const line = find('saves-note');
       return { text: line.textContent ?? '', hidden: line.hidden, bad: line.classList.contains('is-bad') };
     },
-    /** 목록의 줄들 — 제목과 그 아래 한 줄. */
     saves: () =>
       [...dom.window.document.querySelectorAll('.save')].map((row) => ({
         title: row.querySelector('.save-title')?.textContent ?? '',
@@ -123,7 +108,6 @@ test('실행기 단추는 한 번 누르면 켜지고 다시 누르면 꺼진다
   assert.equal(popup.on(), false);
   assert.equal(popup.find('chip').textContent, '꺼짐');
   assert.match(popup.find('note').textContent ?? '', /켭니다/);
-  // 문구는 문장마다 줄을 나눕니다 — 창이 좁아 붙어 보이던 자리입니다.
   assert.equal(popup.find('note').querySelectorAll('br').length, 1);
 
   popup.click('enabled');
@@ -145,7 +129,6 @@ test('꺼진 채로 열면 꺼진 모습으로 시작한다', async (t) => {
 test('벡터 스위치는 저장된 값을 보여 주고, 바꾸면 그대로 쓴다', async (t) => {
   const popup = await mountPopup(t, { svg: true });
   assert.equal((popup.find('svg') as HTMLInputElement).checked, true);
-  // 아이디는 가리지 않고, 모르는 블록은 늘 알린다.
   assert.equal(popup.find('mask'), null);
   assert.equal(popup.find('notice'), null);
 
@@ -153,9 +136,6 @@ test('벡터 스위치는 저장된 값을 보여 주고, 바꾸면 그대로 �
   assert.deepEqual(popup.written, [['svg', false]]);
 });
 
-// ---------------------------------------------------------------------------
-//  저장된 데이터
-// ---------------------------------------------------------------------------
 const WORKS = [
   { work: '60a1', title: '마법사 키우기', names: 3, bytes: 2048, updated: Date.UTC(2026, 8, 1, 3) },
   { work: '77b2', title: '농장', names: 1, bytes: 120, updated: 0 },

@@ -1,4 +1,4 @@
-# use 로 불러와지는 조각 파일. 오브젝트 하나만 담고 있다.
+# Included fragment containing one object.
 object "hero":
   name "용사"
   default costume idle "hero_idle.png"

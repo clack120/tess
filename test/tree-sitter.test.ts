@@ -1,6 +1,3 @@
-/**
- * tree-sitter 파서가 Chevrotain 파서와 똑같은 AST 를 만드는지 확인합니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -40,7 +37,6 @@ function corpus(): Array<[string, string]> {
   return out;
 }
 
-/** The array literal bound to `name` in grammar.js. */
 function grammarList(grammar: string, name: string): string[] {
   const match = new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`).exec(grammar);
   assert.ok(match, name);
@@ -52,13 +48,13 @@ test('tree-sitter 키워드 목록이 tokens.ts 와 같다', () => {
   assert.deepEqual(grammarList(grammar, 'KEYWORDS'), KEYWORDS);
   assert.deepEqual(grammarList(grammar, 'RESERVED'), [...RESERVED]);
   assert.deepEqual(grammarList(grammar, 'STANDALONE'), [...STANDALONE_STATEMENTS]);
-  // `store` opens a statement only before `var`/`list`; alone it is a callable name.
+  // Store starts a declaration only before var or list; alone it remains callable.
   assert.deepEqual(new Set(grammarList(grammar, 'STATEMENT_LEADERS')), new Set([...STATEMENT_KEYWORDS].filter((word) => word !== 'store')));
 });
 
 test('tree-sitter 와 Chevrotain 의 AST 가 같다', async () => {
   const sources = corpus();
-  // Chevrotain results first: once tree-sitter is loaded, parse() goes through it.
+  // Capture Chevrotain results before initializing tree-sitter because parse switches after loading.
   const expected = sources.map(([, source]) => parse(source, { validate: false }));
   assert.ok(sources.length > SNIPPETS.length, 'the example corpus must be present');
   assert.ok(expected.slice(0, SNIPPETS.length).every((result) => result.ok), 'all snippets must parse');

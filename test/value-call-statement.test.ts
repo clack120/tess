@@ -1,6 +1,3 @@
-/**
- * 값을 돌려주는 함수를 문장으로 부르면 엔트리에서도 실행되고, 되돌리면 같은 호출로 읽힌다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileProject } from '../packages/compiler/src/index.ts';

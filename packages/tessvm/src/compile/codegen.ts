@@ -1,18 +1,9 @@
-/**
- * @fileoverview 엔트리 블록 트리를 자바스크립트 소스로 옮기는 JIT 컴파일러입니다.
- *
- * 블록 하나하나를 해석하는 대신, 작품을 한 번 읽어 제너레이터 함수의 소스를 만들고
- * `new Function` 으로 한 번만 컴파일합니다. 프레임을 넘겨야 하는 자리(반복 한 바퀴,
- * 기다리기, 시간이 걸리는 이동)는 `yield` 가 되고, 나머지는 전부 평범한 자바스크립트
- * 문장이 됩니다. 리터럴은 컴파일 시점에 접어 두고, 변수·오브젝트·함수는 배열 인덱스로
- * 미리 풀어 둡니다.
- */
+// Compile blocks once into generators; yield only where Entry gives up the frame.
 import { SAVE_FUNCTIONS, functionLabel } from '../runtime/save.ts';
 import type { GeneratedTrace } from '../runtime/diagnostics.ts';
 
 let nextSourceId = 0;
 
-/** A block as it appears in `project.json`. */
 export interface RawBlock {
   id: string;
   type: string;
@@ -41,21 +32,18 @@ export interface ScriptPlan {
   event: string;
   filter: string | null;
   blockId: string;
-  /** Index into the generated `scripts` array. */
   index: number;
 }
 
 export interface CompiledProgram {
   source: string;
   plans: ScriptPlan[];
-  /** Block types the compiler did not know, with how often they appeared. */
   unknown: Map<string, number>;
-  /** Key codes the work reacts to or reads, or null when it may read any key. */
+  // Null means the project may read any key.
   keys: Set<number> | null;
   trace: GeneratedTrace;
 }
 
-/** Hat blocks and the runtime event each one waits for. */
 const HATS: Record<string, string> = {
   when_run_button_click: 'start',
   when_some_key_pressed: 'keyPress',
@@ -68,7 +56,6 @@ const HATS: Record<string, string> = {
   when_clone_start: 'when_clone_start',
 };
 
-/** Which param of a hat block narrows it (key code, message id). */
 const HAT_FILTER: Record<string, number> = {
   when_some_key_pressed: 1,
   when_message_cast: 1,
@@ -76,23 +63,10 @@ const HAT_FILTER: Record<string, number> = {
 
 const RESERVED_PARAM = /^(string|boolean)Param_/;
 
-/**
- * How many times a loop that need not give up a frame may go round inside one
- * before it gives way anyway. Entry has no such ceiling — a work that spins
- * there hangs its page too — and neither should this one in any way a work can
- * feel: the number is a last resort against a runner that cannot be stopped,
- * set far above what a real work does in a frame rather than anywhere near it.
- */
+// Entry has no spin limit; this guard yields only as a last resort to keep the runner stoppable.
 const SPIN_LIMIT = 10_000_000;
 
-/**
- * How deep function calls may nest before the work stops.
- *
- * Entry nests its calls on the javascript stack; a work that recurses without
- * end overflows it, and `stopProjectWithToast` stops the work. Calls here run on
- * the thread's own frame stack (`Thread.frames`), so the wall is a fixed depth
- * and passing it throws the same way.
- */
+// Use a fixed depth limit because VM calls use frame stacks rather than Entry's JS stack.
 const CALL_DEPTH_LIMIT = 1000000;
 
 type Kind = 'num' | 'str' | 'bool' | 'any';
@@ -100,22 +74,17 @@ type Kind = 'num' | 'str' | 'bool' | 'any';
 interface Value {
   code: string;
   kind: Kind;
-  /** Set when the value is a compile-time constant. */
   constant?: string | number | boolean;
 }
 
 const NULL_VALUE: Value = { code: 'undefined', kind: 'any' };
 
 function literal(value: unknown): string {
-  // Work text must never be mistaken for a generated block marker.
+  // Escape work text so it cannot impersonate generated block markers.
   return JSON.stringify(value === undefined ? null : value).replaceAll('/*@tessvm:', '/\\u002a@tessvm:');
 }
 
-/**
- * `String(value)` for a slot the work fills. A json object with a `toString` of
- * its own — `{"toString": "x"}` — has no primitive form and throws on the way in,
- * which would end the compile for the whole work; it reads as empty here.
- */
+// Treat values that cannot convert to strings as empty so malformed data cannot abort compilation.
 function text(value: unknown): string {
   if (typeof value === 'string') {
     return value;
@@ -130,7 +99,7 @@ function text(value: unknown): string {
   }
 }
 
-/** `Number(value)`, which throws on the same values `text` covers. */
+// Numeric conversion can throw on the same malformed values as text conversion.
 function number(value: unknown): number {
   try {
     return Number(value);
@@ -139,22 +108,12 @@ function number(value: unknown): number {
   }
 }
 
-/**
- * One entry of a table keyed by the work's own text. A plain `table[key]` also
- * answers for `constructor` and every other name on `Object.prototype`, and
- * what came back would be written into the generated source.
- */
+// Ignore inherited table keys so project text cannot inject prototype values into generated code.
 function pick<T>(table: Record<string, T>, key: string): T | undefined {
   return Object.hasOwn(table, key) ? table[key] : undefined;
 }
 
-/**
- * A block type written into a generated comment. The type is the work's own
- * text, and the whole program goes through `new Function`, so anything that
- * could close the comment or open a line of its own is dropped — otherwise a
- * crafted work writes its own javascript here. Entry's own types are word
- * characters throughout, so nothing real is lost.
- */
+// Sanitize block types before generated comments so project data cannot inject JavaScript.
 function comment(type: string): string {
   return `/* ${String(type).replace(/[^\w.-]+/g, ' ').slice(0, 60)} */`;
 }
@@ -163,31 +122,19 @@ function isBlock(value: unknown): value is RawBlock {
   return Boolean(value) && typeof value === 'object' && typeof (value as RawBlock).type === 'string';
 }
 
-/**
- * Flow blocks that work from a value slot, and what they do to the loop they
- * sit in. Entry reads a block's slots before running the block itself, so one
- * of these put in a slot runs there — `continue_repeat` restarts the loop
- * (`continueLoop`) and `stop_repeat` ends it (`breakLoop`) — and the block that
- * carried it is never reached.
- */
+// Entry executes flow blocks in inputs before reaching the parent block.
 const LOOP_TRICKS: Record<string, 'continue' | 'break'> = {
   continue_repeat: 'continue',
   stop_repeat: 'break',
 };
 
-/** `not(continue_repeat)` · `not(stop_repeat)` — the boolean slot these ride in. */
 function slotTrick(param: unknown): 'continue' | 'break' | null {
   if (!isBlock(param) || param.type !== 'boolean_not') return null;
   const inner = param.params?.[1];
   return isBlock(inner) ? pick(LOOP_TRICKS, inner.type) ?? null : null;
 }
 
-/**
- * Whether reading a slot can be felt. Entry reads every slot before it runs the
- * block, so a slot beside the flow block is read for real — a plain value is
- * nothing, but a function call or a statement parked in a `function_field_*`
- * wrapper does something, and a block carrying one of those is left alone.
- */
+// Keep carriers with other effects because Entry evaluates all input slots.
 function inertValue(param: unknown): boolean {
   if (!isBlock(param)) return true;
   if ((param.statements?.length ?? 0) > 0) return false;
@@ -198,16 +145,7 @@ function inertValue(param: unknown): boolean {
   return (param.params ?? []).every(inertValue);
 }
 
-/**
- * The other carrier: a flow block dropped into the value slots of a block that
- * is never meant to run. It runs as the flow block, and the block it rode in on
- * is neither run nor reported.
- *
- * The block around it is whatever the work picked — a hardware block with
- * nothing to drive, but just as often a sound, a dialogue or a move, since any
- * block with a slot carries one. The slots beside it hold whatever the editor
- * put there, usually a number the work never meant.
- */
+// Execute an input's flow control without running or reporting the unreachable carrier block.
 function carriedTrick(block: RawBlock): 'continue' | 'break' | null {
   if ((block.statements?.length ?? 0) > 0) return null;
   let carried: 'continue' | 'break' | null = null;
@@ -237,16 +175,12 @@ export class Codegen {
   readonly unknown = new Map<string, number>();
   private keys: Set<number> | null = new Set();
 
-  /** Names bound inside the function body currently being compiled. */
   private paramSlots: Map<string, number> | null = null;
   private funcLocals: Set<string> | null = null;
   private loopDepth = 0;
-  /**
-   * One entry per loop being compiled, set when something inside it can start
-   * the next round without giving up a frame. Such a loop carries a guard.
-   */
+  // Loops that can skip yielding need a spin guard.
   private readonly spinning: boolean[] = [];
-  /** Set while compiling a function body; ending the executor jumps to this label. */
+  // Ending a function executor jumps to this label.
   private funcLabel: string | null = null;
 
   constructor(input: CompileInput) {
@@ -281,7 +215,7 @@ export class Codegen {
         }
         const event = pick(HATS, hat.type);
         if (!event) {
-          // Loose stacks and comment-only blocks never run; entry ignores them too.
+          // Entry ignores detached stacks and comment-only blocks too.
           continue;
         }
         const filterIndex = pick(HAT_FILTER, hat.type);
@@ -302,10 +236,7 @@ export class Codegen {
     return { source: this.emitModule(), plans: this.plans, unknown: this.unknown, keys: this.keys, trace: this.trace };
   }
 
-  /**
-   * A module whose only script works out one value block and leaves it in
-   * `th.state.result`: what an editor shows when a reporter is clicked.
-   */
+  // Store a clicked reporter's value in th.state.result for inspection.
   compileProbe(block: RawBlock): string {
     for (const fn of this.input.functions) {
       this.functionSources.push(this.compileFunction(fn));
@@ -315,7 +246,6 @@ export class Codegen {
     return this.emitModule();
   }
 
-  /** A module whose only script runs one stack of blocks, for starting it inside a running work. */
   compileStackProbe(stack: RawBlock[]): string {
     for (const fn of this.input.functions) {
       this.functionSources.push(this.compileFunction(fn));
@@ -359,8 +289,7 @@ export class Codegen {
   }
 
   private compileFunction(fn: FunctionEntry): string {
-    // The save manager's own functions are empty in the work — the extension
-    // takes their call. This runner takes it here instead.
+    // Intercept the save manager's empty functions here instead of through an extension.
     const saving = pick(SAVE_FUNCTIONS, functionLabel(fn.content));
     if (saving) {
       return saving === 'wait'
@@ -387,12 +316,10 @@ export class Codegen {
     const body = this.compileStack(functionBody(stack!), '    ');
     this.funcLabel = previousLabel;
 
-    // Past the depth limit the call runs nothing and gives no value, which is
-    // what the caller sees from entry once its stack has run out.
+    // Beyond the depth limit, a call runs no body and produces no value.
     const returnsValue = define.type === 'function_create_value';
     const result = returnsValue ? this.value(define.params[3]).code : '';
-    // On pause, entry hands a value call its result at once: `th.finish` thrown
-    // into the frame skips the rest of the body to the return expression.
+    // On pause, finish skips the value function body and evaluates its return expression.
     let source =
       `function* (e, th, P) {\n` +
       `  if (th.depth >= ${CALL_DEPTH_LIMIT}) throw new RangeError('함수 호출이 너무 깊습니다 (끝나지 않는 재귀)');\n` +
@@ -407,16 +334,13 @@ export class Codegen {
     this.paramSlots = null;
     this.funcLocals = null;
     this.loopDepth = previousLoopDepth;
-    // Marked once on the prototype, so a call costs nothing extra.
+    // Mark the prototype once to avoid extra work on each call.
     return this.marker(define) + (returnsValue
       ? `((g) => { g.prototype.finishes = true; return g; })(${source})`
       : source);
   }
 
-  /**
-   * Ends the running executor. Inside a function that leaves the caller alive and,
-   * for a value function, still evaluates its return expression -- as entry does.
-   */
+  // Ending a function executor leaves its caller alive and still evaluates its return expression.
   private endExecutor(): string {
     return this.funcLabel ? `break ${this.funcLabel};` : 'return;';
   }
@@ -429,9 +353,6 @@ export class Codegen {
     return out;
   }
 
-  // -------------------------------------------------------------------------
-  //  Statements
-  // -------------------------------------------------------------------------
   private statement(block: RawBlock, ind: string): string {
     return this.marker(block) + this.statementCode(block, ind);
   }
@@ -440,16 +361,13 @@ export class Codegen {
     const p = block.params;
     const line = (code: string) => `${ind}${code}\n`;
 
-    // Asked before the block's own name, because the carrier is often a block
-    // this compiler knows — a sound to play, a move to make over a second. The
-    // flow block in its slot runs first and the block itself never does.
+    // Check flow carriers first because input control can prevent the parent block from running.
     const carried = carriedTrick(block);
     if (carried) {
       return line(this.trickCode(carried));
     }
 
     switch (block.type) {
-      // ----- moving -----
       case 'move_direction':
         return line(`O.moveDirection(e, ${this.num(p[0])});`);
       case 'bounce_wall':
@@ -494,7 +412,6 @@ export class Codegen {
       case 'see_angle_object':
         return line(`O.seeAngleObject(e, ${this.field(p[0])});`);
 
-      // ----- looks -----
       case 'show':
         return line('e.setVisible(true);');
       case 'hide':
@@ -524,14 +441,11 @@ export class Codegen {
       case 'reset_scale_size':
         return line('e.resetSize();');
 
-      // ----- 10여 년 전 이름 -----
-      // 엔트리가 옛 작품을 위해 아직 들고 있는 블록들. 이름만 다르고 하는 일은
-      // 지금 블록과 같거나, 몇 가지는 값의 방향만 다릅니다.
       case 'set_scale_percent':
         return line(`O.setScalePercent(e, ${this.num(p[0])});`);
       case 'change_scale_percent':
         return line(`O.changeScalePercent(e, ${this.num(p[0])});`);
-      // `set_effect` 의 `opacity` 는 불투명도라 투명도와 방향이 반대입니다.
+      // Legacy opacity runs in the opposite direction from transparency.
       case 'set_effect':
       case 'set_entity_effect':
         return line(
@@ -550,16 +464,13 @@ export class Codegen {
       case 'change_object_index':
         return line(`O.changeObjectIndex(e, ${this.field(p[0])});`);
 
-      // ----- flow -----
       case 'wait_second':
         return line(`yield* O.waitSecond(${this.num(p[0])});`);
       case 'repeat_basic':
         return this.repeatBasic(block, ind);
       case 'repeat_inf':
         return this.loop(`while (true) {`, block.statements?.[0] ?? [], ind);
-      // The maze lesson's loop never sets entry's `isLooped`, so a round of it costs
-      // no frame; the spin guard keeps a body that never breaks from holding the
-      // frame for good. An empty body is skipped, as entry's own func skips it.
+      // Maze loops cost no frame; guard nonempty bodies and skip empty ones, matching Entry.
       case 'ai_repeat_until_reach':
         return block.statements?.[0]?.length
           ? this.loop(`while (true) {`, block.statements[0], ind, true)
@@ -581,8 +492,7 @@ export class Codegen {
           line('}')
         );
       case 'wait_until_true': {
-        // A flow block in the slot unwinds to the loop and either keeps it
-        // running or ends it, both without spending a frame.
+        // Input flow control unwinds to the loop without spending a frame.
         const trick = slotTrick(p[0]);
         if (trick) {
           return line(this.trickCode(trick));
@@ -601,13 +511,12 @@ export class Codegen {
         return line('O.stopRun(); O.die();');
       case 'create_clone':
         return line(`O.createClone(e, ${this.field(p[0])});`);
-      // Removing a clone ends every script of that clone, this one included.
+      // Removing a clone ends all its scripts, including this one.
       case 'delete_clone':
         return line('if (e.isClone) { e.removeClone(); O.die(); }');
       case 'remove_all_clones':
         return line('O.removeAllClones(e);');
 
-      // ----- events -----
       case 'message_cast':
         return line(`O.castMessage(${this.field(p[0])});`);
       case 'message_cast_wait':
@@ -619,7 +528,6 @@ export class Codegen {
       case 'switch_scope':
         return line(`e = O.entityOf(${this.field(p[0])}) || e;`);
 
-      // ----- variables -----
       case 'set_variable':
         return line(`O.setVariable(e, ${this.varRef(p[0])}, ${this.raw(p[1])});`);
       case 'change_variable':
@@ -648,7 +556,6 @@ export class Codegen {
       case 'set_func_variable':
         return line(`L[${this.funcVarKey(p[0])}] = ${this.raw(p[1])};`);
 
-      // ----- text boxes -----
       case 'text_write':
         return line(`e.setText(${this.str(p[0])});`);
       case 'text_append':
@@ -666,7 +573,6 @@ export class Codegen {
       case 'text_change_bg_color':
         return line(`O.textBgColor(e, ${this.str(p[0])});`);
 
-      // ----- sound -----
       case 'sound_something_with_block':
         return line(`O.playSound(e, ${this.str(p[0])});`);
       case 'sound_something_second_with_block':
@@ -696,7 +602,6 @@ export class Codegen {
       case 'stop_bgm':
         return line('O.stopBgm();');
 
-      // ----- pen -----
       case 'brush_stamp':
         return line('O.stamp(e);');
       case 'start_drawing':
@@ -724,7 +629,6 @@ export class Codegen {
       case 'brush_erase_all':
         return line('O.eraseAll(e);');
 
-      // ----- data tables -----
       case 'append_row_to_table':
         return line(`O.tableAppend(${this.tableRef(p[0])}, ${this.str(p[1])});`);
       case 'insert_row_to_table':
@@ -739,8 +643,7 @@ export class Codegen {
         return line(`O.tableSetCell(${this.tableRef(p[0])}, ${this.raw(p[1])}, ${this.raw(p[2])});`);
       case 'open_table':
         return line(`O.showTable(${this.tableRef(p[0])});`);
-      // Entry does not hold the script here: the window closes itself when the
-      // seconds are up and the blocks below run straight away.
+      // Closing the table later must not hold the script; Entry runs following blocks immediately.
       case 'open_table_wait':
         return line(`O.showTable(${this.tableRef(p[0])}, ${this.num(p[1])});`);
       case 'close_table_chart':
@@ -748,10 +651,9 @@ export class Codegen {
       case 'open_table_chart':
         return line(`O.showChart(${this.tableRef(p[0])}, ${this.num(p[1])});`);
       case 'save_current_table':
-        // The save dialog is editor UI; the running work sees nothing.
+        // The save dialog belongs to the editor and has no effect in the running work.
         return line(comment(block.type));
 
-      // ----- text to speech -----
       case 'read_text':
         return line(`O.speak(e, ${this.str(p[0])});`);
       case 'read_text_wait_with_block':
@@ -761,7 +663,6 @@ export class Codegen {
           `O.setVoice(e, ${this.field(p[0])}, ${this.field(p[1])}, ${this.field(p[2])});`,
         );
 
-      // ----- timer -----
       case 'choose_project_timer_action':
         return line(`O.timerAction(${this.field(p[1])});`);
       case 'set_visible_project_timer':
@@ -776,15 +677,11 @@ export class Codegen {
     }
   }
 
-  /**
-   * What a flow block read from a value slot compiles to. Outside a loop entry
-   * unwinds the call stack instead: restarting gives the frame up, and ending
-   * takes the script with it.
-   */
+  // Outside loops, input flow control unwinds calls and yields or ends the script.
   private trickCode(trick: 'continue' | 'break'): string {
     if (this.loopDepth > 0) {
       if (trick === 'continue' && this.spinning.length) {
-        // This round ends without a frame, so the loop around it needs a guard.
+        // This iteration skips yielding, so the enclosing loop needs a guard.
         this.spinning[this.spinning.length - 1] = true;
       }
       return trick === 'break' ? 'break;' : 'continue;';
@@ -792,10 +689,7 @@ export class Codegen {
     return trick === 'break' ? this.endExecutor() : 'yield 0;';
   }
 
-  /**
-   * The line that keeps a loop which need not yield from holding the frame. It
-   * sits at the top of the body so a `continue` cannot slip past it.
-   */
+  // Put the spin guard before the body so continue cannot bypass it.
   private spinGuard(depth: number, ind: string): string {
     const spins = `s${depth}`;
     const mark = `m${depth}`;
@@ -830,8 +724,8 @@ export class Codegen {
     return this.loop(`while (${condition}) {`, block.statements?.[0] ?? [], ind);
   }
 
-  /** A loop and its body. A round costs a frame unless the body jumps past it. */
-  /** `frameless` rounds cost no frame, so the spin guard is what yields. */
+  // Loop iterations cost a frame unless the body skips yielding.
+  // Frameless loops still need the spin guard to yield when stuck.
   private loop(header: string, body: RawBlock[], ind: string, frameless = false): string {
     const depth = this.loopDepth;
     this.loopDepth += 1;
@@ -858,8 +752,7 @@ export class Codegen {
         return line('O.stopEntity(e); O.die();');
       case 'thisObject':
         return line('O.stopTarget(e); O.die();');
-      // `이 코드 멈추기` ends only the executor it sits in — inside a function
-      // that is the function, and the caller carries on. Entry does the same.
+      // Stopping a function's executor leaves its caller running, matching Entry.
       case 'thisThread':
         return line(this.endExecutor());
       case 'otherThread':
@@ -871,16 +764,7 @@ export class Codegen {
     }
   }
 
-  // -------------------------------------------------------------------------
-  //  Values
-  // -------------------------------------------------------------------------
-  /**
-   * `Entry.Scope.getNumberValue` — `parseFloat(v) || 0`. On a value that is
-   * already a number that is `v || 0`, which is not nothing: `0 / 0` hands back
-   * `NaN`, and the next slot to read it turns it into 0. Dropping the `|| 0`
-   * with the conversion would let that `NaN` run on through the rest of the
-   * expression, so a number keeps it.
-   */
+  // Keep the numeric fallback because Entry converts NaN and negative zero to zero at each number slot.
   private num(param: unknown): string {
     const value = this.value(param);
     if (value.constant !== undefined) {
@@ -890,7 +774,7 @@ export class Codegen {
     return value.kind === 'num' ? `(${value.code} || 0)` : `n(${value.code})`;
   }
 
-  /** `Number(x)` rather than `parseFloat(x) || 0` — the timed blocks use this. */
+  // Timed blocks use Number rather than parseFloat with a zero fallback.
   private numOf(param: unknown): string {
     const value = this.value(param);
     if (value.constant !== undefined) {
@@ -924,7 +808,6 @@ export class Codegen {
     return value.code;
   }
 
-  /** A dropdown value: always a plain literal in the project file. */
   private field(param: unknown): string {
     if (isBlock(param)) {
       return this.value(param).code;
@@ -983,12 +866,10 @@ export class Codegen {
       case 'get_pictures':
       case 'get_sounds':
         return { code: literal(text(p[0])), kind: 'str', constant: text(p[0]) };
-      // 표의 열 고르기. 엔트리는 이름을 보여 주고 1부터 세는 열 번호를 담아 둔다
-      // (`get_table_fields.func` 는 그 번호를 글자로 돌려준다).
+      // Entry table dropdowns store one-based column numbers as text.
       case 'get_table_fields':
         return { code: literal(text(p[0])), kind: 'str', constant: text(p[0]) };
-      // The colour picker block: `color` fills a brush slot, `text_color` a text
-      // slot, and both hold the picked colour in their first param.
+      // Both primitive color pickers hold their color in the first parameter.
       case 'color':
       case 'text_color':
         return { code: literal(text(p[0])), kind: 'str', constant: text(p[0]) };
@@ -1008,7 +889,6 @@ export class Codegen {
         return { code: `O.mouseCoordinate(${this.field(p[1])})`, kind: 'num' };
       case 'coordinate_object':
         return { code: `O.objectProperty(e, ${this.field(p[1])}, ${this.field(p[3])})`, kind: 'any' };
-      // ----- 10여 년 전 이름 -----
       case 'get_x_coordinate':
         return { code: 'e.getX()', kind: 'num' };
       case 'get_y_coordinate':
@@ -1017,7 +897,7 @@ export class Codegen {
         return { code: `(${this.num(p[0])} % ${this.num(p[2])})`, kind: 'num' };
       case 'calc_share':
         return { code: `Math.floor(${this.num(p[0])} / ${this.num(p[2])})`, kind: 'num' };
-      // The pre-`calc_basic` operator blocks: one block per operator, operands at 0 and 2.
+      // Legacy arithmetic stores operands at indices 0 and 2.
       case 'calc_plus':
         return { code: `C.calcPlus(${this.raw(p[0])}, ${this.raw(p[2])})`, kind: 'any' };
       case 'calc_minus':
@@ -1026,7 +906,7 @@ export class Codegen {
         return { code: `C.mulNum(${this.num(p[0])}, ${this.num(p[2])})`, kind: 'num' };
       case 'calc_divide':
         return { code: `C.divNum(${this.num(p[0])}, ${this.num(p[2])})`, kind: 'num' };
-      // 리스트 자리의 `첫번째`·`마지막`·`무작위`. 그 글자 그대로 번호 자리에서 풀립니다.
+      // Resolve FIRST, LAST, and RANDOM only at list read slots.
       case 'options_for_list':
         return { code: this.field(p[0]), kind: 'str' };
       case 'distance_something':
@@ -1076,9 +956,7 @@ export class Codegen {
       case 'get_block_count':
         return { code: '0', kind: 'num', constant: 0 };
 
-      // ----- 번역 -----
-      // Both answer from entry's own service, so the script waits on them the
-      // way it waits on a function call.
+      // Translation waits for Entry's service like a function call.
       case 'get_translated_string':
         return {
           code: `(yield* O.translate(${this.field(p[0])}, ${this.str(p[1])}, ${this.field(p[2])}))`,
@@ -1087,13 +965,12 @@ export class Codegen {
       case 'check_language':
         return { code: `(yield* O.detectLanguage(${this.str(p[0])}))`, kind: 'str' };
 
-      // ----- judgement -----
       case 'is_clicked':
         return { code: 'O.isClicked()', kind: 'bool' };
       case 'is_object_clicked':
         return { code: 'O.isObjectClicked(e)', kind: 'bool' };
       case 'is_press_some_key':
-        // A key worked out at run time could be any key.
+        // A computed key may refer to any key at runtime.
         if (isBlock(p[0])) this.keys = null;
         else this.keys?.add(Number(text(p[0])));
         return { code: `O.isKeyPressed(${this.field(p[0])})`, kind: 'bool' };
@@ -1104,7 +981,7 @@ export class Codegen {
       case 'boolean_basic_operator':
         return this.compare(block);
       case 'boolean_and_or':
-        // Entry reads both sides before combining them, so neither is skipped.
+        // Entry evaluates both sides before combining them.
         return {
           code:
             text(p[1] ?? 'AND') === 'AND'
@@ -1112,12 +989,11 @@ export class Codegen {
               : `C.orOf(${this.raw(p[0])}, ${this.raw(p[2])})`,
           kind: 'bool',
         };
-      // Entry's older and/or pair. Same two-sided read as `boolean_and_or`.
+      // Legacy and/or blocks also evaluate both sides.
       case 'boolean_and':
         return { code: `C.andOf(${this.raw(p[0])}, ${this.raw(p[2])})`, kind: 'bool' };
       case 'boolean_or':
         return { code: `C.orOf(${this.raw(p[0])}, ${this.raw(p[2])})`, kind: 'bool' };
-      // The pre-`boolean_basic_operator` comparisons, same operand slots.
       case 'boolean_equal':
         return { code: `C.cmpEqual(${this.raw(p[0])}, ${this.raw(p[2])})`, kind: 'bool' };
       case 'boolean_bigger':
@@ -1133,7 +1009,6 @@ export class Codegen {
       case 'is_touch_supported':
         return { code: 'O.isTouchSupported()', kind: 'bool' };
 
-      // ----- variables -----
       case 'get_variable':
         return { code: `O.getVariable(e, ${this.varRef(p[0])})`, kind: 'any' };
       case 'value_of_index_from_list':
@@ -1147,11 +1022,9 @@ export class Codegen {
       case 'get_func_variable':
         return { code: `L[${this.funcVarKey(p[0])}]`, kind: 'any' };
 
-      // ----- text boxes -----
       case 'text_read':
         return { code: `O.readText(e, ${this.field(p[0])})`, kind: 'str' };
 
-      // ----- data tables -----
       case 'get_table_count':
         return { code: `O.tableCount(${this.tableRef(p[0])}, ${this.str(p[1])})`, kind: 'num' };
       case 'get_value_from_table':
@@ -1179,7 +1052,6 @@ export class Codegen {
           kind: 'any',
         };
 
-      // ----- sound -----
       case 'get_sound_volume':
         return { code: 'O.volume()', kind: 'num' };
       case 'get_sound_speed':
@@ -1245,11 +1117,9 @@ export class Codegen {
       this.note(block.type);
       return { code: asValue ? 'undefined' : `${ind}${comment(`missing ${block.type}`)}\n` };
     }
-    // Entry hands the function every slot of the call block in order and the
-    // body reads them by declaration index (`register.params[paramMap[type]]`).
-    // Dropping empty slots would shift every argument after them.
+    // Preserve empty argument slots so later arguments keep their declaration indices.
     const args = block.params.map((param) => this.raw(param));
-    // The thread runs the yielded call on its own stack, so depth costs no JS stack.
+    // Yield calls onto the thread's stack so recursion does not grow the JS stack.
     const call = `(yield F[${index}](e, th, [${args.join(', ')}]))`;
     return { code: asValue ? call : `${ind}${call};\n` };
   }
@@ -1259,7 +1129,7 @@ export class Codegen {
   }
 }
 
-/** playentry leaves `params` out of a block that has none; the compiler reads it on every block. */
+// Fill omitted params arrays because playentry leaves them out of argument-free blocks.
 function withParams(_key: string, value: unknown): unknown {
   if (value && typeof value === 'object' && !Array.isArray(value) &&
     typeof (value as RawBlock).type === 'string' && !Array.isArray((value as RawBlock).params)) {
@@ -1285,7 +1155,7 @@ function parseScript(script: string | RawBlock[][] | undefined): RawBlock[][] {
   return script;
 }
 
-/** The stack that actually defines a function; comment blocks can precede it. */
+// Find the definition stack even when workspace comments precede it.
 function findFunctionDefine(content: RawBlock[][]): RawBlock[] | null {
   for (const stack of content) {
     const first = stack[0];
@@ -1296,16 +1166,7 @@ function findFunctionDefine(content: RawBlock[][]): RawBlock[] | null {
   return null;
 }
 
-/**
- * A function's body, in either shape entry hands it over in.
- *
- * `함수 정의하기` is a hat: the body is the rest of its stack, which is what
- * playentry's project data holds and what entry's own runner executes. Saving a
- * work to `.ent` writes the same body nested in the define block's one statement
- * slot instead. Reading only the nested one leaves every function empty on a
- * work loaded from playentry — the blocks are all there, so nothing is reported
- * as missing; the calls simply do nothing.
- */
+// Accept both inline playentry function bodies and bodies nested in saved archives.
 function functionBody(stack: RawBlock[]): RawBlock[] {
   const nested = stack[0]?.statements?.[0];
   if (nested?.length) {
@@ -1314,7 +1175,6 @@ function functionBody(stack: RawBlock[]): RawBlock[] {
   return stack.slice(1);
 }
 
-/** Walks the label/param chain of a function head, in call order. */
 function collectParams(field: unknown): string[] {
   const names: string[] = [];
   let node = field;

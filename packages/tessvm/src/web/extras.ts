@@ -1,46 +1,17 @@
-/**
- * @fileoverview The page side of `$TESSVM` and the names beside it.
- *
- * The clipboard, the cursor and the pointer are the viewer's, not the work's,
- * so every one of them is asked for before it is taken. The dialog stands over
- * the stage and carries the whole answer in the click on its button: the
- * browser only lets a page write to the clipboard or hold the pointer while it
- * is acting on something the viewer just did, and an answer that came back
- * through a promise is no longer that.
- *
- * What is asked, and how often:
- *
- * | name          | asked                                              |
- * | ------------- | -------------------------------------------------- |
- * | `$CLIPBOARD`  | every copy, and no more than one a second           |
- * | `$CURSOR`     | only for `none`, once for as long as the page lives |
- * | `$MOUSE_LOCK` | every time it is taken, once per run                |
- *
- * Pasting is not asked about: the viewer pasting *is* the answer, and nothing
- * is read from the clipboard until they do. It is told, though — a notice that
- * goes away on its own says the work took what was on the clipboard.
- */
+// Handle clipboard and pointer requests inside viewer gestures so browser permissions remain valid.
 import { stage } from '../runtime/model.ts';
 import type { PixiRenderer } from '../render/renderer.ts';
 import type { Vm } from '../runtime/engine.ts';
 
-/** The shortest gap between two copies, in milliseconds. */
 const COPY_INTERVAL = 1000;
-/** How long the paste notice stands, in milliseconds. */
 const NOTICE_TIME = 1800;
-/** How much of the text to put in the dialog's own box. */
 const DETAIL_LIMIT = 20_000;
-/** Wheel units per notch, by `WheelEvent.deltaMode`: pixels, lines, pages. */
+// Normalize wheel units from pixels, lines, or pages.
 const WHEEL_UNITS = [100, 3, 1];
-/** Controls of the page that read text of their own. */
 const FIELD_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
 export const EXTRAS_DIALOG_STYLE = `
-/* The ask field and the chart window are drawn to stage units because entry
-   draws them inside its canvas. This is not one of those: it is the runner
-   talking to the viewer, so it keeps ordinary pixel sizes at every stage size —
-   scaled to a small embedded stage its buttons came out a few pixels tall.
-   Every rule also outweighs the host page's own button reset. */
+/* Keep permission dialogs in ordinary pixels so embedded stages cannot shrink their controls. */
 .tessvm-ask-permission {
   position: absolute;
   inset: 0;
@@ -150,7 +121,6 @@ export const EXTRAS_DIALOG_STYLE = `
   margin-top: 2px;
 }
 
-/* The box that keeps the answer, at the far end of the button row. */
 .tessvm-ask-permission .tessvm-permit-keep {
   display: flex;
   align-items: center;
@@ -198,8 +168,6 @@ export const EXTRAS_DIALOG_STYLE = `
   outline-offset: 2px;
 }
 
-/* The line that says what the work took. It stands over the stage without
-   taking the pointer and fades out on its own. */
 .tessvm-notice {
   position: absolute;
   left: 50%;
@@ -251,7 +219,6 @@ interface Dialog {
   dispose(): void;
 }
 
-/** The dialog itself. One element, reused for every question. */
 function makeDialog(parent: HTMLElement): Dialog {
   const root = document.createElement('div');
   root.className = 'tessvm-ask-permission';
@@ -299,8 +266,7 @@ function makeDialog(parent: HTMLElement): Dialog {
   };
   allow.addEventListener('click', () => close(true));
   deny.addEventListener('click', () => close(false));
-  // The keys are the dialog's while it stands: the work reads them off the
-  // window, and one that got through here would reach it as a press.
+  // Keep dialog keys from reaching work scripts.
   card.addEventListener('keydown', (event) => {
     event.stopPropagation();
     if (event.key === 'Escape') {
@@ -327,8 +293,7 @@ function makeDialog(parent: HTMLElement): Dialog {
       const detail = request.detail ?? '';
       details.hidden = detail === '';
       details.open = false;
-      // A work can hold a novel in one variable; the whole of it is copied,
-      // only the look at it is cut short.
+      // Copy the full text but truncate its preview so large variables cannot overwhelm the dialog.
       content.textContent =
         detail.length > DETAIL_LIMIT
           ? `${detail.slice(0, DETAIL_LIMIT)}\n… ${detail.length - DETAIL_LIMIT}자 더`
@@ -350,7 +315,6 @@ interface Notice {
   dispose(): void;
 }
 
-/** The notice itself. One element, reused for every line. */
 function makeNotice(parent: HTMLElement): Notice {
   const root = document.createElement('div');
   root.className = 'tessvm-notice';
@@ -363,7 +327,7 @@ function makeNotice(parent: HTMLElement): Notice {
   return {
     show(text) {
       root.textContent = text;
-      // Hiding it first restarts the fade on a notice that is still standing.
+      // Hide first to restart the fade when a notice is already visible.
       root.hidden = true;
       void root.offsetWidth;
       root.hidden = false;
@@ -385,12 +349,6 @@ export interface ExtrasBinding {
   dispose(): void;
 }
 
-/**
- * Hands the vm's extras a page to act on and listens for what the viewer does.
- *
- * `frame` is where the dialog goes — the box the canvas is in, so it scales
- * with the stage; `view` is what the wheel and the pointer are read from.
- */
 export function bindExtras(
   vm: Vm,
   renderer: PixiRenderer,
@@ -411,18 +369,15 @@ export function bindExtras(
     cleanups.push(() => target.removeEventListener(type, handler, options));
   };
 
-  /** What the work last asked the cursor to be, already checked against the keywords. */
   let wanted = '';
-  /** The answer for `none`, once it has been given. Kept for the life of the page. */
+  // Keep cursor-hiding consent for the life of the page.
   let hideAllowed: boolean | null = null;
-  /** Set while the run has been allowed to hold the pointer. */
   let lockAllowed = false;
-  /** Answers the viewer asked not to be asked for again. They last the page's life. */
   let copyAlways: boolean | null = null;
   let lockAlways: boolean | null = null;
   let lastCopy = 0;
 
-  /** Puts the text on the clipboard. The browser only allows it inside a gesture. */
+  // Browser clipboard writes must run inside a viewer gesture.
   const write = (text: string): Promise<void> =>
     navigator.clipboard?.writeText(text) ?? Promise.reject(new Error('no clipboard'));
 
@@ -451,8 +406,7 @@ export function bindExtras(
       }
       lastCopy = now;
       if (copyAlways) {
-        // The answer is in; the write is tried straight away and the viewer is
-        // asked again only where the browser refuses it outside a gesture.
+        // Try immediately after consent; ask again only if the browser rejects the gesture context.
         void write(text).then(
           () => notice.show('작품이 클립보드에 복사했습니다.'),
           () => askCopy(text),
@@ -502,8 +456,7 @@ export function bindExtras(
         extras.lockChanged(false);
         return;
       }
-      // A question already standing is left to be answered; the work asking
-      // again next frame finds it there.
+      // Keep an existing question open rather than replacing it on each frame.
       dialog.ask({
         title: '마우스 잠금',
         body: '작품이 마우스 포인터를 무대 안에 가두려고 합니다.\nEsc 키를 누르면 언제든 빠져나올 수 있습니다.',
@@ -532,26 +485,18 @@ export function bindExtras(
     },
   };
 
-  /** A refused lock is not an error to report — the work is told it has none. */
+  // Report a refused pointer lock as unlocked state rather than a script error.
   const request = () => {
     const result = view.requestPointerLock() as unknown as Promise<void> | undefined;
     void result?.catch?.(() => extras.lockChanged(false));
   };
 
-  /** A control of the page's own that reads text: its paste is its own. */
+  // Text controls keep their own paste events.
   const field = (node: Element | null): boolean =>
     node !== null &&
     (FIELD_TAGS.has(node.tagName) || (node as HTMLElement).isContentEditable === true);
 
-  /**
-   * Whether a paste was meant for the work. The listener is on the window
-   * because the player is not an input and never gets the event itself, and the
-   * page around it — a comment box on playentry.org — has pastes of its own.
-   *
-   * Only such a box keeps its paste. Anything else the page holds focus on —
-   * the button that started the work, a link, nothing at all — leaves it to the
-   * work, which is what a viewer pressing ctrl+v over the stage means.
-   */
+  // Listen on the window but leave text-field pastes to the page's controls.
   const ours = (target: EventTarget | null): boolean => {
     if (target instanceof Node && view.contains(target)) {
       return true;
@@ -560,14 +505,10 @@ export function bindExtras(
     return !active || view.contains(active) || !field(active);
   };
 
-  /** Whether the paste went into the answer field, which shows the text itself. */
   const intoAnswer = (target: EventTarget | null): boolean =>
     target instanceof Element && target.closest('.tessvm-ask') !== null;
 
-  // Pasting is the viewer's own doing, so it is never held back — no gap
-  // between two of them, and a question standing over the stage does not stop
-  // one. The listener catches the event on its way down so a page that handles
-  // pastes of its own cannot take it first.
+  // Paste is a viewer action; capture it without throttling or waiting for a permission dialog.
   on(
     window,
     'paste',
@@ -579,8 +520,7 @@ export function bindExtras(
       const text = event.clipboardData?.getData('text/plain');
       if (text) {
         extras.pasted(text);
-        // The answer field shows the pasted text itself; a paste at the stage
-        // leaves nothing to see, so that one is told.
+        // Show a stage-paste notice because no input field displays the pasted text there.
         if (!intoAnswer(event.target)) {
           notice.show('작품이 클립보드를 읽었습니다.');
         }
@@ -598,9 +538,9 @@ export function bindExtras(
       }
       const event = raw as WheelEvent;
       const unit = WHEEL_UNITS[event.deltaMode] ?? WHEEL_UNITS[0]!;
-      // The stage counts y upwards and the wheel counts it down.
+      // Flip wheel y because stage y increases upward.
       extras.scrolled(event.deltaX / unit, -event.deltaY / unit);
-      // The work is reading the wheel, so the page does not also scroll under it.
+      // Prevent page scrolling when the work reads the wheel.
       event.preventDefault();
     },
     { passive: false },
@@ -616,8 +556,7 @@ export function bindExtras(
     }
     const event = raw as MouseEvent;
     const rect = renderer.canvasRect();
-    // Movement is given in css pixels; the work counts in stage units, and the
-    // stage counts y upwards.
+    // Convert CSS movement pixels to stage units and flip y.
     const perX = rect.width ? stage.width / rect.width : 1;
     const perY = rect.height ? stage.height / rect.height : 1;
     extras.moved(event.movementX * perX, -event.movementY * perY);

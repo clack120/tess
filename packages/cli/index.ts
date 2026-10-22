@@ -1,16 +1,3 @@
-/**
- * @fileoverview Tess 언어를 처리하는 커맨드 라인 인터페이스(CLI) 도구입니다.
- *
- * 엔트리 작품을 컴파일하거나, 구문 오류를 검사하고, 서버를 열어 테스트하는 등 다양한 명령을 지원합니다.
- *
- * @example
- * // 문법 및 의미 검사 (컴파일 테스트 포함)
- * node index.ts check examples/tour.tess
- *
- * // 엔트리 작품으로 컴파일하여 출력
- * node index.ts build examples/all_blocks.tess -o build/blocks.ent
- * node index.ts build examples/all_blocks.tess -o build/project.json
- */
 export { parse, parseOrThrow, check, validate } from "@tess/parser";
 export {
   compileProject,
@@ -37,10 +24,6 @@ import type {
 import type { RunningServer as EntryServer } from "@tess/player";
 import type { RunningServer as VmServer } from "@tess/vm";
 
-/**
- * 서버 하나로 보는 두 실행기. `run` 은 tessvm 으로 띄우고, `--entry` 면 엔트리
- * 실행기로 띄운다 — 지켜보다 다시 불러오는 쪽에서는 이 둘을 구분할 필요가 없다.
- */
 type RunningServer = (EntryServer | VmServer) & {
   update(next: {
     project: EntryProject;
@@ -49,7 +32,6 @@ type RunningServer = (EntryServer | VmServer) & {
   }): void;
 };
 
-/** Everything the command line can set. */
 interface CliOptions {
   assets: string[];
   out?: string;
@@ -58,9 +40,7 @@ interface CliOptions {
   noOpen?: boolean;
   noReload?: boolean;
   boost?: boolean;
-  /** `run` 을 엔트리 실행기(entryjs)로 돌린다. 기본은 tessvm 이다. */
   entry?: boolean;
-  /** tessvm 으로 돌릴 때의 화질 배수 · 무대 크기 · 틱 속도. */
   quality?: number;
   stage?: { width: number; height: number };
   fps?: number;
@@ -68,7 +48,7 @@ interface CliOptions {
   sizes?: boolean;
   keepSvg?: boolean;
   strict?: boolean;
-  /** Shared between rebuilds so a watch only re-parses what changed. */
+  // Reuse parsed files across watch rebuilds.
   cache?: CompileCache;
 }
 import { spawn } from "node:child_process";
@@ -149,7 +129,6 @@ function parseArgs(argv: string[]) {
   return { options, rest };
 }
 
-/** build 와 똑같이 끝까지 컴파일해 보고 결과만 버린다. use 로 불러오는 파일까지 검사된다. */
 function runCheck(file: string, options: CliOptions = { assets: [] }): number {
   const source = fs.readFileSync(file, "utf-8");
   const label = path.basename(file);
@@ -176,7 +155,6 @@ function runCheck(file: string, options: CliOptions = { assets: [] }): number {
   return 0;
 }
 
-/** 모양·소리를 찾을 폴더. --assets 가 없으면 소스 파일 옆이다. */
 function assetDirsFor(file: string, options: CliOptions): string[] {
   return (options.assets?.length ?? 0) > 0
     ? options.assets.map((dir) => path.resolve(dir))
@@ -190,7 +168,6 @@ function runAst(file: string): number {
     out.report(path.basename(file), result.errors, "에러");
     return 1;
   }
-  // AST 는 다른 도구로 넘겨 쓰는 것이라 꾸미지 않고 그대로 낸다.
   console.log(JSON.stringify(result.ast, null, 2));
   return 0;
 }
@@ -213,7 +190,7 @@ async function runBuild(file: string, options: CliOptions): Promise<number> {
   out.report(label, result.notices, "주의");
   if (!result.ok) {
     out.report(label, result.errors, "에러");
-    // 문법 에러면 작품 자체가 없으므로(project 가 null) 느슨한 실행으로도 내보낼 게 없다
+    // Syntax errors leave no project to export, even in loose mode.
     if (options.strict || !result.project) {
       out.outro(
         out.red(
@@ -269,12 +246,6 @@ async function runBuild(file: string, options: CliOptions): Promise<number> {
   return 0;
 }
 
-/**
- * 작품을 띄울 서버를 연다. 기본은 tessvm 이고, `--entry` 면 엔트리 실행기다.
- *
- * 둘은 같은 컴파일 결과(project·assets·sourceMap)를 받아 같은 디버그 패널을 단다.
- * 다른 것은 그 작품을 무엇이 돌리는가 하나뿐이다.
- */
 function openServer(
   file: string,
   options: CliOptions,
@@ -304,7 +275,6 @@ function openServer(
   });
 }
 
-/** 컴파일해서 브라우저에서 열어 본다 */
 async function runProject(
   file: string,
   options: CliOptions,
@@ -354,8 +324,7 @@ async function runProject(
       reload ? "켜짐  " + out.dim("--no-reload 로 끌 수 있습니다") : "꺼짐",
     ],
   ];
-  // 부스트로 렌더러가 갈리는 것은 엔트리 실행기뿐이다 — tessvm 은 늘 WebGL 이라
-  // 지금 켜졌는지 꺼졌는지 알릴 것이 없다.
+  // Only Entry changes renderers with boost; tessvm always uses WebGL.
   if (options.boost && options.entry) {
     rows.push(["부스트", "켜짐  " + out.dim("WebGL 렌더러")]);
   }
@@ -370,21 +339,15 @@ async function runProject(
 
   process.on("SIGINT", () => {
     stopWatching?.();
-    // 서버가 어떤 이유로든 안 닫히면(예: 소켓이 안 끊김) Ctrl+C 가 먹통이 된
-    // 것처럼 보이니, 잠깐 기다려도 안 끝나면 그냥 강제로 끝낸다.
+    // Force exit if open sockets prevent the server from closing.
     const forceExit = setTimeout(() => process.exit(0), 2000);
     forceExit.unref();
     server.close().then(() => process.exit(0));
   });
-  return null; // 서버가 떠 있는 동안 프로세스를 유지한다
+  return null;
 }
 
-/**
- * 소스와 리소스 폴더를 지켜보다가 바뀌면 다시 컴파일해서 서버에 반영한다.
- *
- * Rebuilds share one compile cache, so an edit only re-parses the files it
- * touched — the rest of the `use` graph is reused from the previous build.
- */
+// Reuse the compile cache so only changed files are parsed again.
 function watchAndReload(
   file: string,
   options: CliOptions,
@@ -420,7 +383,6 @@ function watchAndReload(
           `에러 ${result.errors.length}개가 난 문장을 빼고 반영합니다.`,
         );
       }
-      // The guard above returned for every case that leaves `project` unset.
       server.update({
         project: result.project!,
         assets: result.assets,
@@ -441,17 +403,16 @@ function watchAndReload(
     timer = setTimeout(rebuild, 150);
   };
 
-  // Object fragments live under objects/<scene>/, so a non-recursive watch never
-  // fires for the files that are edited most.
+  // Object fragments need a recursive watch because they live in subfolders.
   const watchers: fs.FSWatcher[] = [];
   for (const dir of watchDirs) {
     try {
       watchers.push(fs.watch(dir, { recursive: true }, onChange));
     } catch {
       try {
-        watchers.push(fs.watch(dir, onChange)); // where recursive is unsupported
+        watchers.push(fs.watch(dir, onChange));
       } catch {
-        // 폴더를 지켜볼 수 없어도 (예: 없는 폴더) 조용히 넘어간다
+        // Missing or unwatched folders should not stop the server.
       }
     }
   }
@@ -461,7 +422,6 @@ function watchAndReload(
   };
 }
 
-/** 웹 브라우저로 열기 (열 수 없으면 조용히 넘어간다) */
 function openBrowser(url: string) {
   const command =
     process.platform === "darwin"
@@ -478,7 +438,7 @@ function openBrowser(url: string) {
     child.on("error", () => {});
     child.unref();
   } catch {
-    // 브라우저를 못 열어도 주소를 찍어 뒀으니 괜찮다
+    // The printed URL still works if opening the browser fails.
   }
 }
 
@@ -491,10 +451,7 @@ function countBlocks(node: any): number {
   );
 }
 
-/**
- * 되돌리면서 남긴 경고와 주의를 보여 준다. 소스에는 '# [decompile]' 주석으로도
- * 남아 있어서, 목록 전체는 --warnings 를 붙였을 때만 펼친다.
- */
+// Decompile notes also appear in the source; expand the full list only on request.
 function showDecompileNotes(
   warnings: string[],
   notices: string[],
@@ -517,7 +474,6 @@ function showDecompileNotes(
   }
 }
 
-/** 이미 있는 .ent(엔트리 작품)를 Tess 소스로 되돌린다 */
 async function runDecompile(
   file: string,
   options: CliOptions,
@@ -572,7 +528,6 @@ async function runDecompile(
 
   showDecompileNotes(result.warnings, result.notices, options);
 
-  // 되돌린 소스가 실제로 다시 컴파일되는지 확인해 준다 (참고용)
   try {
     const recheck = compileProject(result.source, {
       path: mainFile,
@@ -588,7 +543,7 @@ async function runDecompile(
       );
     }
   } catch {
-    // 다시 컴파일해 보는 건 참고용이라, 실패해도 결과물은 그대로 둔다
+    // Recompilation is advisory; keep the output even if it fails.
   }
 
   out.outro(`${out.green("완료")}  ${label} ${out.dim("->")} ${mainFile}`);
@@ -597,8 +552,7 @@ async function runDecompile(
 
 async function main(argv: string[]): Promise<number | null> {
   const { options, rest } = parseArgs(argv);
-  // One cache for the whole run: files shared by several inputs are parsed once,
-  // and `run` keeps reusing it for every rebuild.
+  // Share one parse cache across input files and watch rebuilds.
   options.cache = createCompileCache();
   const [first, ...others] = rest;
   const commands: Record<

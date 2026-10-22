@@ -1,7 +1,4 @@
-# ============================================================================
-#  Tess 의 거의 모든 명령을 한 번씩 쓰는 컴파일 검증용 작품.
-#  (테스트가 이 파일을 컴파일해서 엔트리 블록 구조를 검사한다)
-# ============================================================================
+# Compile-check example covering most Tess commands.
 project:
   title "블록 검증"
   fps 60
@@ -11,12 +8,11 @@ var 점수 = 0
 var 속도 = 5
 list 기록 = [1, 2, 3]
 
-# 공유 변수 · 실시간 변수는 전역 선언 앞에 shared / realtime 을 붙인다
+# Use shared or realtime before global declarations for Entry storage.
 shared var 최고기록 = 0
 realtime var 접속자수 = 0
 shared list 명예의전당 as "명예의 전당" = []
 
-# 테이블 (엔트리 '자료 분석')
 table 성적표 as "성적 표":
   columns "이름", "점수"
   row "철수", 90
@@ -55,7 +51,6 @@ scene "무대":
     var 체력 = 100
 
     when start do
-      # 움직임
       forward 10
       forward 10 at 90
       bounce
@@ -81,7 +76,6 @@ scene "무대":
     end
 
     when scene start do
-      # 모양 · 연출
       show
       hide
       costume = "달리기"
@@ -113,7 +107,6 @@ scene "무대":
     end
 
     when click do
-      # 소리
       play sound "점프음"
       play sound "점프음" for 0.5
       play sound "점프음" from 1 to 5
@@ -128,14 +121,12 @@ scene "무대":
       stop sound this
       stop sound all
 
-      # tts (읽어주기)
       read "안녕"
       read "안녕" and wait
       tts voice "female" speed "normal" pitch "normal"
     end
 
     when click up do
-      # 붓
       draw_color = #ff0000
       draw_color = random_color()
       draw_width = 5
@@ -152,7 +143,6 @@ scene "무대":
     end
 
     when stage click do
-      # 흐름
       wait 1.5
       wait mouse_down
       repeat 5:
@@ -191,7 +181,6 @@ scene "무대":
     end
 
     when key "space" do
-      # 신호 · 복제 · 장면
       send "신호1"
       call "신호2"
       clone
@@ -209,7 +198,6 @@ scene "무대":
     end
 
     when cloned do
-      # 자료
       var 임시 = 0
       임시 = 두배(21)
       점수 = 0
@@ -239,7 +227,6 @@ scene "무대":
     end
 
     when signal "신호1" do
-      # 판단 · 계산
       if key_down("space") and touching("상대"):
         점수 = 1
       end
@@ -350,7 +337,6 @@ scene "표와 확장":
     costume 기본 "end.png" size 480 270
 
     when start do
-      # 테이블 — 자료 분석 블록 전부
       in 성적표 add row
       in 성적표 add column
       in 성적표 insert row at 2
@@ -378,7 +364,6 @@ scene "표와 확장":
       점수 = correlation(성적표, "이름", "점수")
       점수 = lookup(성적표, "이름", "철수", "점수")
 
-      # 확장 — 날씨 · 축제 · 재난문자 · 국민행동요령
       say get_cur_weather(get_korea_area_code("Seoul", "Jung-gu"))
       say get_cur_wind(get_korea_area_code("Seoul", "Jung-gu"))
       say get_weather_data("오늘", "서울", "기온")

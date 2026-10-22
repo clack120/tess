@@ -1,15 +1,4 @@
-/**
- * 남의 작품을 열었을 때 그 작품이 실행기를 넘어 무엇을 하지 못하게 막는지 확인합니다.
- *
- * `.ent` 는 인터넷에서 받아 오는 남의 파일이고, 그 안의 글자는 전부 작성자가 정합니다.
- * 그 글자가 닿는 곳이 세 군데 있습니다.
- *
- * - **JIT** — 블록 트리는 자바스크립트 소스로 만들어져 `new Function` 을 지납니다.
- * - **되돌린 소스** — `.ent` → `.tess` 는 다시 컴파일되어 같은 JIT 로 들어갑니다.
- * - **디스크** — 되돌리기가 모양·소리를 파일로 씁니다.
- *
- * 셋 다 작품이 스스로 코드가 되거나 폴더 밖을 짚지 못해야 합니다.
- */
+// Check generated code, decompiled source, and output paths against project-controlled input.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -26,11 +15,9 @@ import { decompileEnt } from '@tess/decompiler';
 import { parse } from '@tess/parser';
 import { tessComment, tessCommentLines, tessString } from '../packages/decompiler/src/ident.ts';
 
-/** 되돌린 조각 파일의 내용 — 에셋은 바이트로 담긴다. */
 const utf8 = (data: Uint8Array) => new TextDecoder('utf-8').decode(data);
 
 
-/** A one-object work whose script is `blocks`. */
 function work(blocks: unknown[], object: Record<string, unknown> = {}) {
   return {
     scenes: [{ id: 's', name: 's' }],
@@ -102,7 +89,6 @@ end`);
   }
 });
 
-/** Builds and runs the emitted program, and says whether the work got to run its own code. */
 function runsOwnCode(blocks: unknown[]): boolean {
   const source = new Codegen(work(blocks) as never).compile().source;
   const flag = '__tessSecurityProbe';
@@ -118,16 +104,13 @@ function runsOwnCode(blocks: unknown[]): boolean {
       }
     }
   } catch {
-    // A generated program that will not build cannot run the work's code either.
+    // An invalid generated program cannot execute injected project code either.
   }
   return flag in globalThis;
 }
 
 test('블록 이름은 만들어진 자바스크립트를 빠져나가지 못한다', () => {
-  /**
-   * 알 수 없는 블록은 `/* 이름 *​/` 주석으로 남습니다. 이름은 작품이 정하므로 주석을
-   * 닫고 나오는 글자가 그대로 들어가면 그 자리가 남의 코드가 됩니다.
-   */
+  // Sanitize unknown block names so they cannot close a generated comment and inject JavaScript.
   const escapes = [
     "*/;globalThis.__tessSecurityProbe=1;/*",
     "func_*/;globalThis.__tessSecurityProbe=1;/*",
@@ -153,11 +136,7 @@ test('빠져나가려는 이름이 있어도 나머지 블록은 그대로 돈�
   assert.doesNotMatch(source, /evil\(\)/, '실행될 수 있는 형태로는 남지 않습니다');
 });
 
-/**
- * `table[키]` 는 `constructor` · `toString` 같은 `Object.prototype` 의 이름에도
- * 답한다. 그렇게 돌아온 함수가 `C.<여기>(…)` 로 들어가면 작품 하나가 자기 프로그램을
- * 통째로 못 만들게 만들 수 있고, 값이 글자였다면 그 자리가 남의 코드가 된다.
- */
+// Ignore inherited lookup keys because prototype values can enter generated source.
 test('연산자 이름이 Object.prototype 의 것이어도 프로그램은 만들어진다', () => {
   for (const operator of ['constructor', '__proto__', 'toString', 'valueOf', 'hasOwnProperty']) {
     const compare = { id: 'c', type: 'boolean_basic_operator', params: [1, operator, 2] };
@@ -179,10 +158,7 @@ test('햇 블록 이름이 Object.prototype 의 것이면 아무 스크립트도
   }
 });
 
-/**
- * `{"toString": "x"}` 는 원시 값으로 바꿀 수 없어 `String()` 이 그 자리에서 던진다.
- * .ent 안의 json 이 그대로 만들 수 있는 모양이므로, 컴파일이 예외로 끝나면 안 된다.
- */
+// JSON can shadow toString; failed primitive conversion must not abort project compilation.
 test('원시 값이 없는 값이 슬롯에 있어도 컴파일은 끝난다', () => {
   const hostile = { toString: 'x' };
   const blocks = [
@@ -198,10 +174,7 @@ test('원시 값이 없는 값이 슬롯에 있어도 컴파일은 끝난다', (
   assert.doesNotThrow(() => new Function('R', source));
 });
 
-/**
- * 함수의 지역 변수 이름은 `const L = {<여기>: …}` 의 이름 자리에 들어간다 — 작품의
- * 글자가 문자열 리터럴 밖에 놓이는 유일한 자리다.
- */
+// Quote function-local keys because project text becomes a generated object property name.
 test('함수 지역 변수의 이름이 글자가 아니어도 프로그램은 만들어진다', () => {
   const define = { id: 'd', type: 'function_create', params: [null], statements: [[]] };
   for (const id of [['a', 'b'], { a: 1 }, 12, null]) {
@@ -219,11 +192,7 @@ test('함수 지역 변수의 이름이 글자가 아니어도 프로그램은 �
   }
 });
 
-/**
- * 엔트리는 블록을 돌리기 전에 값 자리부터 읽으므로, 값 자리에 놓인 흐름 블록이 그
- * 자리에서 실행되어 감싸는 반복을 다시 돌리거나(`continueLoop`) 끝냅니다
- * (`breakLoop`). 어느 쪽이든 그것을 실은 블록은 실행되지 않습니다.
- */
+// Input flow blocks execute before their carrier and can restart or end the loop.
 test('값 자리에 놓인 흐름 블록은 그 자리에서 반복을 다시 돌리거나 끝낸다', () => {
   const slot = (type: string) => ({
     id: 'w', type: 'wait_until_true',
@@ -250,17 +219,12 @@ test('값 자리에 놓인 흐름 블록은 그 자리에서 반복을 다시 �
     }
   }
 
-  // 반복 밖이면 엔트리는 호출 스택을 풀어 그 스크립트를 끝낸다.
+  // Outside a loop, Entry unwinds the call stack and ends the script.
   const loose = new Codegen(work([HAT, slot('stop_repeat')]) as never).compile().source;
   assert.match(loose, /return;/);
 });
 
-/**
- * 껍데기는 하드웨어 블록만이 아닙니다 — 값 자리를 가진 블록이면 무엇이든 실을 수
- * 있어서, 소리·말하기·시간을 두고 움직이기·기다리기가 다 쓰입니다. 그런 블록은
- * 컴파일러가 이미 아는 것이므로, 치트 판정이 블록 이름을 보기 **전에** 서야 합니다.
- * 옆 자리에 편집기가 넣어 둔 숫자가 같이 들어 있는 것도 같은 치트입니다.
- */
+// Detect carriers before block-name dispatch because supported blocks can carry flow control too.
 test('컴파일러가 아는 블록에 실린 흐름 블록도 같은 치트다', () => {
   const carriers: Array<[string, unknown[]]> = [
     ['sound_something_wait_with_block', []],
@@ -285,7 +249,6 @@ test('컴파일러가 아는 블록에 실린 흐름 블록도 같은 치트다'
     const again = new Codegen(work(body('continue_repeat')) as never).compile();
     assert.match(again.source, /continue;/, `${type}: 이어 하기`);
     for (const built of [ended, again]) {
-      // 껍데기는 실행되지도, 모르는 블록으로 세어지지도 않는다.
       assert.doesNotMatch(built.source, new RegExp(type.replace(/_/g, '[_]')), type);
       assert.equal(built.unknown.size, 0, type);
       assert.doesNotThrow(() => new Function('R', built.source));
@@ -293,10 +256,7 @@ test('컴파일러가 아는 블록에 실린 흐름 블록도 같은 치트다'
   }
 });
 
-/**
- * 값 자리를 읽는 것이 느껴지는 블록 — 함수 호출 — 이 같이 들어 있으면 그 호출은
- * 실제로 돕니다. 그런 블록은 치트로 삼키지 않고 그대로 둡니다.
- */
+// Keep adjacent side-effecting inputs rather than discarding them with a flow carrier.
 test('값 자리에 함수 호출이 같이 있으면 치트로 삼키지 않는다', () => {
   const carrier = {
     id: 'c', type: 'wait_second',
@@ -314,11 +274,7 @@ test('값 자리에 함수 호출이 같이 있으면 치트로 삼키지 않는
   assert.match(built.source, /waitSecond/);
 });
 
-/**
- * 미로 수업의 반복 블록. `func` 가 `script.isLooped` 를 세우지 않아 엔트리에서 한
- * 바퀴가 프레임을 쓰지 않으므로, 여기서도 바퀴마다 `yield` 하지 않는다. 대신 스핀
- * 가드가 한 프레임을 영영 붙잡지 못하게 막는다.
- */
+// Maze loops do not spend frames; keep a spin guard instead of yielding each iteration.
 test('미로 수업의 반복 블록은 한 바퀴에 프레임을 쓰지 않는다', () => {
   const maze = (inner: unknown) => new Codegen(work([
     HAT,
@@ -328,28 +284,21 @@ test('미로 수업의 반복 블록은 한 바퀴에 프레임을 쓰지 않는
     id: 'm', type: 'move_y', params: [{ id: 'n', type: 'number', params: ['10'] }, null], statements: [],
   });
   assert.deepEqual([...program.unknown.keys()], [], '모르는 블록이 아니다');
-  // 바퀴 끝에 `yield` 가 없고, 그 자리를 스핀 가드가 지킨다.
   assert.doesNotMatch(program.source, /O\.moveY\(e, 10\);\n\s*yield 0;/);
   assert.match(program.source, /while \(true\) \{\n\s*if \(m0 !== O\.frame\(\)\)/);
   assert.doesNotThrow(() => new Function('R', program.source));
 
-  // 몸통이 비면 엔트리도 그냥 지나간다 — 반복을 만들지 않는다.
   const bare = new Codegen(work([
     HAT,
     { id: 'r', type: 'ai_repeat_until_reach', params: [null], statements: [[]] },
   ]) as never).compile();
   assert.doesNotMatch(bare.source, /while \(true\)/);
 
-  // 안에 놓인 `반복 중단하기` 는 이 반복을 끝낸다.
   const ended = maze({ id: 's', type: 'stop_repeat', params: [null], statements: [] });
   assert.match(ended.source, /while \(true\) \{[\s\S]*?\n\s*break;/);
 });
 
-/**
- * 프레임을 넘기지 않고 다음 바퀴로 가는 반복은 한 프레임을 영영 붙잡을 수 있습니다.
- * 엔트리도 같은 자리에서 멈추지만, 멈춘 실행기는 끌 수도 없으므로 한 프레임에 도는
- * 횟수를 세어 그만큼 돌면 한 번 비켜 줍니다.
- */
+// Guard frameless loops so a stuck work can still be stopped.
 test('프레임을 안 넘기는 반복도 실행기를 붙잡지 못한다', async () => {
   const { compileProject } = await import('@tess/compiler');
   const { Vm } = await import('@tess/vm');
@@ -368,7 +317,7 @@ test('프레임을 안 넘기는 반복도 실행기를 붙잡지 못한다', as
 });
 
 test('되돌린 소스에서 주석과 문자열은 한 줄을 벗어나지 못한다', () => {
-  // 렉서가 줄의 끝으로 치는 네 글자 — 주석은 여기서 끊기고 문자열은 이것을 담지 못한다.
+  // Escape all four lexer line endings in strings and comments.
   for (const brk of ['\n', '\r', '\u2028', '\u2029']) {
     assert.equal(
       tessComment(`note${brk}say "INJECTED"`).includes(brk),
@@ -380,7 +329,6 @@ test('되돌린 소스에서 주석과 문자열은 한 줄을 벗어나지 못�
       false,
       `tessString ${JSON.stringify(brk)}`,
     );
-    // 여러 줄짜리 메모는 줄마다 `#` 을 다시 붙여서 남긴다.
     for (const line of tessCommentLines(`note${brk}say "INJECTED"`)) {
       assert.match(line, /^# /, line);
     }
@@ -401,7 +349,7 @@ test('작품의 글자가 되돌린 소스의 문법을 바꾸지 못한다', as
   assert.ok(fragment, '오브젝트 조각이 나와야 합니다');
   const text = utf8(fragment.data);
 
-  // 주석과 문자열 안을 지운 뒤에도 남는 `INJECTED` 가 있으면 문장이 된 것입니다.
+  // Any injection marker left outside strings and comments became executable syntax.
   const bare = text.replace(/^\s*#.*$/gm, '').replace(/"(?:\\.|[^"\\])*"/g, '""');
   assert.doesNotMatch(bare, /INJECTED/, `문장으로 새어 나왔습니다:\n${text}`);
   assert.ok(
@@ -441,10 +389,6 @@ test('모양·소리 파일은 내보낼 폴더 밖으로 나가지 못한다', 
   }
 });
 
-// ---------------------------------------------------------------------------
-//  .ent 만들기 — gzip 으로 감싼 tar 하나
-// ---------------------------------------------------------------------------
-
 const PNG = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489' +
     '0000000a49444154789c6300010000050001' +
@@ -460,7 +404,7 @@ function tarHeader(name: string, size: number): Buffer {
   head.write('000000 \0', 116, 8, 'utf-8');
   head.write(`${size.toString(8).padStart(11, '0')} `, 124, 12, 'utf-8');
   head.write('00000000000 ', 136, 12, 'utf-8');
-  head.write('        ', 148, 8, 'utf-8'); // checksum placeholder
+  head.write('        ', 148, 8, 'utf-8'); // TAR checksum placeholder.
   head.write('0', 156, 1, 'utf-8');
   let sum = 0;
   for (const byte of head) sum += byte;
@@ -468,7 +412,6 @@ function tarHeader(name: string, size: number): Buffer {
   return head;
 }
 
-/** The `.ent` container: a gzipped tar with `temp/project.json` and its assets. */
 function entFile(project: unknown, extra: Record<string, Buffer> = {}): Buffer {
   const parts: Buffer[] = [];
   const add = (name: string, data: Buffer) => {
@@ -481,7 +424,7 @@ function entFile(project: unknown, extra: Record<string, Buffer> = {}): Buffer {
 }
 
 test('만든 .ent 를 되돌리기가 실제로 읽는다', async () => {
-  // 위 검사들이 빈 작품을 보고 통과해 버리지 않도록, 그릇 자체를 한 번 확인합니다.
+  // Verify the archive fixture itself so malformed empty input cannot make the security checks pass.
   const out = await decompileEnt(entFile(work([HAT])), {});
   assert.match(out.source, /scene/);
   assert.ok(out.assets.some((asset) => asset.path.endsWith('.tess')));
@@ -492,17 +435,13 @@ test('파일을 쓰는 자리가 폴더 밖 경로를 거부한다', () => {
     path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'packages/tessvm/src/node/load.ts'),
     'utf-8',
   );
-  // 되돌리기가 막더라도 쓰는 쪽에 한 겹 더 둔다 — 둘 중 하나만 남아도 막히도록.
+  // Keep output-path validation even when decompilation already rejects unsafe paths.
   assert.match(load, /path\.resolve\(root, asset\.path\)/);
   assert.match(load, /startsWith\(root \+ path\.sep\)/);
 });
 
-// ---------------------------------------------------------------------------
-//  확장 — 작품이 들고 오는 주소
-// ---------------------------------------------------------------------------
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** `thumbUrl` 을 playentry 페이지인 척하는 사본 위에 올려 돌려준다. */
 function thumbReader(): (thumb: unknown) => string | null {
   const source = stripTypes(fs.readFileSync(path.join(repoRoot, 'packages/extension/src/page/entry-project.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = {
@@ -518,11 +457,7 @@ function thumbReader(): (thumb: unknown) => string | null {
   return sandbox.read as (thumb: unknown) => string | null;
 }
 
-/**
- * 미리보기 그림 주소는 작품의 제 데이터이고, 그것이 `url("…")` 안에 적힌다.
- * 따옴표 하나면 그 자리에서 다른 주소를 한 겹 더 그리게 할 수 있다 — 읽는 사람의
- * 브라우저가 남의 서버를 부르게 되는 길이다.
- */
+// Validate thumbnail URLs before inserting them into CSS so project text cannot redirect requests.
 test('미리보기 그림 주소는 playentry 를 벗어나지도, 따옴표를 남기지도 않는다', () => {
   const thumbUrl = thumbReader();
   assert.equal(thumbUrl('/uploads/aa/bb/thumb/cc.png'), 'https://playentry.org/uploads/aa/bb/thumb/cc.png');
@@ -538,9 +473,6 @@ test('미리보기 그림 주소는 playentry 를 벗어나지도, 따옴표를 
   }
 });
 
-// ---------------------------------------------------------------------------
-//  run 서버 — 이 컴퓨터에서만, 이 페이지에서만
-// ---------------------------------------------------------------------------
 async function withVmServer(body: (server: { port: number }) => Promise<void>) {
   const result = compileProject('scene "s":\n  text "t":\n    text_content = "x"\n  end\nend', {
     path: 'main.tess',
@@ -560,7 +492,7 @@ async function withVmServer(body: (server: { port: number }) => Promise<void>) {
   }
 }
 
-/** 한 번의 요청 — 헤더를 직접 정해야 해서 fetch 가 아니라 http 로 보낸다. */
+// Use HTTP directly so tests can set Host and Origin headers.
 function request(
   port: number,
   options: { path: string; method?: string; headers?: Record<string, string>; body?: string },
@@ -579,10 +511,7 @@ function request(
   });
 }
 
-/**
- * 서버는 127.0.0.1 에만 붙지만, 남의 페이지가 자기 이름을 127.0.0.1 로 가리키게 하면
- * 그 페이지의 오리진으로 여기 있는 것을 읽을 수 있다. 어떤 이름으로 왔는지가 둘을 가른다.
- */
+// Check Host to prevent a foreign name resolving to loopback from reading the local server.
 test('run 서버는 자기 이름으로 오지 않은 요청을 거절한다', async () => {
   await withVmServer(async ({ port }) => {
     assert.equal((await request(port, { path: '/project.json' })).status, 200);
@@ -597,10 +526,7 @@ test('run 서버는 자기 이름으로 오지 않은 요청을 거절한다', a
   });
 });
 
-/**
- * `/__log` 는 받은 글을 터미널에 적는다. 프리플라이트 없이 보낼 수 있는 요청이라
- * 아무 사이트나 이 자리를 빌려 쓸 수 있었다.
- */
+// Log endpoints must reject foreign origins because form-style requests need no preflight.
 test('오류 기록 자리는 이 페이지가 보낸 것만 받는다', async () => {
   await withVmServer(async ({ port }) => {
     const log = JSON.stringify({ kind: 'k', message: 'm' });
@@ -645,18 +571,14 @@ test('터미널에 적히는 글에서는 제어 문자가 빠진다', async () 
   const all = printed.join('\n');
   assert.ok(all.includes('오류'), all);
   assert.doesNotMatch(all, /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
-  // 줄 바꿈은 남는다 — 스택은 줄로 읽는다.
+  // Keep line breaks for readable stack traces.
   assert.match(all, /줄1\n/);
   assert.ok(all.includes('줄2'), all);
 });
 
-/**
- * 번역 블록은 엔트리의 파파고 주소를 부르는데, 실행기는 그 사이트가 아니라 브라우저가
- * 직접 부르지 못합니다. 서버가 그 자리만 넘겨 주므로, 넘기는 자리가 좁은지 봅니다.
- */
+// Restrict the translation proxy to the one supported API path.
 test('번역 호출은 정해진 자리와 방법으로만 넘어간다', async () => {
   await withVmServer(async ({ port }) => {
-    // 넘기지 않는 것들은 서버 안에서 끝난다 — 밖으로 나가지 않는다.
     assert.equal(
       (await request(port, { path: '/api/expansionBlock/papago/translate/n2mt', method: 'POST' })).status,
       404,

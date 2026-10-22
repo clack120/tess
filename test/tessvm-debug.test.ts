@@ -1,10 +1,3 @@
-/**
- * 디버그 패널(`packages/player/src/debug-ui.ts`)을 tessvm 어댑터 위에 올려서,
- * 엔트리 실행기 없이도 패널이 작품을 그대로 몰 수 있는지 확인합니다.
- *
- * 브라우저에서 도는 그 파일 그대로(타입만 지운 것)를 jsdom 에 올리고, 실행기 자리에는
- * `makeVmRuntime` 이 만든 어댑터를 놓습니다 — 실제 실행 페이지와 같은 구성입니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -42,7 +35,6 @@ scene "둘째 장면":
 end
 `;
 
-/** 화면이 없는 렌더러. 어댑터가 무대를 다시 그릴 때 부르는 것만 받아 센다. */
 function stubRenderer() {
   return {
     flushed: 0,
@@ -55,10 +47,6 @@ function stubRenderer() {
   };
 }
 
-/**
- * 실행 페이지가 만드는 것과 같은 핸들을 화면 없이 꾸민다.
- * 어댑터가 쓰는 것은 vm · renderer · 실행 제어 · 처음 환경값뿐이다.
- */
 function makeHandle(vm: Vm, renderer: ReturnType<typeof stubRenderer>) {
   return {
     vm,
@@ -79,7 +67,6 @@ function makeHandle(vm: Vm, renderer: ReturnType<typeof stubRenderer>) {
   };
 }
 
-/** 패널을 jsdom 에 올리고, 실행기 자리에 tessvm 어댑터를 놓는다. */
 async function mountPanelOnVm(t: any) {
   const compiled = compileProject(SOURCE, { path: 'test.tess' });
   assert.ok(compiled.project, compiled.errors[0]?.message ?? '컴파일 실패');
@@ -137,7 +124,7 @@ async function mountPanelOnVm(t: any) {
       .querySelector('.debug-tab[data-tab="' + name + '"]')!
       .dispatchEvent(new window.MouseEvent('click')),
     settle: () => new Promise((resolve) => setTimeout(resolve, 20)),
-    /** 패널은 열려 있는 동안 0.4초마다 실행기에서 값을 다시 읽는다. */
+    // Refresh open-panel state on its 400 ms polling interval.
     refresh: () => new Promise((resolve) => setTimeout(resolve, 500)),
     async edit(node: any, value: any) {
       node.dispatchEvent(new window.MouseEvent('click'));
@@ -158,10 +145,8 @@ test('실행 탭의 단추가 VM 을 시작·일시정지·정지시킨다', asy
 
   ui.click('run-btn');
   assert.equal(ui.vm.state, 'run');
-  /** 같은 단추가 실행 중에는 일시정지가 된다. */
   ui.click('run-btn');
   assert.equal(ui.vm.state, 'pause');
-  /** 일시정지에서 다시 누르면 처음부터가 아니라 이어서 실행한다. */
   ui.click('run-btn');
   assert.equal(ui.vm.state, 'run');
 
@@ -176,7 +161,6 @@ test('실행 환경 흉내내기는 VM 이 들고 있는 값을 바꾼다', asyn
   await ui.settle();
   ui.window.tessPatchEnvironmentBlocks();
 
-  /** 아무것도 안 고르면 실행기가 들고 시작한 값 그대로다. */
   assert.equal(ui.vm.boost, false);
   assert.equal(ui.vm.deviceType, 'desktop');
 
@@ -199,7 +183,7 @@ test('자료 탭이 VM 의 변수와 리스트를 지금 값으로 보여 주고
   await ui.settle();
 
   ui.vm.start();
-  ui.vm.tick(); // when start 가 score 를 1 로 만든다
+  ui.vm.tick();
   await ui.refresh();
 
   const rows = [...ui.window.document.querySelectorAll('#var-list li')];
@@ -263,7 +247,6 @@ test('오브젝트 탭이 VM 의 오브젝트를 보여 주고 좌표를 옮긴�
   await ui.settle();
 
   assert.match(ui.byId('object-info')!.textContent, /x 좌표/);
-  /** 글상자가 아닌 오브젝트에는 글 내용 칸이 없어야 한다. */
   assert.doesNotMatch(ui.byId('object-info')!.textContent, /글 내용/);
 
   const entity = ui.vm.targets[0]!.entity;
@@ -291,7 +274,7 @@ test('장면 바로가기는 그 장면으로 넘어가서 그 장면을 실행�
 
   assert.equal(ui.vm.currentSceneId, second.id);
   assert.equal(ui.vm.state, 'run');
-  ui.vm.tick(); // 그 장면의 '장면이 시작되었을 때' 가 score 를 7 로 만든다
+  ui.vm.tick();
   assert.equal(Number(ui.variable('score').getValue()), 7);
 });
 
@@ -299,7 +282,6 @@ test('스크립트가 터지면 오류 탭에 그 블록과 함께 쌓인다', a
   const ui = await mountPanelOnVm(t);
   await ui.settle();
 
-  /** 실행 페이지가 하는 것과 같은 연결 — VM 의 오류를 패널로 넘긴다. */
   ui.vm.onError = (error: any) => {
     ui.window.tessReportError('실행 오류', new Error(error.message));
     if (error.blockId) ui.window.tessHighlightBlock(error.blockId);
@@ -315,7 +297,6 @@ test('스크립트가 터지면 오류 탭에 그 블록과 함께 쌓인다', a
 
   assert.equal(ui.window.__errors.length, 1);
   assert.match(ui.window.__errors[0].message, /일부러 낸 오류/);
-  /** 오류가 난 블록을 가진 오브젝트가 열리고, 오류는 오류 탭에 쌓인다. */
   assert.equal(ui.byId('debug-badge')!.textContent, '1');
   ui.tab('errors');
   await ui.settle();
@@ -343,14 +324,12 @@ test('실행 서버가 패널과 소스맵을 함께 내보낸다', async () => 
     assert.match(page.text, /<aside id="debug-panel"/);
     assert.match(page.text, /src="\/debug-ui\.js"/);
     assert.match(page.text, /makeVmRuntime/);
-    /** 패널 스타일도 같은 페이지에 실려 나간다. */
     assert.match(page.text, /#debug-panel \{/);
 
     const ui = await get('/debug-ui.js');
     assert.equal(ui.status, 200);
     const preactFile = ui.text.match(/from ["']\/preact\/([^"']+)["']/)![1];
     assert.equal((await get('/preact/' + preactFile)).status, 200);
-    /** preact 폴더 밖으로는 나갈 수 없다. */
     assert.equal((await get('/preact/' + encodeURIComponent('../../../package.json'))).status, 404);
 
     const sourceMap = JSON.parse((await get('/sourcemap.json')).text);
@@ -361,12 +340,7 @@ test('실행 서버가 패널과 소스맵을 함께 내보낸다', async () => 
 });
 
 test('무대 상자는 캔버스를 따라 크기가 정해지지 않는다', async () => {
-  /**
-   * 무대 상자 크기가 그 안의 캔버스에서 나오면, 캔버스를 맞추는 ResizeObserver 가
-   * 자기가 쓴 값을 다시 읽어 `ResizeObserver loop completed with undelivered
-   * notifications.` 가 납니다. 그래서 `main` 은 `#stage` 를 늘려서 채우고, 가운데
-   * 정렬은 그 안쪽(`.tessvm-stage`)에서 합니다.
-   */
+  // Keep stage layout independent of canvas size to avoid ResizeObserver feedback loops.
   const compiled = compileProject(SOURCE, { path: 'test.tess' });
   const server = await serveVm({
     project: compiled.project as never,
@@ -382,7 +356,7 @@ test('무대 상자는 캔버스를 따라 크기가 정해지지 않는다', as
     assert.doesNotMatch(mainRule, /place-items/, 'main 이 무대 상자를 내용 크기로 만들면 안 된다');
     assert.match(css, /\.tessvm-stage \{[^}]*width: 100%/);
 
-    /** 그래도 남는 이 알림은 예외가 아니므로 빨간 오류 상자에 띄우지 않는다. */
+    // ResizeObserver delivery warnings are not script exceptions.
     assert.match(page, /\/\^ResizeObserver loop\//);
   } finally {
     await server.close();

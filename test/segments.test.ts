@@ -1,10 +1,3 @@
-/**
- * 붓 선분을 사각형으로 펴는 계산을 확인합니다.
- *
- * 그리기 자체는 PIXI 가 하므로 여기서는 꼭짓점만 봅니다 — 화면에서 `Graphics` 의
- * 획과 같은 그림이 나오는지는 브라우저에서 픽셀로 맞춰 본 것이고, 여기서는 그
- * 꼭짓점이 다시 어긋나지 않는지를 지킵니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isSegment, quadIndices, writeQuads } from '../packages/tessvm/src/render/segment-geometry.ts';
@@ -25,7 +18,7 @@ test('가로 선은 굵기의 절반만큼 위아래로 벌어진다', () => {
   const positions = new Float32Array(8);
   const count = writeQuads([line([0, 0, 10, 0], { thickness: 2 })], 0, 1, 2, positions);
   assert.equal(count, 1);
-  // 무대는 y 가 위로, PIXI 는 아래로 자라므로 y 는 뒤집혀 나온다.
+  // Flip y because stage coordinates grow upward and PIXI grows downward.
   assert.deepEqual([...positions], [0, 1, 10, 1, 10, -1, 0, -1]);
 });
 
@@ -38,7 +31,7 @@ test('세로 선도 같은 규칙으로 벌어진다', () => {
 test('길이가 없는 획은 아무 곳도 덮지 않는다', () => {
   const positions = new Float32Array(8);
   writeQuads([line([3, 3, 3, 3], { thickness: 2 })], 0, 1, 2, positions);
-  // 방향이 없으므로 네 꼭짓점이 한 점에 겹쳐 넓이가 0 이다.
+  // Zero-length segments collapse to one point and cover no area.
   assert.deepEqual([...positions], [3, -3, 3, -3, 3, -3, 3, -3]);
 });
 

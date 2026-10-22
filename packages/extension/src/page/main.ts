@@ -1,9 +1,3 @@
-/**
- * @fileoverview Page-side entry point, loaded into playentry.org as a module.
- *
- * The content script marks where a player belongs; a runner is mounted there and
- * taken down again when the page drops that mount point.
- */
 import { mountPlayer, type MountedPlayer } from './player.ts';
 
 const HOST_SELECTOR = '[data-tessvm-project]';

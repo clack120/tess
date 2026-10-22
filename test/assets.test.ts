@@ -1,15 +1,3 @@
-/**
- * imageSize(모양 파일 원본 크기 읽기) 기능을 검사합니다. 특히 SVG 파일을 중점적으로 테스트합니다.
- * 
- * 엔트리는 project.json의 dimension 값을 기준으로 렌더링 크기를 결정하며, 
- * 실제 로드한 이미지 픽셀 크기를 다시 측정하지 않습니다. SVG 파일은 매직 바이트 헤더가 없어 
- * 크기를 읽지 못하면 makeAsset이 100x100으로 대체합니다. 이 경우 scale_x/scale_y가 
- * SVG의 실제 크기 기준으로 설정되어 있다면, 100x100 기준으로 스케일링되어 결과물이 비정상적으로 작게 렌더링될 수 있습니다.
- *
- * @example
- * const svg = Buffer.from('<svg viewBox="0 0 800 490"></svg>');
- * assert.deepEqual(imageSize(svg), { width: 800, height: 490 });
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -61,22 +49,12 @@ test('크기를 전혀 알 수 없는 SVG 는 null 을 돌려준다 (makeAsset �
 
 test('실제로 디컴파일한 배경 SVG(새그림1.svg, 800x490)에서도 정확히 읽힌다', () => {
   const file = path.join(root, 'temp/dd_tess/assets/image/새그림1.svg');
-  if (!fs.existsSync(file)) return; // temp/ 는 예제 자산이라 없어도 이 테스트만 건너뛴다
+  if (!fs.existsSync(file)) return; // Skip only this asset check when the optional example directory is absent.
   const bytes = fs.readFileSync(file);
   assert.deepEqual(imageSize(bytes), { width: 800, height: 490 });
 });
 
-/**
- * audioDuration(소리 재생 길이 읽기) 기능을 검사합니다.
- *
- * 엔트리는 소리 길이도 project.json의 duration 값을 사용합니다. 컴파일러가 이 값을
- * 구하지 못하면 1초로 고정되므로, 오디오 파일 헤더를 직접 읽어 정확한 길이를 측정해야 합니다.
- * 
- * @example
- * const duration = audioDuration(wavBuffer, '.wav');
- */
-
-/** 재생 길이 2.5초짜리 최소 WAV — 초당 byteRate 바이트 */
+// Minimal WAV with 2.5 seconds of PCM data.
 function wavFixture(seconds: any, byteRate = 88200) {
   const dataSize = Math.round(seconds * byteRate);
   const header = Buffer.alloc(44);
@@ -84,11 +62,11 @@ function wavFixture(seconds: any, byteRate = 88200) {
   header.writeUInt32LE(36 + dataSize, 4);
   header.write('WAVE', 8, 'latin1');
   header.write('fmt ', 12, 'latin1');
-  header.writeUInt32LE(16, 16);            // fmt 청크 크기
-  header.writeUInt16LE(1, 20);             // PCM
-  header.writeUInt16LE(2, 22);             // 채널
-  header.writeUInt32LE(44100, 24);         // 표본율
-  header.writeUInt32LE(byteRate, 28);      // 초당 바이트
+  header.writeUInt32LE(16, 16);            // Format chunk size.
+  header.writeUInt16LE(1, 20);             // PCM format.
+  header.writeUInt16LE(2, 22);             // Channel count.
+  header.writeUInt32LE(44100, 24);         // Sample rate.
+  header.writeUInt32LE(byteRate, 28);      // Bytes per second.
   header.writeUInt16LE(4, 32);
   header.writeUInt16LE(16, 34);
   header.write('data', 36, 'latin1');
@@ -96,13 +74,13 @@ function wavFixture(seconds: any, byteRate = 88200) {
   return Buffer.concat([header, Buffer.alloc(dataSize)]);
 }
 
-/** MPEG1 Layer III · 44.1kHz · 128kbps 스테레오 프레임 하나 (417 바이트) */
+// One 417-byte MPEG 1 Layer III stereo frame at 44.1 kHz and 128 kbps.
 function mp3Frame() {
   const frame = Buffer.alloc(417);
   frame[0] = 0xff;
-  frame[1] = 0xfb; // MPEG1, Layer III, CRC 없음
-  frame[2] = 0x90; // 128kbps, 44.1kHz, 패딩 없음
-  frame[3] = 0x00; // 스테레오
+  frame[1] = 0xfb; // MPEG 1, Layer III, no CRC.
+  frame[2] = 0x90; // 128 kbps, 44.1 kHz, no padding.
+  frame[3] = 0x00; // Stereo mode.
   return frame;
 }
 
@@ -112,7 +90,7 @@ test('WAV 는 fmt 의 초당 바이트로 data 청크를 나눈다', () => {
 });
 
 test('MP3 는 고정 비트레이트면 파일 크기로 잰다', () => {
-  // 128kbps 프레임 100개 = 41700 바이트 -> 2.6초
+  // One hundred 417-byte frames represent 2.6 seconds.
   const bytes = Buffer.concat(Array.from({ length: 100 }, mp3Frame));
   assert.equal(audioDuration(bytes, '.mp3'), 2.6);
 });
@@ -120,7 +98,7 @@ test('MP3 는 고정 비트레이트면 파일 크기로 잰다', () => {
 test('MP3 앞의 ID3v2 태그와 뒤의 ID3v1 태그는 길이에서 뺀다', () => {
   const id3v2 = Buffer.alloc(2010);
   id3v2.write('ID3', 0, 'latin1');
-  id3v2[6] = 0x00; id3v2[7] = 0x00; id3v2[8] = 0x0f; id3v2[9] = 0x50; // synchsafe 2000
+  id3v2[6] = 0x00; id3v2[7] = 0x00; id3v2[8] = 0x0f; id3v2[9] = 0x50; // Synchsafe encoding of 2000.
   const id3v1 = Buffer.alloc(128);
   id3v1.write('TAG', 0, 'latin1');
   const audio = Buffer.concat(Array.from({ length: 100 }, mp3Frame));
@@ -129,11 +107,11 @@ test('MP3 앞의 ID3v2 태그와 뒤의 ID3v1 태그는 길이에서 뺀다', ()
 });
 
 test('MP3 에 Xing/Info 표가 있으면 프레임 수로 잰다 (VBR)', () => {
-  // 프레임 수만 믿어야 한다 — 파일 크기로 재면 비트레이트가 들쭉날쭉해 틀린다
+  // Use the VBR frame count rather than estimating from variable bitrates.
   const first = mp3Frame();
-  first.write('Info', 36, 'latin1');       // MPEG1 스테레오는 헤더 뒤 36바이트
-  first.writeUInt32BE(0x01, 40);           // 프레임 수 칸이 있다
-  first.writeUInt32BE(200, 44);            // 200 프레임 -> 200 * 1152 / 44100 = 5.2초
+  first.write('Info', 36, 'latin1');       // MPEG 1 stereo places Xing 36 bytes after the frame header starts.
+  first.writeUInt32BE(0x01, 40);           // Frame-count field is present.
+  first.writeUInt32BE(200, 44);            // Two hundred frames at 1152 samples and 44100 Hz represent 5.2 seconds.
   const bytes = Buffer.concat([first, Buffer.alloc(999999)]);
   assert.equal(audioDuration(bytes, '.mp3'), 5.2);
 });
@@ -162,23 +140,13 @@ end`;
   assert.deepEqual(result.warnings, [], result.warnings.map((w) => w.message).join('\n'));
   assert.equal(result.project!.objects[0].sprite.sounds[0].duration, 2.5);
 
-  // 코드에 적어 둔 값이 있으면 그 값이 우선이다 (파일을 아직 안 넣었을 때를 위해서)
+  // Explicit dimensions take precedence when the asset file is not available yet.
   const declared = compileProject(source.replace('"click.wav"', '"click.wav" for 9'), { path: main, assetDirs: [dir] });
   assert.equal(declared.project!.objects[0].sprite.sounds[0].duration, 9);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/**
- * 모양 미리보기(썸네일) 생성 기능을 검사합니다.
- *
- * 엔트리 작품 파일은 이미지마다 image/ 폴더와 나란히 thumb/ 폴더를 가지고 있으며,
- * 편집기의 오브젝트 및 모양 목록에서 이를 사용합니다. 컴파일된 .ent 파일에도 
- * 올바르게 썸네일이 포함되는지 확인합니다.
- * 
- * @example
- * const thumb = await makeThumbnail(imageBuffer);
- */
 test('PNG 에서 96x96 안에 맞춘 미리보기를 만든다', async () => {
   const bytes = fs.readFileSync(path.join(root, 'examples/cat_run.png'));
   const original = imageSize(bytes);
@@ -187,8 +155,8 @@ test('PNG 에서 96x96 안에 맞춘 미리보기를 만든다', async () => {
 
   const size = imageSize(thumb);
   assert.ok(size!.width <= 96 && size!.height <= 96, `96 안에 들어와야 한다: ${size!.width}x${size!.height}`);
-  assert.equal(Math.max(size!.width, size!.height), 96); // 긴 쪽이 96 에 딱 맞는다
-  // 비율이 유지된다
+  assert.equal(Math.max(size!.width, size!.height), 96);
+
   const before = original!.width / original!.height;
   const after = size!.width / size!.height;
   assert.ok(Math.abs(before - after) / before < 0.02, `비율이 달라졌다: ${before} -> ${after}`);
@@ -196,7 +164,6 @@ test('PNG 에서 96x96 안에 맞춘 미리보기를 만든다', async () => {
 });
 
 test('원본이 96 보다 작으면 늘리지 않는다', async () => {
-  // 8x4 짜리 아주 작은 PNG 를 만들어서 넣는다
   const tiny = await makeThumbnail(fs.readFileSync(path.join(root, 'examples/cat_run.png')), 4096);
   assert.equal(imageSize(tiny!)!.width, imageSize(fs.readFileSync(path.join(root, 'examples/cat_run.png')))!.width);
 });

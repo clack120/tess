@@ -19,7 +19,7 @@ function changed(): void {
   pending = setTimeout(build, 150);
 }
 
-// Watch source directories rather than dist, which the build itself replaces.
+// Watch source directories because the build replaces dist.
 const watchers = ['src', '../tessvm/src', '../core/src'].map((dir) =>
   fs.watch(path.resolve(root, dir), { recursive: true }, changed),
 );

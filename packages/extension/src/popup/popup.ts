@@ -1,10 +1,3 @@
-/**
- * @fileoverview The toolbar panel: switches written straight to storage.
- *
- * Open work pages watch the same keys, so a change lands without a reload.
- * The runner itself is one button — pressing it turns it on, pressing it again
- * takes it off — and the rows under it are that runner's own settings.
- */
 import { readSettings, write, ENABLED_KEY, SVG_KEY } from '../browser.ts';
 import {
   clearWorks, exportAll, exportName, importAll, listWorks, removeWork, type SavedSummary,
@@ -36,7 +29,6 @@ const TEXT = {
   },
 };
 
-/** The lines of a note, broken where the sentence ends rather than where it fits. */
 function lines(text: string[]): Node[] {
   return text.flatMap((line, index) =>
     index === 0
@@ -69,20 +61,13 @@ void readSettings().then((settings) => {
   paint(settings.enabled);
 });
 
-// ---------------------------------------------------------------------------
-//  저장된 데이터
-// ---------------------------------------------------------------------------
-/** `1.2 KB` — 목록에 적을 만큼만 어림합니다. */
 function sizeText(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
 }
 
 const when = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
 
-/**
- * 한 번 누르면 묻고, 이어서 누르면 지웁니다 — 팝업에서 창을 띄우면 팝업이 닫히므로
- * 확인도 그 단추 자리에서 받습니다. 다른 곳을 누르면 되돌아갑니다.
- */
+// Confirm deletion in place because opening a dialog can close the popup.
 function confirmingButton(label: string, sure: string, run: () => void): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
@@ -131,7 +116,6 @@ function saveRow(saved: SavedSummary, again: () => void): HTMLLIElement {
   return row;
 }
 
-/** 목록에 있는 것을 모두 지우는 단추. 비어 있으면 자리도 없습니다. */
 const clearButton = confirmingButton('전체 삭제', '정말 전체 삭제', () => {
   void clearWorks().then(() => paintSaves());
 });
@@ -149,10 +133,6 @@ async function paintSaves(): Promise<void> {
 
 void paintSaves();
 
-// ---------------------------------------------------------------------------
-//  파일로 내보내기 · 파일에서 가져오기
-// ---------------------------------------------------------------------------
-/** One line under the buttons, gone again once something else happens. */
 function say(text: string, bad = false): void {
   savesNote.textContent = text;
   savesNote.classList.toggle('is-bad', bad);
@@ -168,8 +148,7 @@ exportButton.addEventListener('click', () => {
       link.href = url;
       link.download = exportName();
       link.click();
-      // The browser has read it by the time the click returns; letting the url
-      // go keeps the blob from being held for as long as the panel is open.
+      // Release the blob URL after the browser reads the download.
       setTimeout(() => URL.revokeObjectURL(url), 0);
       say(`${exportName()} 으로 내보냈습니다.`);
     },
@@ -184,7 +163,7 @@ importButton.addEventListener('click', () => {
 
 file.addEventListener('change', () => {
   const picked = file.files?.[0];
-  // The same file picked twice must be read twice, so the input is emptied.
+  // Clear the input so selecting the same file again still triggers a change.
   file.value = '';
   if (!picked) {
     return;

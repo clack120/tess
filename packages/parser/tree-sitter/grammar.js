@@ -1,18 +1,4 @@
-/**
- * @fileoverview Tess grammar for tree-sitter.
- *
- * Mirrors the Chevrotain grammar in `src/parser/parser.ts` rule for rule, so the
- * converter in `src/tree/convert.ts` can build the same AST. Two things the
- * Chevrotain grammar decides with gates are handled differently here:
- *
- * - "same line" conditions use `_same_line`, a zero-width token from the
- *   external scanner that exists only when no line break comes before the next
- *   token;
- * - keywords that double as names are listed in `identifier`, and the
- *   statement/assignment choice is left to GLR with dynamic precedence.
- *
- * The keyword lists below must match `src/parser/tokens.ts`; a test checks it.
- */
+// Match Chevrotain; use scanner tokens for line gates and GLR precedence for keyword names.
 
 /* eslint-disable no-undef */
 
@@ -40,7 +26,6 @@ const STANDALONE = [
   'clone', 'kill',
 ];
 
-/** Plain words that name an object property in `name = value` (not keywords in Tess). */
 const PROPERTY_WORDS = [
   'scale_x', 'scale_y',
   'text_content', 'text_bold', 'text_italic',
@@ -50,7 +35,7 @@ const PROPERTY_WORDS = [
   'angle', 'way',
 ];
 
-/** Keywords that open a statement; followed by `(` they still do (`if (a):`). */
+// Statement keywords still start statements when followed by an opening parenthesis.
 const STATEMENT_LEADERS = [
   'if', 'switch', 'repeat', 'for', 'while', 'until', 'forever', 'wait', 'return', 'break', 'continue', 'skip', 'restart',
   'stop', 'start', 'reset', 'clear', 'send', 'call', 'clone', 'del', 'kill', 'jump', 'forward', 'bounce',
@@ -58,13 +43,11 @@ const STATEMENT_LEADERS = [
   'write', 'append', 'prepend', 'stamp', 'play', 'read', 'tts', 'in', 'remove', 'ask', 'save', 'var', 'list',
 ];
 
-/** Keywords that are also names wherever a name is read. */
 const NAME_KEYWORDS = KEYWORDS.filter((word) => !RESERVED.includes(word));
 
-/** Names an assignment or call may start with: a standalone command never does. */
+// Standalone commands cannot start assignments or calls.
 const LEAD_KEYWORDS = NAME_KEYWORDS.filter((word) => !STANDALONE.includes(word));
 
-/** Names a statement-level call may start with. */
 const CALL_KEYWORDS = LEAD_KEYWORDS.filter((word) => !STATEMENT_LEADERS.includes(word));
 
 const PREC = {
@@ -80,7 +63,7 @@ module.exports = grammar({
 
   word: ($) => $._word,
 
-  // No keyword is ever a plain word; the ones that name things are listed in `identifier`.
+  // Keywords can be names only when explicitly listed in identifier.
   reserved: {
     global: () => KEYWORDS,
   },
@@ -468,10 +451,7 @@ module.exports = grammar({
 
     assign_operator: () => choice('+=', '-=', '**=', '*=', '/=', '%=', '='),
 
-    // ------------------------------------------------------------------------
-    //  Expressions, lowest precedence first. Each level is its own rule, as in
-    //  the Chevrotain grammar, so the converter can fold the chains the same way.
-    // ------------------------------------------------------------------------
+    // Keep expression levels aligned with Chevrotain so both converters fold operators identically.
     _expr: ($) => $._or,
 
     _or: ($) => choice($._and, $.or_expr),
@@ -528,16 +508,13 @@ module.exports = grammar({
 
     list_literal: ($) => seq('[', commaSep(field('elements', $._expr)), ']'),
 
-    // ------------------------------------------------------------------------
-    //  Terminals
-    // ------------------------------------------------------------------------
     identifier: ($) => choice($._word, ...NAME_KEYWORDS, ...PROPERTY_WORDS),
     _lead_name: ($) => choice($._word, ...LEAD_KEYWORDS, ...PROPERTY_WORDS),
     _call_name: ($) => choice($._word, ...CALL_KEYWORDS, ...PROPERTY_WORDS),
 
     boolean: () => choice('true', 'false'),
 
-    // Only an attached sign counts, so `- 5` still reads as a subtraction.
+    // A signed literal requires an attached sign; - 5 is subtraction.
     signed_number: ($) => choice(
       seq(field('sign', '-'), field('number', alias($._attached_number, $.number))),
       field('number', $.number),

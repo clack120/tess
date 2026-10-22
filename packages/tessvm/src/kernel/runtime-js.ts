@@ -1,18 +1,8 @@
-/**
- * @fileoverview 커널이 돌 때 쓰는 받침입니다.
- *
- * 작품의 숫자는 `Float64Array` 하나에 담깁니다. 산술은 `runtime/cast.ts` 의 것을 그대로 부르므로, 블록 실행기와 커널이
- * 같은 한 벌의 10진 규칙을 씁니다 — 두 벌이 어긋날 자리가 없습니다.
- *
- * 남는 것은 상자와 이름 찾기입니다. 블록 실행기는 값 하나를 읽을 때마다
- * `Variable` 을 찾고 `{data}` 를 벗기고 형을 가리지만, 여기서는 칸 번호가
- * 컴파일 때 정해져 있어 `cells[i]` 한 번입니다.
- */
+// Reuse runtime decimal arithmetic so kernel and generator results follow the same rules.
 import * as cast from '../runtime/cast.ts';
 import { BAIL_SLOT } from './plan.ts';
 import { scalarPlaces } from './values.ts';
 
-/** What the generated javascript is handed as `R`. */
 export interface KernelOps {
   ld(slot: number): number;
   st(slot: number, value: number): void;
@@ -41,7 +31,6 @@ export interface KernelOps {
   float_point(value: number): number;
 }
 
-/** `calc_operation` operators in the order `plan.ts` numbers them. */
 const MATH_OPS = [
   'square', 'factorial', 'root', 'log', 'ln', 'asin', 'acos', 'atan',
   'sin', 'cos', 'tan', 'unnatural', 'abs', 'floor', 'ceil', 'round',
@@ -50,7 +39,7 @@ const MATH_OPS = [
 const SQRT3 = Math.sqrt(3);
 const HALF_SQRT2 = Math.SQRT1_2;
 
-/** The whole turns entry answers from a table rather than from the library. */
+// Use Entry's table for whole-turn angles rather than floating-point trig results.
 const TRIG: Record<string, Record<number, number>> = {
   sin: {
     0: 0, 30: 0.5, 45: HALF_SQRT2, 60: SQRT3 / 2, 90: 1, 120: SQRT3 / 2,
@@ -86,11 +75,7 @@ function factorial(n: number): number {
   return result;
 }
 
-/**
- * Which list items a run stored into: a flag per cell, and the lowest and
- * highest flagged one so clearing and scanning stay inside what was touched.
- * Plain variables are not marked; a store there stays one assignment.
- */
+// Track changed list cells and their span; plain variable stores need no marks.
 export interface KernelMarks {
   flags: Uint8Array;
   strings: Uint8Array;
@@ -103,7 +88,6 @@ function floatPoint(value: unknown): number {
   return dot === -1 ? 0 : Math.min(source.length - dot - 1, 20);
 }
 
-/** Builds the helper set the generated javascript reads its world through. */
 export function kernelOps(cells: Float64Array, marks: KernelMarks): KernelOps {
   const { flags, strings, span } = marks;
   const item = (base: number, length: number, index: number): number => {

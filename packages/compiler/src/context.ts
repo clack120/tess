@@ -1,8 +1,3 @@
-/**
- * 컴파일 컨텍스트
- *
- * 블록 생성, 심볼 테이블(오브젝트, 장면, 변수, 신호, 함수), 진단 수집을 한 곳에서 관리합니다.
- */
 import { createIdFactory, seedFrom } from './ids.ts';
 import type { IdFactory } from './ids.ts';
 import { commentKey, makeComment } from './comments.ts';
@@ -17,17 +12,6 @@ import type {
 
 type DiagnosticDetails = Pick<CompileDiagnostic, 'code' | 'help' | 'related'>;
 
-/**
- * 엔트리 블록 하나에 대한 기본 구조를 생성합니다.
- *
- * @param id 블록의 고유 식별자
- * @param type 블록의 종류
- * @param params 블록에 전달할 매개변수 배열
- * @param statements 블록 내부의 실행 문장 배열
- * @returns 생성된 엔트리 블록 객체
- * @example
- * const block = makeBlock('uuid-123', 'text_write', ['Hello']);
- */
 export function makeBlock(
   id: string,
   type: string,
@@ -52,7 +36,7 @@ export function makeBlock(
 }
 
 export class Context {
-  /** 파일별 줄 찾기표. 블록마다 위치를 남기므로 파일당 한 번만 만든다. */
+  // Cache line offsets per file because every block records a source position.
   #lineLookups = new Map<string, (offset: number) => { line: number; column: number }>();
 
   source: string;
@@ -127,43 +111,34 @@ export class Context {
     this.warnings = [];
     this.notices = [];
 
-    // 블록 id -> 그 블록을 만든 Tess 소스 위치. 실행 중 엔트리가 panic 나면
-    // 어느 블록인지(id)는 알 수 있어도 어느 줄인지는 모르니, 디버그 패널이
-    // 이 표를 찾아서 "블록 -> 소스 위치" 로 되짚어 보여줄 수 있게 모아 둔다.
+    // Map block IDs back to Tess source positions for runtime diagnostics.
     this.sourceMap = {};
-    this.currentNode = null; // 지금 컴파일 중인 문장의 AST 노드 (블록 위치 태깅용)
-    // 인공지능 블록을 쓰면 그 모듈 이름을 넣는다 — project.aiUtilizeBlocks 로 나간다
+    this.currentNode = null;
+
     this.aiUtilizeBlocks = new Set();
-    // costume/sound 선언의 `force id "..."` 로 고정해 둔 진짜 엔트리 id 들 (SPEC-ADDENDUM.md
-    // 1.4절). resolvePicture/resolveSound 가 "이 문자열이 이 오브젝트의 이름은 아니어도,
-    // 어딘가에 고정해 둔 진짜 id 인가" 를 볼 때 쓴다 — ctx.newId 가 만든 모든 id(장면·
-    // 오브젝트·변수·블록 id 전부 포함)를 그대로 쓰면, 코스튬 이름 오타가 우연히 무관한
-    // id 와 겹쳐서 조용히 잘못된 걸 가리키게 될 수 있어 따로 둔다.
+    // Track forced asset IDs separately so unrelated IDs cannot hide misspelled names.
     this.forcedResourceIds = new Set();
 
-    // 심볼 테이블
-    this.scenes = [];           // { id, name }
+    this.scenes = [];
     this.sceneByName = new Map();
-    this.objects = [];          // { id, name, kind, ... }
+    this.objects = [];
     this.objectByName = new Map();
-    this.variables = [];        // 엔트리 variables 항목
-    this.globals = new Map();   // name -> variable 항목
+    this.variables = [];
+    this.globals = new Map();
     this.messages = [];
     this.messageByName = new Map();
-    this.tables = [];           // 엔트리 project.tables 항목
+    this.tables = [];
     this.tableByName = new Map();
-    this.expansionBlocks = new Set(); // project.expansionBlocks — 확장 블록을 쓰면 켠다
-    this.functions = [];        // { id, name, node, params, isValue, owner }
+    this.expansionBlocks = new Set();
+    this.functions = [];
     this.functionByName = new Map();
-    this.runtimeFunctions = new Map(); // 컴파일러가 만들어 넣는 함수 (scale_x/scale_y)
+    this.runtimeFunctions = new Map();
 
-    // 현재 컴파일 중인 위치
-    this.object = null;         // 현재 오브젝트
-    this.locals = new Map();    // 오브젝트 로컬 변수 name -> 변수 항목
-    this.funcScope = null;      // 함수 안이면 { name, params:Set, localVars:Map }
+    this.object = null;
+    this.locals = new Map();
+    this.funcScope = null;
   }
 
-  // --- 진단 ---------------------------------------------------------------
   error(node: Node | null | undefined, message: string, details: DiagnosticDetails = {}): null {
     this.#report(this.errors, node, message, details);
     return null;
@@ -174,10 +149,7 @@ export class Context {
     return null;
   }
 
-  /**
-   * A name entry resolves when the block runs, so the build is complete
-   * without it. `strict` reports these as warnings instead.
-   */
+  // Entry resolves these names at runtime; strict mode reports warnings instead.
   notice(node: Node | null | undefined, message: string): null {
     this.#report(this.notices, node, message);
     return null;
@@ -224,12 +196,7 @@ export class Context {
     });
   }
 
-  /**
-   * Line and column for an offset in one of the compiled files.
-   *
-   * Every block records where it came from, so this runs once per block. The
-   * line table for each file is built the first time that file is asked about.
-   */
+  // Cache line offsets per file to keep block position lookups cheap.
   #positionIn(file: string | null | undefined, offset: number) {
     const key = file ?? '';
     let lookup = this.#lineLookups.get(key);
@@ -240,14 +207,12 @@ export class Context {
     return lookup(offset);
   }
 
-  // --- 블록 만들기 ---------------------------------------------------------
   block(type: string, params: EntryParam[] = [], statements: EntryBlock[][] = []): EntryBlock {
     const block = makeBlock(this.newId(), type, params, statements);
     this.#recordLocation(block);
     return block;
   }
 
-  /** 지금 만든 블록이 소스의 어디서 왔는지 sourceMap 에 남긴다 */
   #recordLocation(block: EntryBlock) {
     const node = this.currentNode;
     if (!node?.loc) return;
@@ -259,7 +224,6 @@ export class Context {
     };
   }
 
-  /** 소스에 달린 주석을 엔트리 블록 주석으로 옮긴다 */
   applyComment<T extends EntryBlock | null>(node: Node, block: T): T {
     if (!block) return block;
     const text = this.comments.get(commentKey(node));
@@ -267,36 +231,29 @@ export class Context {
     return block;
   }
 
-  /** 숫자 리터럴 블록 */
   number(value: number | string): EntryBlock {
     return this.block('number', [String(value)]);
   }
 
-  /** 문자열 리터럴 블록 */
   text(value: number | string): EntryBlock {
     return this.block('text', [String(value)]);
   }
 
-  /** 각도 리터럴 블록 (회전 계열 블록 전용) */
   angle(value: number | string): EntryBlock {
     return this.block('angle', [String(value)]);
   }
 
-  // --- 심볼 조회 -----------------------------------------------------------
-  /** 이름으로 변수/리스트 찾기: 함수 블록 지역 -> 매개변수 -> 오브젝트 로컬 -> 전역 */
+  // Resolve names from block locals, parameters, object locals, then globals.
   lookupVariable(name: string): VariableRef | null {
     if (this.funcScope) {
       const local = this.funcScope.bindings.get(name);
       if (local) return { kind: 'funcLocal', name, id: local.id };
       if (this.funcScope.params.has(name)) return { kind: 'param', name };
-      // A function declared inside an object sees that object's locals.
       const owned = this.locals.get(name);
       if (owned) return { kind: 'variable', entry: owned };
       const scoped = this.globals.get(name);
       if (scoped) return { kind: 'variable', entry: scoped };
-      // A local named from a global function: an entry block carries the
-      // variable id, so it always means one object's variable. Source has only
-      // the name, so it means the same thing while exactly one object owns it.
+      // A global function can use an object local only when its name is unique.
       return this.lookupObjectLocal(name);
     }
     const local = this.locals.get(name);
@@ -305,10 +262,7 @@ export class Context {
     return global ? { kind: 'variable', entry: global } : null;
   }
 
-  /**
-   * Finds an object local from a place that belongs to no object. Several
-   * objects owning the name leaves nothing to pick between them.
-   */
+  // Shared local names are ambiguous outside an object.
   lookupObjectLocal(name: string): VariableRef | null {
     const owners = this.objects.filter((object) => object.locals?.has(name));
     if (owners.length === 0) return null;
@@ -318,11 +272,7 @@ export class Context {
     return { kind: 'variable', entry: owners[0]!.locals.get(name)!, owner: owners[0] };
   }
 
-  /**
-   * Finds a costume/sound name declared by exactly one object, for a place
-   * that belongs to none (a global function). Several objects sharing the
-   * name leaves nothing to pick between them — same shape as lookupObjectLocal.
-   */
+  // A global function can name a resource only when one object owns that name.
   lookupObjectResource(kind: 'pictures' | 'sounds', name: string): ResourceRef | null {
     const owners = this.objects.filter((object) => object[kind].has(name));
     if (owners.length === 0) return null;
@@ -330,23 +280,20 @@ export class Context {
     return { kind: 'found', asset: owners[0]![kind].get(name)! };
   }
 
-  /** 오브젝트 이름 -> 엔트리 오브젝트 id */
   objectId(name: string): string | null {
     return this.objectByName.get(name)?.id ?? null;
   }
 
-  /** 지금 자리에서 값으로 쓸 수 있는 이름들 — 오타를 짚어 줄 때 후보가 된다 */
   knownNames(): string[] {
     const names = [...this.globals.keys(), ...this.locals.keys()];
     if (this.funcScope) {
       names.push(...this.funcScope.params.keys(), ...this.funcScope.bindings.keys());
-      // A global function can name an object's local, so those are candidates too.
+      // A global function can name an object's local, so include those as suggestions.
       for (const object of this.objects) names.push(...(object.locals?.keys() ?? []));
     }
     return names;
   }
 
-  /** 신호 이름 -> 엔트리 메시지 id (없으면 만든다) */
   messageId(name: string): string {
     let message = this.messageByName.get(name);
     if (!message) {

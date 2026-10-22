@@ -1,9 +1,3 @@
-/**
- * @fileoverview Tess 구문 분석 결과(CST)를 추상 구문 트리(AST)로 변환하는 역할을 합니다.
- * 
- * 구문 분석기(grammar)는 코드가 올바른 형태인지 판단하지만, 이 모듈은 그 코드의 실질적인 의미(AST)를 결정합니다.
- * 여기서 만들어진 노드의 형태는 컴파일러, 검증기(validator), 역컴파일러(decompiler) 등 전체 시스템에서 공통으로 사용되는 계약(contract)입니다.
- */
 import type { CstNode, IToken } from 'chevrotain';
 import { normalizeColor } from '@tess/core';
 import { parser } from './parser.ts';
@@ -26,17 +20,11 @@ import type {
   WaitNode, WhileNode,
 } from '../ast.ts';
 
-/**
- * 파싱된 규칙의 자식 노드들을 나타내는 타입입니다.
- * Chevrotain은 실행 시간에 각 규칙별로 이 객체의 형태를 결정하므로 여기서는 느슨하게(loose) 타입이 지정되어 있습니다.
- * 실제 각 메서드는 이 객체에서 어떤 데이터를 꺼내서 어떤 구조를 만들지 명확한 타입으로 정의합니다.
- */
 type Ctx = Record<string, any>;
 
 const BaseVisitor = parser.getBaseCstVisitorConstructor();
 
 
-/** Span of a parsed rule. `end` is exclusive, matching the offsets in `loc`. */
 const nodeLoc = (node: CstNode): Loc => ({
   start: node.location!.startOffset,
   end: node.location!.endOffset! + 1,
@@ -47,7 +35,6 @@ const tokenLoc = (token: IToken): Loc => ({
   end: token.endOffset! + 1,
 });
 
-/** The one child a dispatch-only rule matched. */
 function onlyChild(ctx: Ctx) {
   for (const key of Object.keys(ctx)) {
     const value = ctx[key]?.[0];
@@ -56,7 +43,6 @@ function onlyChild(ctx: Ctx) {
   return undefined;
 }
 
-/** The one token a rule consumed, whatever key it landed under. */
 function onlyToken(ctx: Ctx): IToken | undefined {
   const child = onlyChild(ctx);
   return child?.image !== undefined ? child : undefined;
@@ -84,23 +70,14 @@ export class TessAstVisitor extends BaseVisitor {
     this.validateVisitor();
   }
 
-  /**
-   * The stock dispatcher hands a rule only its children, but every node needs
-   * its own span for `loc`, so pass the node itself as the second argument.
-   */
+  // Pass the CST node too because children alone cannot provide its source span.
   visit(cstNode: any, param?: any): any {
     const node = Array.isArray(cstNode) ? cstNode[0] : cstNode;
     if (node === undefined) return undefined;
     return (this as Ctx)[node.name](node.children, param ?? node);
   }
 
-  /**
-   * Folds `a op b op c` into left-leaning Binary nodes.
-   *
-   * Spans come from the parsed operands rather than their AST nodes, because a
-   * parenthesised operand reports its inner span while the operator node covers
-   * the brackets too.
-   */
+  // Use parsed operand spans so binary expressions include enclosing parentheses.
   foldBinary(ctx: Ctx): Expr {
     const parsed = ctx.operands;
     let node = this.visit(parsed[0]);
@@ -121,7 +98,6 @@ export class TessAstVisitor extends BaseVisitor {
     return node;
   }
 
-  /** Folds repeated prefix operators, innermost last. */
   foldPrefix(operators: IToken[], parsed: any, name: 'not' | '-'): Expr {
     let node = this.visit(parsed);
     const end = (Array.isArray(parsed) ? parsed[0] : parsed).location.endOffset + 1;
@@ -136,12 +112,7 @@ export class TessAstVisitor extends BaseVisitor {
     return node;
   }
 
-  // ==========================================================================
-  //  Program and declarations
-  // ==========================================================================
-  // A program must consume its whole file, so its span always ends at the end of
-  // the text — trailing blank lines and comments included. An empty program has
-  // no tokens to start from and collapses onto that same point.
+  // Program spans include trailing whitespace and comments, even for an empty file.
   program(ctx: Ctx, node: CstNode): ProgramNode {
     const body = (ctx.topLevelItem ?? []).map((item: CstNode) => this.visit(item));
     const start = node.location!.startOffset >= 0
@@ -214,7 +185,7 @@ export class TessAstVisitor extends BaseVisitor {
     };
   }
 
-  // Shaped like an object's `name` property so the compiler can treat both alike.
+  // Match object name properties so the compiler can handle scene display names the same way.
   sceneNameDecl(ctx: Ctx, node: CstNode): PropertyNode {
     return {
       type: 'Property',
@@ -234,9 +205,6 @@ export class TessAstVisitor extends BaseVisitor {
     };
   }
 
-  // ==========================================================================
-  //  Object properties
-  // ==========================================================================
   propertyDecl(ctx: Ctx, node: CstNode): PropertyNode | CenterNode | CostumeNode | SoundNode | ObjectMember {
     if (ctx.costumeProperty) return this.visit(ctx.costumeProperty);
     if (ctx.soundProperty) return this.visit(ctx.soundProperty);
@@ -327,9 +295,6 @@ export class TessAstVisitor extends BaseVisitor {
     return onlyToken(ctx)!.image;
   }
 
-  // ==========================================================================
-  //  Functions, variables and lists
-  // ==========================================================================
   functionDecl(ctx: Ctx, node: CstNode): FunctionDeclNode {
     const declared = (ctx.params ?? []).map((param: CstNode) => this.visit(param));
     return {
@@ -414,9 +379,6 @@ export class TessAstVisitor extends BaseVisitor {
     };
   }
 
-  // ==========================================================================
-  //  Events
-  // ==========================================================================
   eventHandler(ctx: Ctx, node: CstNode): EventNode {
     const up = Boolean(ctx.up);
     const tail = { body: this.visit(ctx.body), loc: nodeLoc(node) };
@@ -442,9 +404,6 @@ export class TessAstVisitor extends BaseVisitor {
     return { type: 'Event', event: 'cloned', ...tail };
   }
 
-  // ==========================================================================
-  //  Statements
-  // ==========================================================================
   blockOpen(): null {
     return null;
   }
@@ -534,7 +493,6 @@ export class TessAstVisitor extends BaseVisitor {
       };
       return { type: kinds[ctx.what[0].image], loc };
     }
-    // A bare `stop` ends this script.
     return { type: 'Stop', target: ctx.scope ? ctx.scope[0].image : 'this', loc };
   }
 
@@ -581,9 +539,6 @@ export class TessAstVisitor extends BaseVisitor {
     };
   }
 
-  // ==========================================================================
-  //  Movement
-  // ==========================================================================
   forwardStatement(ctx: Ctx, node: CstNode): ForwardNode {
     return {
       type: 'Forward',
@@ -640,9 +595,6 @@ export class TessAstVisitor extends BaseVisitor {
     return { type: 'Look', target: this.visit(ctx.target), loc: nodeLoc(node) };
   }
 
-  // ==========================================================================
-  //  Looks and speech
-  // ==========================================================================
   showHideStatement(ctx: Ctx, node: CstNode): ShowHideNode {
     return {
       type: ctx.kind[0].image === 'show' ? 'Show' : 'Hide',
@@ -678,9 +630,6 @@ export class TessAstVisitor extends BaseVisitor {
     return { type: 'Order', to: ctx.to[0].image, loc: nodeLoc(node) };
   }
 
-  // ==========================================================================
-  //  Text box, pen and sound
-  // ==========================================================================
   textStatement(ctx: Ctx, node: CstNode): TextWriteNode {
     return {
       type: 'TextWrite',
@@ -727,9 +676,6 @@ export class TessAstVisitor extends BaseVisitor {
     };
   }
 
-  // ==========================================================================
-  //  Data
-  // ==========================================================================
   listAddStatement(ctx: Ctx, node: CstNode): ListAddNode | ListInsertNode | TableAddLineNode {
     const loc = nodeLoc(node);
     const list = this.visit(ctx.list);
@@ -787,9 +733,6 @@ export class TessAstVisitor extends BaseVisitor {
     return { type: 'Ask', question: this.visit(ctx.question), loc: nodeLoc(node) };
   }
 
-  // ==========================================================================
-  //  Assignment and calls
-  // ==========================================================================
   assignOrCall(ctx: Ctx, node: CstNode): ExpressionStatementNode | AssignNode {
     if (ctx.call) {
       return {
@@ -823,9 +766,6 @@ export class TessAstVisitor extends BaseVisitor {
     return onlyToken(ctx)!.image;
   }
 
-  // ==========================================================================
-  //  Expressions
-  // ==========================================================================
   expr(ctx: Ctx): Expr {
     return this.visit(ctx.orExpr);
   }
@@ -893,8 +833,7 @@ export class TessAstVisitor extends BaseVisitor {
     if (ctx.string) return stringNode(ctx.string[0]);
     if (ctx.boolean) return this.visit(ctx.boolean);
     if (ctx.color) {
-      // The token may be a short hex, an rgba one or a colour name; the AST
-      // always carries the `#rrggbb` entry stores.
+      // Normalize short hex, alpha hex, and named colors for the AST.
       return {
         type: 'Color',
         value: normalizeColor(ctx.color[0].image) ?? ctx.color[0].image.toLowerCase(),
@@ -930,9 +869,6 @@ export class TessAstVisitor extends BaseVisitor {
     };
   }
 
-  // ==========================================================================
-  //  Terminals
-  // ==========================================================================
   identifier(ctx: Ctx): Identifier {
     const token = ctx.name[0];
     return { type: 'Identifier', name: token.image, loc: tokenLoc(token) };
@@ -951,7 +887,6 @@ export class TessAstVisitor extends BaseVisitor {
 
 export const visitor = new TessAstVisitor();
 
-/** Turns a parsed rule into its AST. */
 export function toAst(cst: CstNode, sourceLength: number): ParseRoot {
   visitor.sourceLength = sourceLength;
   return visitor.visit(cst);

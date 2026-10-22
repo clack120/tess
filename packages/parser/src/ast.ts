@@ -1,24 +1,8 @@
-/**
- * Tess AST 노드 구조를 정의합니다.
- * 방문자(visitor)가 이를 생성하고, 유효성 검사기, 컴파일러, 디컴파일러가 이를 읽습니다.
- * `type` 속성을 판별자로 사용하여 `switch` 문으로 안전하게 타입을 좁힐 수 있습니다.
- */
-
-/**
- * 반개구간(half-open) 소스 코드 범위를 나타냅니다. `end` 값은 포함되지 않습니다.
- * 
- * @example
- * const loc: Loc = { start: 0, end: 10 };
- */
+// Source spans exclude the end offset.
 export interface Loc {
   start: number;
   end: number;
-  /**
-   * `use` 구문으로 가져온 파일에서 유래한 노드인 경우 파일 경로가 설정됩니다.
-   * 
-   * @example
-   * loc.file = "other.tess";
-   */
+  // Included nodes retain their source file for diagnostics.
   file?: string;
 }
 
@@ -26,9 +10,6 @@ interface Base {
   loc: Loc;
 }
 
-// ----------------------------------------------------------------------------
-//  Expressions
-// ----------------------------------------------------------------------------
 export interface StringNode extends Base {
   type: 'String';
   value: string;
@@ -58,12 +39,7 @@ export interface Identifier extends Base {
   name: string;
 }
 
-/**
- * 회전 방식과 같은 단일 옵션 키워드를 나타냅니다. 소스 범위(span) 없이 기록될 수 있습니다.
- * 
- * @example
- * const kw: KeywordNode = { type: 'Keyword', name: 'left_right' };
- */
+// Option nodes may have no source span.
 export interface KeywordNode {
   type: 'Keyword';
   name: string;
@@ -115,14 +91,8 @@ export type Expr =
   | IndexNode
   | ListLiteralNode;
 
-/**
- * 할당 또는 리스트 연산의 대상이 될 수 있는 좌변값(LValue) 타입입니다.
- */
 export type LValue = Identifier | IndexNode;
 
-// ----------------------------------------------------------------------------
-//  Declarations
-// ----------------------------------------------------------------------------
 export interface UseNode extends Base {
   type: 'Use';
   path: string;
@@ -213,13 +183,8 @@ export interface TableDeclNode extends Base {
   charts: TableChartNode[];
 }
 
-/**
- * 일반 지역 스토리지가 아닌 경우, 변수나 리스트가 저장되는 스코프를 나타냅니다.
- */
 export type StorageScope = 'shared' | 'realtime' | 'store';
 
-/** 선언에 `visible` 이 붙으면 그 변수·리스트는 무대에 보인 채로 시작한다. */
-/** `chart line "제목" x 1 series 2, 3` — 표에 딸린 차트 한 벌. */
 export interface TableChartNode {
   kind: string;
   title: string | null;
@@ -234,11 +199,9 @@ export interface VarDeclNode extends Base {
   displayName: string | null;
   scope: StorageScope | null;
   value: Expr;
-  /** `from A to B` — entry's slide variable, shown with a slider on its box. */
   range: { min: Expr; max: Expr } | null;
-  /** `visible` — the box stands on the stage from the start. */
   shown: boolean;
-  /** `at X Y` — where the box stands; null leaves it to the runner. */
+  // Null lets the runtime choose the monitor position.
   at: { x: Expr; y: Expr } | null;
 }
 
@@ -248,17 +211,13 @@ export interface ListDeclNode extends Base {
   displayName: string | null;
   scope: StorageScope | null;
   value: Expr;
-  /** `visible` — the box stands on the stage from the start. */
   shown: boolean;
-  /** `at X Y` — where the box stands; null leaves it to the runner. */
+  // Null lets the runtime choose the monitor position.
   at: { x: Expr; y: Expr } | null;
-  /** `size W H` — how big the box is; null keeps entry's 100 by 120. */
+  // Null uses Entry's default list size of 100 by 120.
   size: { width: Expr; height: Expr } | null;
 }
 
-// ----------------------------------------------------------------------------
-//  Events
-// ----------------------------------------------------------------------------
 export type EventName =
   | 'start'
   | 'scene_start'
@@ -279,9 +238,6 @@ export interface EventNode extends Base {
   body: Stmt[];
 }
 
-// ----------------------------------------------------------------------------
-//  Statements
-// ----------------------------------------------------------------------------
 export interface IfNode extends Base {
   type: 'If';
   test: Expr;
@@ -336,7 +292,6 @@ export interface ForeverNode extends Base {
 export interface WaitNode extends Base {
   type: 'Wait';
   value: Expr;
-  /** `wait until x` — waits for `x` to hold, whatever kind of value it is. */
   until?: boolean;
 }
 
@@ -345,9 +300,6 @@ export interface ReturnNode extends Base {
   value: Expr | null;
 }
 
-/**
- * 추가적인 속성 없이 소스 범위(span)와 타입만을 가지는 문장의 종류입니다.
- */
 export type NullaryStatementType =
   | 'Break'
   | 'Continue'
@@ -515,9 +467,6 @@ export interface ListRemoveNode extends Base {
   index: Expr;
 }
 
-/**
- * 테이블이 늘어나거나 줄어드는 방향을 나타냅니다.
- */
 export type TableLine = 'row' | 'column';
 
 export interface TableAddLineNode extends Base {
@@ -539,10 +488,9 @@ export interface TableSaveNode extends Base {
   table: Expr;
 }
 
-/** `save` · `save async` — writes every `store` variable and list out. */
 export interface StoreSaveNode extends Base {
   type: 'StoreSave';
-  /** `async` — the work carries on without waiting for the write to land. */
+  // Continue without waiting for storage when asynchronous.
   async: boolean;
 }
 
@@ -609,9 +557,6 @@ export type Stmt =
   | ListDeclNode
   | FunctionDeclNode;
 
-// ----------------------------------------------------------------------------
-//  Containers
-// ----------------------------------------------------------------------------
 export type ObjectMember =
   | VarDeclNode
   | ListDeclNode
@@ -642,9 +587,6 @@ export interface ProgramNode extends Base {
   body: TopLevelItem[];
 }
 
-/**
- * 방문자가 생성할 수 있는 모든 위치의 노드 타입입니다.
- */
 export type Node =
   | ProgramNode
   | TopLevelItem
@@ -655,21 +597,8 @@ export type Node =
   | ProjectFieldNode
   | EventNode;
 
-/**
- * 구문 분석기(`parse`)가 시작 규칙에 따라 반환하는 결과 타입입니다.
- * `Program`은 전체 프로그램을, 단편(fragment) 규칙은 일치하는 멤버들을, 표현식과 문장 규칙은 단일 노드를 반환합니다.
- */
 export type ParseRoot = ProgramNode | SceneMember[] | ObjectMember[] | Stmt | Expr;
 
-// ----------------------------------------------------------------------------
-//  Diagnostics
-// ----------------------------------------------------------------------------
-/**
- * 구문 분석 또는 유효성 검사 중에 발견된 소스 파일 내의 문제를 나타냅니다.
- * 
- * @example
- * const diag: Diagnostic = { line: 1, column: 1, offset: 0, message: "에러" };
- */
 export interface Diagnostic {
   line: number;
   column: number;
@@ -683,23 +612,11 @@ export interface Diagnostic {
   related?: Diagnostic[];
 }
 
-/**
- * 단일 프로그램에 대해 `validate`가 보고하는 검사 결과입니다.
- * 
- * @example
- * const result: ValidationResult = { errors: [], warnings: [] };
- */
 export interface ValidationResult {
   errors: Diagnostic[];
   warnings: Diagnostic[];
 }
 
-/**
- * 구문 분석기(`parse`)의 반환 결과입니다. 성공 시 생성된 트리와 진단 정보를 포함합니다.
- * 
- * @example
- * const result: ParseResult = { ok: true, ast: programNode, errors: [], warnings: [] };
- */
 export interface ParseResult<T = ParseRoot> {
   ok: boolean;
   ast: T | null;

@@ -1,10 +1,4 @@
-/**
- * @fileoverview The slice of the extension api this uses.
- *
- * Typed here rather than pulled from `@types/chrome` so the package keeps no
- * dependencies. Firefox exposes `browser` with promises and chrome's MV3
- * namespace returns promises too, so the same calls fit both.
- */
+// Both browser APIs support promises; keep only the types used here.
 
 export interface StorageChange {
   newValue?: unknown;
@@ -25,7 +19,6 @@ export interface ExtensionApi {
   };
   runtime: {
     getURL(path: string): string;
-    /** Chrome MV3 and Firefox both answer with a promise. */
     sendMessage?(message: unknown): Promise<unknown>;
     onMessage?: {
       addListener(
@@ -44,7 +37,6 @@ const globals = globalThis as unknown as { browser?: ExtensionApi; chrome?: Exte
 export const api = (globals.browser ?? globals.chrome) as ExtensionApi;
 
 export const ENABLED_KEY = 'enabled';
-/** Whether a costume drawn as a vector is loaded as one. */
 export const SVG_KEY = 'svg';
 
 export interface Settings {
@@ -52,7 +44,6 @@ export interface Settings {
   svg: boolean;
 }
 
-/** Everything is on unless turned off. */
 export async function readSettings(): Promise<Settings> {
   const stored = await api.storage.local.get({
     [ENABLED_KEY]: true,

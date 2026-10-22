@@ -1,28 +1,15 @@
-/**
- * @fileoverview Runs at document_start in the isolated world.
- *
- * A work page does not run the work itself — an iframe pointing at `/iframe/<id>`
- * does. That frame is sent to `about:blank` before it can navigate, so neither
- * the entry runner nor the megabytes it pulls in are ever fetched.
- *
- * The emptied frame stays in the layout, hidden: the page sizes the player
- * through `.wrapper iframe { height: … }` rules that change with the viewport,
- * so the frame's own box is what the mount point is laid over. Removing the
- * element instead would both collapse that box and take a node out from under
- * the page's own view code.
- */
+// Blank the original iframe before loading, but keep its layout box for the replacement player.
 import { api, readSettings, ENABLED_KEY, SVG_KEY } from './browser.ts';
 
 const IFRAME_MARK = '/iframe/';
-/** `data-tessvm-held` — set on a frame this has already taken over. */
 const HELD = 'tessvmHeld';
 
 interface Held {
   frame: HTMLIFrameElement;
-  /** The entry runner's own address, put back when the extension is turned off. */
+  // Restore the original iframe URL when disabling the extension.
   src: string;
   id: string;
-  /** Set when the frame's parent had to be made a positioning root. */
+  // Remember positioning changes so removing the player can restore the parent.
   positioned: boolean;
 }
 
@@ -40,7 +27,6 @@ function hostAfter(frame: HTMLIFrameElement): HTMLElement | null {
   return next instanceof HTMLElement && next.dataset.tessvmProject ? next : null;
 }
 
-/** Loads the page-side runner once, into the page's own world. */
 function inject(): void {
   if (injected) {
     return;
@@ -53,7 +39,7 @@ function inject(): void {
   const script = document.createElement('script');
   script.type = 'module';
   script.src = api.runtime.getURL('page/main.js');
-  // A runner that never arrives would leave an empty box and no reason for it.
+  // Report a missing runner instead of leaving an unexplained empty player.
   script.onerror = () => {
     for (const item of held) {
       const host = hostAfter(item.frame);
@@ -123,11 +109,7 @@ function applyAll(): void {
   }
 }
 
-/**
- * Takes a frame over the moment it shows up. The setting may not have arrived
- * yet — the frame is blanked either way, because a frame that has already begun
- * loading entry cannot be un-loaded, and putting its address back costs nothing.
- */
+// Blank frames before settings arrive because Entry cannot be unloaded after it starts.
 function hold(frame: HTMLIFrameElement): void {
   if (frame.dataset[HELD]) {
     return;
@@ -164,8 +146,7 @@ function sweep(node: Node): void {
   }
 }
 
-// The frame is written by the page's own view code, and its address can be set
-// either with it or a moment after, so both are watched.
+// Watch both insertion and src changes because the page may set them separately.
 const observer = new MutationObserver((records) => {
   for (const record of records) {
     if (record.type === 'attributes') {
@@ -193,7 +174,7 @@ api.storage.onChanged.addListener((changes, area) => {
   }
   if (SVG_KEY in changes) {
     svg = changes[SVG_KEY]?.newValue !== false;
-    // The runner reads this when it starts, so the players have to be built again.
+    // Rebuild players because they read this setting only when mounted.
     window.postMessage({ __tessvm: 'unmount' }, location.origin);
     for (const item of held) {
       hostAfter(item.frame)?.remove();
@@ -214,11 +195,7 @@ void readSettings().then((settings) => {
   applyAll();
 });
 
-/**
- * The runner saves through here. What a work keeps belongs to the extension
- * (`store-db.ts`), which the page's own world cannot reach, so a request is
- * carried to the worker and its answer posted back under the same id.
- */
+// Relay saves to extension storage because page scripts cannot access it directly.
 window.addEventListener('message', (event) => {
   if (event.source !== window) {
     return;

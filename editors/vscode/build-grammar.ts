@@ -1,9 +1,4 @@
-// ============================================================================
-//  파서의 키워드 목록과 builtins.ts 를 읽어 VS Code 문법 강조 파일을 만든다.
-//  (손으로 키워드를 옮겨 적지 않도록 — 언어가 바뀌면 다시 돌리면 된다)
-//
-//  실행:  node editors/vscode/build-grammar.mjs
-// ============================================================================
+// Reuse lexer keywords so syntax highlighting stays in sync.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,16 +8,13 @@ import { KEYWORDS } from '@tess/parser';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-/** 렉서가 쓰는 키워드 목록이 그대로 강조 대상이 된다 */
 const keywords = new Set(KEYWORDS);
 
-/** 낱말 경계 (Tess 식별자는 _ 와 한글도 쓴다) */
+// Tess identifiers include underscores and Unicode letters.
 const word = (list: Iterable<string>) => `(?<![A-Za-z0-9_])(?:${[...list].sort((a, b) => b.length - a.length).join('|')})(?![A-Za-z0-9_])`;
 
 const DECLARATION = ['project', 'scene', 'object', 'text', 'table', 'function', 'use', 'useobject', 'usetext', 'var', 'list'];
-// Storage scope of a global declaration: cloud (`shared`) and real-time (`realtime`).
 const STORAGE = ['shared', 'realtime'];
-// Modifiers trailing a declaration: `as "name"`, `force id "..."`, `default costume`.
 const MODIFIER = ['as', 'force', 'id', 'default'];
 const CONTROL = ['if', 'else', 'switch', 'case', 'default', 'end', 'then', 'do', 'repeat', 'for', 'while', 'until', 'forever',
   'wait', 'break', 'continue', 'skip', 'restart', 'stop', 'return'];
@@ -33,13 +25,11 @@ const CONSTANTS = ['true', 'false', 'transparent', 'next', 'prev', 'back', 'fron
 
 const PROPERTIES = [...new Set([...OBJECT_PROPERTIES, ...TEXT_ONLY_PROPERTIES])];
 
-// What may follow `#` and still be a colour, matching `colorLiteralLength`:
-// a run of hex digits or one of the names, and nothing more of the word.
+// Match the lexer: a color must end at a word boundary.
 const COLOR_NAMES = Object.keys(NAMED_COLORS).sort((a, b) => b.length - a.length).join('|');
 const COLOR_BODY = `(?:[0-9a-fA-F]+|(?i:${COLOR_NAMES}))(?![\\p{L}0-9_])`;
 
-// 위 갈래에 넣지 않은 나머지 키워드는 전부 "명령"으로 본다
-// Keywords that double as property names (`x`, `size`, `costume`) go to PROPERTIES.
+// Property keywords take precedence over command keywords.
 const claimed = new Set([...DECLARATION, ...STORAGE, ...MODIFIER, ...CONTROL, ...EVENT,
   ...OPERATOR_WORDS, ...CONSTANTS, ...PROPERTIES]);
 const COMMANDS = [...keywords].filter((keyword) => !claimed.has(keyword));
@@ -53,7 +43,7 @@ const grammar = {
     { include: '#keyword' }, { include: '#operator' }, { include: '#punctuation' },
     { include: '#identifier' }],
   repository: {
-    // `#` 은 주석이지만 `#ff0000` 은 색이다 (문법의 comment 규칙과 같은 판단)
+    // A hex color starts with # but is not a comment.
     comment: {
       name: 'comment.line.number-sign.tess',
       match: `#(?!${COLOR_BODY}).*$`,
@@ -72,7 +62,6 @@ const grammar = {
       name: 'constant.numeric.tess',
       match: '(?<![A-Za-z0-9_])[0-9]+(\\.[0-9]+)?',
     },
-    // 선언 뒤에 오는 이름을 따로 칠한다
     declaration: {
       patterns: [
         {

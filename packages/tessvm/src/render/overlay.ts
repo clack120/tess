@@ -1,8 +1,3 @@
-/**
- * @fileoverview 무대 위에 얹히는 것들 — 말풍선, 변수·리스트 상자, 초시계, 대답 —
- * 을 그립니다. 위치와 크기는 엔트리(`Entry.Dialog`, `Entry.Variable.generateView`)가
- * 쓰는 값을 그대로 따릅니다.
- */
 import { Container, Graphics, Text } from 'pixi.js';
 import { entityBounds, type Rect } from '../collision/detect.ts';
 import { stage, type Entity, type Variable } from '../runtime/model.ts';
@@ -11,51 +6,35 @@ const DIALOG_PADDING = 10;
 const DIALOG_FONT = 15;
 const DIALOG_BORDER = '#4f80ff';
 const DIALOG_BG = '#ffffff';
-/** `_adjustSingleViewBox` — entry gives each kind of monitor its own value box. */
 const MONITOR_VARIABLE = '#4f80ff';
 const MONITOR_ANSWER = '#F57DF1';
 const MONITOR_TIMER = '#f4af18';
 const MONITOR_FAMILY = 'Nanum Gothic, sans-serif';
 const MONITOR_BORDER = '#aac5d5';
 const MONITOR_BG = '#ffffff';
-/** `Entry.Variable` — `FONT` is `10pt`, `VALUE_FONT` is `9pt`; a point is 4/3 px. */
+// Entry uses 10pt labels and 9pt values; one point is 4/3 pixels.
 const MONITOR_FONT = 40 / 3;
 const MONITOR_VALUE_FONT = 12;
-/** `BORDER` and `RECT_RADIUS` on `Entry.Variable`. */
 const MONITOR_INSET = 6;
 const MONITOR_RADIUS = 7;
-/**
- * Text in a monitor is anchored on its middle, so these are the centre lines of
- * the boxes it sits in, not the top edges entry writes in `GL_VAR_POS`.
- */
+// Text anchors use box centers rather than Entry's stored top edges.
 const LABEL_Y = -2;
 const VALUE_Y = -2;
 const LIST_ROW_HEIGHT = 20;
-/** The strip the title sits on; below it the rows begin. */
 const LIST_TITLE_HEIGHT = 23;
-/** The coloured strip inside one list row. */
 const STRIP_TOP = 4;
 const STRIP_HEIGHT = 17;
-/**
- * `stage_list_resize_handle.png` — 목록 상자 오른쪽 아래의 크기 조절 손잡이.
- * 14x14 그림을 0.7 로 줄여 쓰고, 자리는 `(width - 10, height + 6)` 이다.
- */
+// Match Entry's 14 by 14 resize handle drawn at 0.7 scale.
 const LIST_HANDLE_SIZE = 14 * 0.7;
 const LIST_HANDLE_X = 10;
 const LIST_HANDLE_Y = 6;
 const LIST_HANDLE_COLOR = '#4f80ff';
-/** `setWidth`·`setHeight` — 엔트리가 허락하는 가장 작은 상자. */
+// Match Entry's minimum list box dimensions.
 export const LIST_MIN_SIZE = 100;
 
-/** Where the scroll bar starts and how tall it is (`scrollButton_`). */
 const LIST_BAR_TOP = LIST_TITLE_HEIGHT + 4;
 const LIST_BAR_HEIGHT = 20;
-/**
- * `Entry.SlideVariable` — a slide variable's box is 42 tall rather than 24, and
- * carries a grey run with a knob on it. `SLIDE_BAR` is where that run starts and
- * how thick it is, `SLIDE_KNOB` the knob entry draws from a 9x20 image at 0.8,
- * grip lines and all.
- */
+// Match Entry's 42-unit slider box and its scaled 9 by 20 knob.
 const SLIDE_HEIGHT = 42;
 const SLIDE_BAR_X = 6;
 const SLIDE_BAR_Y = 16;
@@ -66,25 +45,16 @@ const SLIDE_KNOB_WIDTH = 9 * 0.8;
 const SLIDE_KNOB_HEIGHT = 20 * 0.8;
 const SLIDE_KNOB_RADIUS = 1 * 0.8;
 const SLIDE_KNOB_COLOR = '#4f80ff';
-/**
- * 손잡이는 단색이 아니다 — `stage_variable_slider.png` 의 9x20 그림은 파란 바탕
- * 가운데에 짙은 파랑 세로 두 줄(x=2·5 에서 2픽셀 너비, y=4 부터 12픽셀)을 쥠자리로
- * 두고 있다.
- */
+// Keep the two dark grip lines from Entry's slider image.
 const SLIDE_GRIP_COLOR = '#3759b2';
 const SLIDE_GRIP_X = [2 * 0.8, 5 * 0.8];
 const SLIDE_GRIP_WIDTH = 2 * 0.8;
 const SLIDE_GRIP_Y = 4 * 0.8;
 const SLIDE_GRIP_HEIGHT = 12 * 0.8;
-/**
- * `DataTable.showTable` — 표 창. 엔트리는 무대 위에 표를 모달로 띄웁니다. 여기서는
- * 같은 자리에 같은 것을 그립니다: 이름줄과 닫기 단추, 열 이름줄, 그리고 자료 줄들.
- */
 const TABLE_MARGIN = 24;
 const TABLE_TITLE_HEIGHT = 22;
 const TABLE_HEAD_HEIGHT = 18;
 const TABLE_ROW_HEIGHT = 16;
-/** 줄 번호가 들어가는 맨 왼쪽 칸. */
 const TABLE_INDEX_WIDTH = 26;
 const TABLE_BG = '#ffffff';
 const TABLE_BORDER = '#c0c5cc';
@@ -96,9 +66,9 @@ const TABLE_TEXT = '#16161a';
 const TABLE_FONT = 11;
 const TABLE_CLOSE = 14;
 
-/** The narrowest a monitor box gets — `Math.max(width, 90)` in entry. */
+// Entry clamps slider monitor widths to at least 90.
 const MONITOR_MIN_WIDTH = 90;
-/** Where entry puts the built-in monitors when the work does not say. */
+// Use Entry's built-in monitor positions when the project omits them.
 const ANSWER_HOME = { x: 150, y: -100 };
 const TIMER_HOME = { x: 134, y: -70 };
 
@@ -111,28 +81,26 @@ interface DialogView {
   mode: string;
 }
 
-/** One numbered row of a list box. Kept and rewritten, never rebuilt. */
 interface RowView {
   root: Container;
   index: Text;
   strip: Graphics;
   value: Text;
-  /** What the row is showing now, so an unmoved one is left alone. */
+  // Cache displayed values so unchanged rows need no redraw.
   shown: string;
   stripWidth: number;
 }
 
-/** 표 창과 차트 창이 그리는 데 필요한 만큼의 표. */
 export interface TableLike {
   name: string;
   fields: string[];
   rows: Array<Array<string | number>>;
   charts?: ChartLike[];
-  /** 담긴 것이 바뀔 때마다 오르는 수 — 열려 있는 창이 이것을 보고 다시 그립니다. */
+  // Increment after table changes so open views can refresh.
   revision?: number;
 }
 
-/** 표에 딸린 차트 한 벌 — 엔트리가 저장하는 그대로, 열 번호는 0부터. */
+// Saved chart column numbers are zero-based.
 export interface ChartLike {
   type: string;
   title: string;
@@ -141,7 +109,6 @@ export interface ChartLike {
   categoryIndexes: number[];
 }
 
-/** The table window's own display objects. */
 interface TableView {
   root: Container;
   frame: Graphics;
@@ -154,18 +121,13 @@ interface MonitorView {
   frame: Graphics;
   label: Text;
   value: Text;
-  /** List rows live here; a value monitor leaves it empty. */
   items: Container | null;
   rows: RowView[];
-  /** The run and knob of a slide variable; null on every other kind. */
   slider: { bar: Graphics; knob: Graphics } | null;
-  /** How far the knob may travel — `Entry.SlideVariable.maxWidth`. */
   slideRun: number;
-  /** What the box is showing now — a monitor that did not move is not redrawn. */
   shown: string;
 }
 
-/** Entity bounds converted back to entry stage units, as `Entry.Dialog` expects. */
 function stageBounds(entity: Entity): Rect {
   const rect: Rect = { x: 0, y: 0, width: 0, height: 0 };
   entityBounds(entity, rect);
@@ -184,7 +146,6 @@ export class Overlay {
   private readonly dialogs = new Map<Entity, DialogView>();
   private readonly monitors = new Map<Variable, MonitorView>();
   private variables: Variable[] = [];
-  /** First row shown in a list box, moved by dragging the rows or the bar. */
   private readonly scrolled = new Map<Variable, number>();
   private answerMonitor: MonitorView | null = null;
   private timerMonitor: MonitorView | null = null;
@@ -195,19 +156,13 @@ export class Overlay {
   private currentScene: () => string = () => '';
   private ownerName: (objectId: string) => string | null = () => null;
   private ownerScene: (objectId: string) => string | null = () => null;
-  /** The table window, while one is open. */
   private readonly tableLayer = new Container();
   private tableView: TableView | null = null;
   private openTable: TableLike | null = null;
 
-  /**
-   * Texture pixels per text pixel for every box, bubble and table: what one
-   * stage pixel takes on screen (stage scale × canvas resolution), so the text
-   * is baked as fine as it is drawn.
-   */
+  // Bake text at stage scale times canvas resolution so overlays remain sharp.
   static textResolution = 2;
 
-  /** Bakes the overlay's text again at `resolution`, as the canvas's own resolution moved. */
   setTextResolution(resolution: number): void {
     if (Math.abs(resolution - Overlay.textResolution) < 1e-3) return;
     Overlay.textResolution = resolution;
@@ -224,7 +179,6 @@ export class Overlay {
     this.applyStageSize();
   }
 
-  /** Keeps the overlay in the same space the world container uses. */
   applyStageSize(): void {
     this.root.position.set(stage.worldWidth / 2, stage.worldHeight / 2);
     this.root.scale.set(stage.scale);
@@ -232,9 +186,8 @@ export class Overlay {
 
   bind(options: {
     variables: Variable[];
-    /** `Entry.container.getObject(...)` — 오브젝트 변수 이름 앞에 붙는 이름. */
     ownerName?: (objectId: string) => string | null;
-    /** The scene an object variable's owner is in; its box shows only there. */
+    // Show local variable monitors only in their owner's scene.
     ownerScene?: (objectId: string) => string | null;
     answer: () => string | number;
     answerVisible: () => boolean;
@@ -252,16 +205,11 @@ export class Overlay {
     this.currentScene = options.scene;
   }
 
-  /**
-   * `DataTable.showTable` · `closeModal` — 어느 표를 띄워 둘지 정합니다. null 이면
-   * 창을 닫습니다. 차트는 캔버스가 아니라 HTML 로 띄우므로(`web/chart-view.ts`)
-   * 차트 번호가 붙은 창은 여기서 그리지 않습니다.
-   */
+  // Charts use HTML windows, so draw only ordinary tables on the canvas.
   showTable(table: TableLike | null, chart: number | null = null): void {
     this.openTable = chart === null ? table : null;
   }
 
-  /** Whether a point falls inside the open table window — its close button aside. */
   tableAt(x: number, y: number): 'close' | 'window' | null {
     if (!this.openTable) {
       return null;
@@ -275,7 +223,6 @@ export class Overlay {
     return onClose ? 'close' : 'window';
   }
 
-  /** Where the window sits — the stage, less a margin on every side. */
   private static tableBox(): { left: number; top: number; width: number; height: number } {
     return {
       left: -stage.width / 2 + TABLE_MARGIN,
@@ -285,7 +232,6 @@ export class Overlay {
     };
   }
 
-  /** Draws the open table, or takes the window down when none is open. */
   private drawTable(): void {
     const table = this.openTable;
     if (!table) {
@@ -323,7 +269,6 @@ export class Overlay {
     view.frame
       .rect(0, TABLE_TITLE_HEIGHT, box.width, TABLE_HEAD_HEIGHT)
       .fill({ color: TABLE_HEAD_BG });
-    // 칸을 가르는 선들.
     const gridTop = TABLE_TITLE_HEIGHT;
     for (let column = 0; column <= columns; column += 1) {
       const x = TABLE_INDEX_WIDTH + column * cellWidth;
@@ -337,7 +282,6 @@ export class Overlay {
     }
     view.frame.stroke({ width: 1, color: TABLE_LINE });
 
-    // 글자는 칸마다 하나씩, 있는 것을 다시 쓴다.
     const texts: Array<{ text: string; x: number; y: number; head: boolean }> = [];
     table.fields.forEach((field, column) => {
       texts.push({
@@ -362,7 +306,6 @@ export class Overlay {
     Overlay.placeCells(view, texts);
   }
 
-  /** 창의 테두리와 이름줄, 닫기 단추. */
   private drawWindowFrame(
     view: TableView,
     box: { width: number; height: number },
@@ -384,10 +327,7 @@ export class Overlay {
       .stroke({ width: 1.5, color: TABLE_TITLE_COLOR });
   }
 
-  /**
-   * 창 안의 글자들을 자리에 놓습니다. 만들어 둔 것을 다시 쓰고, 남는 것은 숨깁니다 —
-   * 창은 프레임마다 그려지므로 글자를 새로 만들면 그때마다 재고 굽습니다.
-   */
+  // Reuse table text each frame to avoid repeated measurement and texture creation.
   private static placeCells(
     view: TableView,
     texts: Array<{ text: string; x: number; y: number; color?: string }>,
@@ -436,11 +376,7 @@ export class Overlay {
     this.timerMonitor = null;
   }
 
-  /**
-   * Drops what the overlay holds for an entity that is gone. A clone's bubble
-   * outlives the clone otherwise: nothing owns it, so it stays on the stage
-   * through a stop and the next run.
-   */
+  // Remove orphaned clone bubbles so they cannot survive stop and restart.
   forget(entity: Entity): void {
     const view = this.dialogs.get(entity);
     if (!view) {
@@ -450,9 +386,6 @@ export class Overlay {
     this.dialogs.delete(entity);
   }
 
-  // -------------------------------------------------------------------------
-  //  Dialogs
-  // -------------------------------------------------------------------------
   setDialog(entity: Entity): void {
     const state = entity.dialog;
     const existing = this.dialogs.get(entity);
@@ -470,9 +403,7 @@ export class Overlay {
         existing.text.text = state.message;
         this.drawDialog(existing);
       }
-      // `new Entry.Dialog` throws the old bubble away and loads the new one, so
-      // saying anything at all — the same words included — puts that bubble in
-      // front of every other one.
+      // Any new speech, including repeated words, moves its bubble in front in Entry.
       this.raise(existing.root);
       return;
     }
@@ -491,7 +422,6 @@ export class Overlay {
     this.drawDialog(view);
   }
 
-  /** Moves one bubble to the front of the others. */
   private raise(root: Container): void {
     const last = this.dialogLayer.children.length - 1;
     if (last > 0 && this.dialogLayer.getChildIndex(root) !== last) {
@@ -531,7 +461,7 @@ export class Overlay {
     view.root.x = east
       ? Math.min(bound.x + bound.width + width / 2, stage.halfWidth - width / 2 - DIALOG_PADDING)
       : Math.max(bound.x - width / 2, -stage.halfWidth + width / 2 + DIALOG_PADDING);
-    // A dialog belongs to its object's scene, so it leaves with the scene.
+    // Hide bubbles with their object's scene.
     view.root.visible = entity.visible && entity.target.sceneId === this.currentScene();
     this.drawNotch(view, north ? 'n' : 's', east ? 'e' : 'w', width, height);
   }
@@ -568,17 +498,13 @@ export class Overlay {
       .stroke({ width: 2, color: DIALOG_BORDER });
   }
 
-  // -------------------------------------------------------------------------
-  //  Monitors
-  // -------------------------------------------------------------------------
   private static text(size: number, fill: string): Text {
     const text = new Text({
       text: '',
       style: { fontFamily: MONITOR_FAMILY, fontSize: size, fill },
       resolution: Overlay.textResolution,
     });
-    // Centred on the line it is given: the font's own ascent and descent then
-    // cannot leave the letters sitting low in their box.
+    // Center text by its anchor so font ascent and descent cannot push it downward.
     text.anchor.set(0, 0.5);
     return text;
   }
@@ -593,15 +519,7 @@ export class Overlay {
     return { root, frame, label, value, items: null, rows: [], slider: null, slideRun: 0, shown: '' };
   }
 
-  /**
-   * `Entry.Variable._adjustSingleViewBox` — a white pill with the name on it and
-   * a coloured box holding the value, 24 units tall, hanging 14 above the point
-   * the work stores as the variable's position.
-   */
-  /**
-   * `updateView` — 오브젝트에 딸린 변수는 상자에 `오브젝트명:변수명` 으로 선다.
-   * 이름이 겹치는 변수가 여러 오브젝트에 있을 때 어느 것인지 알려 주는 자리다.
-   */
+  // Prefix local monitor names with the owning object to distinguish duplicate variable names.
   private monitorName(variable: Variable): string {
     if (!variable.objectId) {
       return variable.name;
@@ -619,8 +537,7 @@ export class Overlay {
     color: string,
   ): void {
     view.root.position.set(x, y);
-    // Every monitor is drawn on every frame, and rebuilding a box that has not
-    // changed costs a text measurement and a fresh geometry each time.
+    // Rebuild monitor geometry only when changed to avoid measuring text every frame.
     const shown = `${name}\u0000${text}\u0000${color}`;
     if (view.shown === shown) {
       return;
@@ -630,8 +547,7 @@ export class Overlay {
     view.value.text = text;
     const nameWidth = view.label.width;
     const valueWidth = view.value.width;
-    // `_adjustSingleViewBox` — 보통 변수 상자는 이름과 값이 차지하는 만큼이다.
-    // 최소 너비(90)는 슬라이더 달린 상자에만 있다.
+    // Ordinary variable boxes fit their content; only slider boxes have a minimum width of 90.
     view.frame
       .clear()
       .roundRect(0, -14, nameWidth + valueWidth + 35, 24, 4)
@@ -644,11 +560,6 @@ export class Overlay {
     view.value.position.set(nameWidth + 21, VALUE_Y);
   }
 
-  /**
-   * `Entry.SlideVariable.updateView` — the same pill on a box 42 tall, with a
-   * grey run under it and a knob sitting where the value falls between the
-   * variable's own smallest and largest.
-   */
   private drawSlideMonitor(
     view: MonitorView,
     variable: Variable,
@@ -663,7 +574,7 @@ export class Overlay {
       view.root.addChild(bar, knob);
       view.slider = { bar, knob };
     }
-    // The knob moves with the value even when nothing else about the box did.
+    // Update the slider knob even when the rest of the box is unchanged.
     view.slideRun = Overlay.slideRun(view);
     view.slider.knob.position.set(Overlay.slideKnobX(variable, view.slideRun), 9);
     if (view.shown === shown) {
@@ -690,8 +601,7 @@ export class Overlay {
       .clear()
       .roundRect(SLIDE_BAR_X, SLIDE_BAR_Y, run + 4, SLIDE_BAR_HEIGHT, SLIDE_BAR_RADIUS)
       .fill({ color: SLIDE_BAR_COLOR });
-    // Entry draws the knob from a 9x20 image; the same shape drawn here needs no
-    // asset to fetch. The two lines down its middle are part of that picture.
+    // Draw Entry's knob and grip lines directly to avoid another image asset.
     const knobLeft = -SLIDE_KNOB_WIDTH / 2;
     view.slider.knob
       .clear()
@@ -704,23 +614,17 @@ export class Overlay {
     view.slider.knob.position.set(Overlay.slideKnobX(variable, run), 9);
   }
 
-  /** `maxWidth` — how far the knob travels, from the name and value widths. */
   private static slideRun(view: MonitorView): number {
     return Math.max(view.label.width + view.value.width + 26, MONITOR_MIN_WIDTH) - 16;
   }
 
-  /** `getSlidePosition` — where the knob sits for the value the variable holds. */
   private static slideKnobX(variable: Variable, run: number): number {
     const span = Math.abs(variable.maxValue - variable.minValue);
     const ratio = span === 0 ? 0 : Math.abs(Number(variable.value) - variable.minValue) / span;
     return run * ratio + SLIDE_BAR_X;
   }
 
-  /**
-   * `Entry.ListVariable.updateView` — a titled box of numbered rows, each 20 tall
-   * with the value on a coloured strip. The box is `width + 7` by `height + 22`,
-   * so the size the work stores is the room the rows get, not the whole frame.
-   */
+  // Saved list dimensions describe row space; the full frame adds 7 in width and 22 in height.
   private drawListMonitor(
     view: MonitorView,
     variable: Variable,
@@ -737,7 +641,6 @@ export class Overlay {
     const stripWidth = width - 2 * MONITOR_INSET - (overflow ? 30 : 20) - 6 + 14;
     const run = this.barRun(variable);
 
-    // The frame is geometry, so it is rebuilt only when its shape moved.
     const shown = `${variable.name}\u0000${width}\u0000${height}\u0000${first}\u0000${run ? run.room : -1}`;
     if (view.shown !== shown) {
       view.shown = shown;
@@ -752,7 +655,6 @@ export class Overlay {
           .roundRect(width - 9, run.top + (run.span * first) / run.room, 6, LIST_BAR_HEIGHT, 3)
           .fill({ color: MONITOR_BORDER });
       }
-      // 오른쪽 아래 모서리의 크기 조절 손잡이 — 엔트리 그림과 같은 삼각형이다.
       const handleX = width - LIST_HANDLE_X;
       const handleY = height + LIST_HANDLE_Y;
       view.frame
@@ -774,19 +676,13 @@ export class Overlay {
     for (let seat = 0; seat < seats; seat += 1) {
       this.drawRow(view, seat, first + seat, String(rows[first + seat]!.data ?? ''), stripWidth);
     }
-    // Rows the list outgrew stay built and go out of sight; a list that grows
-    // again wants them back.
+    // Hide unused rows instead of deleting them so growing lists can reuse them.
     for (let seat = seats; seat < view.rows.length; seat += 1) {
       view.rows[seat]!.root.visible = false;
     }
   }
 
-  /**
-   * One row of a list box, built the first time that seat is used and rewritten
-   * after that. Building a `Text` measures the string and bakes a texture, and
-   * every monitor is drawn on every frame — a list that rebuilt its rows each
-   * time would do that work sixty times a second for nothing.
-   */
+  // Reuse row text to avoid measuring and baking textures on every frame.
   private drawRow(
     view: MonitorView,
     seat: number,
@@ -796,7 +692,6 @@ export class Overlay {
   ): void {
     let row = view.rows[seat];
     if (!row) {
-      // Both texts sit on the middle of the coloured strip the row is drawn on.
       const middle = STRIP_TOP + STRIP_HEIGHT / 2;
       const root = new Container();
       const index = Overlay.text(MONITOR_FONT, '#000000');
@@ -828,7 +723,6 @@ export class Overlay {
     row.value.text = Overlay.fitText(row.value, text, stripWidth - 12);
   }
 
-  /** First row shown; `Entry.ListVariable` calls this its scroll position. */
   scrollOf(variable: Variable): number {
     return this.scrolled.get(variable) ?? 0;
   }
@@ -839,11 +733,6 @@ export class Overlay {
     this.scrolled.set(variable, Math.max(0, Math.min(last, Math.round(row))));
   }
 
-  /**
-   * The resize handle under a stage point, if there is one. Entry hands the
-   * handle to its drag helper; pointers come through one path here, so the hit
-   * test lives beside the drawing.
-   */
   listHandleAt(x: number, y: number): Variable | null {
     for (const [variable, view] of this.monitors) {
       if (!variable.isList || !variable.visible || !view.root.visible) {
@@ -858,14 +747,7 @@ export class Overlay {
     return null;
   }
 
-  /**
-   * The list box under a stage point, if there is one — in the overlay's own
-   * space, where y counts downwards. `Entry.Variable` hands its view to a drag
-   * helper; here pointers come through one path, so the hit test lives here and
-   * the dragging is done where that path is.
-   *
-   * The rows and the bar beside them both scroll; the title strip does not.
-   */
+  // Scroll list rows and the scrollbar, but leave the title strip fixed.
   listAt(x: number, y: number): { variable: Variable; rowsPerPixel: number } | null {
     for (const [variable, view] of this.monitors) {
       if (!variable.isList || !variable.visible || !view.root.visible) {
@@ -880,7 +762,7 @@ export class Overlay {
         continue;
       }
       const run = this.barRun(variable);
-      // On the bar the list follows the run; on the rows it follows the finger.
+      // Scrollbar dragging follows the track; row dragging follows the pointer.
       const onBar = run !== null && x - left >= (variable.width || 100) - 12;
       return {
         variable,
@@ -890,12 +772,6 @@ export class Overlay {
     return null;
   }
 
-  /**
-   * The slide variable under a stage point, if there is one — the overlay's own
-   * space again, y counting downwards. Entry hands the run and the knob to its
-   * drag helper; pointers come through one path here, so the hit test lives
-   * beside the drawing and the dragging is done where that path is.
-   */
   sliderAt(x: number, y: number): Variable | null {
     for (const [variable, view] of this.monitors) {
       if (!variable.isSlide || !variable.visible || !view.root.visible || !view.slider) {
@@ -907,7 +783,7 @@ export class Overlay {
       if (x < left || x > left + width || y < top || y > top + SLIDE_HEIGHT) {
         continue;
       }
-      // The pill above the run keeps working as a box to look at, not to drag.
+      // Keep the variable pill above the slider read-only for dragging.
       if (y - view.root.y < SLIDE_BAR_Y - 6) {
         continue;
       }
@@ -916,12 +792,7 @@ export class Overlay {
     return null;
   }
 
-  /**
-   * `setSlideCommandX` then `updateSlideValueByView` — the knob is put where the
-   * pointer is along the run, and the value follows from how far along it
-   * landed. `x` is a stage x; the knob travels from 10 to `maxWidth + 10` inside
-   * the box, which is where entry reads the ratio from.
-   */
+  // Match Entry's slider ratio over the local range from 10 to maxWidth + 10.
   dragSlider(variable: Variable, x: number): void {
     const view = this.monitors.get(variable);
     if (!view || !view.slider) {
@@ -934,18 +805,14 @@ export class Overlay {
     const max = Number(variable.maxValue);
     let value = parseFloat((min + Math.abs(max - min) * ratio).toFixed(2));
     value = Math.min(Math.max(value, min), max);
-    // Entry only keeps the decimals when the ends themselves have some.
+    // Entry retains decimals only when the slider bounds contain them.
     if (Number.isInteger(min) && Number.isInteger(max)) {
       value = Math.round(value);
     }
     variable.setValue(value);
   }
 
-  /**
-   * The run the scroll bar travels, from just under the title to the bottom of
-   * the box. One place, so the bar the eye sees and the bar the pointer grabs
-   * cannot drift apart — at the last row it has to sit at the end of the run.
-   */
+  // Share scrollbar geometry between drawing and hit tests so the thumb cannot drift.
   private barRun(variable: Variable): { top: number; span: number; room: number } | null {
     const height = variable.height || 120;
     const visible = Math.floor((height - 15) / LIST_ROW_HEIGHT);
@@ -953,15 +820,14 @@ export class Overlay {
     if (room <= 0) {
       return null;
     }
-    // The bar runs beside the rows, not beside the box: at the first row it lines
-    // up with the first strip, at the last row with the last one.
+    // Align the scrollbar track with the rows rather than the full box.
     const lastStripBottom =
       (visible - 1) * LIST_ROW_HEIGHT + LIST_TITLE_HEIGHT + STRIP_TOP + STRIP_HEIGHT;
     const bottom = lastStripBottom - LIST_BAR_HEIGHT;
     return { top: LIST_BAR_TOP, span: Math.max(1, bottom - LIST_BAR_TOP), room };
   }
 
-  /** `updateView` shortens a row that does not fit and marks it with `..`. */
+  // Match Entry's clipped row text ending with two dots.
   private static fitText(view: Text, text: string, room: number): string {
     view.text = text;
     if (view.width <= room) {
@@ -975,7 +841,7 @@ export class Overlay {
     return cut;
   }
 
-  /** `Entry.Variable.updateView` — integers show raw, decimals get two places. */
+  // Entry shows integers unchanged and rounds other numbers to two decimals.
   private static formatValue(value: string | number | boolean): string {
     const text = String(value);
     if (text !== '' && !isNaN(Number(text))) {
@@ -987,7 +853,7 @@ export class Overlay {
     return text;
   }
 
-  /** entry shows an object's variable box only in the scene its object is in. */
+  // Show local monitors only in their owner's scene.
   private inCurrentScene(variable: Variable): boolean {
     if (!variable.objectId) return true;
     const scene = this.ownerScene(variable.objectId);
@@ -1001,7 +867,6 @@ export class Overlay {
     }
     for (const variable of this.variables) {
       if (variable.kind === 'answer' || variable.kind === 'timer') {
-        // Both have a built-in monitor of their own.
         continue;
       }
       let view = this.monitors.get(variable);
@@ -1035,19 +900,12 @@ export class Overlay {
     this.flushBuiltin();
   }
 
-  /**
-   * `Variable.generateView` — a work usually stores where its box sits, and
-   * entry only lays one out itself when both numbers are missing. Zero counts as
-   * missing there, so it does here too.
-   */
+  // Entry treats zero coordinates as missing and lays those monitors out automatically.
   private homeOf(variable: Variable): { x: number; y: number } {
     if (variable.x && variable.y) {
       return { x: variable.x, y: variable.y };
     }
-    // `generateView` counts value boxes and list boxes apart, and stacks each
-    // kind down a column before starting the next one. The index is the box's
-    // own place among its kind — reading it off the whole list instead put a
-    // work's later boxes below the stage, where nothing could be seen.
+    // Count variables and lists separately so automatic positions stay within their own columns.
     const family = this.variables.filter((item) => item.isList === variable.isList);
     const index = Math.max(0, family.indexOf(variable));
     if (variable.isList) {
@@ -1060,10 +918,7 @@ export class Overlay {
     return { x: 10 - 240 + column * 80, y: index * 24 + 20 - 135 - column * 264 };
   }
 
-  /**
-   * The answer and the timer are variables too — the work stores where their
-   * boxes sit, and entry falls back to a place of its own for each.
-   */
+  // Preserve saved timer and answer positions, with Entry's defaults when absent.
   private flushBuiltin(): void {
     const answer = this.variables.find((variable) => variable.kind === 'answer');
     const timer = this.variables.find((variable) => variable.kind === 'timer');

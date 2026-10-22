@@ -1,24 +1,10 @@
-/**
- * @fileoverview 선분 하나를 사각형 네 점으로 펴는 계산입니다.
- *
- * PIXI 를 쓰지 않으므로 화면 없이도 확인할 수 있습니다. `segments.ts` 가 이 결과를
- * 그대로 메시 버퍼에 담습니다.
- */
 import type { Stroke } from '../runtime/model.ts';
 
-/** Whether one stroke is a plain line from one point to one other. */
 export function isSegment(piece: Stroke): boolean {
   return !piece.fill && piece.points.length === 4;
 }
 
-/**
- * Writes `pieces[from…to)` into `positions` as four corners each, and answers
- * how many were written. The stage counts y upwards and PIXI downwards, so the
- * corners come out flipped, the way the path the mesh replaces is drawn.
- *
- * Ends are square and there are no corners to join, which is what a two-point
- * stroke with entry's own pen settings draws.
- */
+// Flip y for PIXI and use butt caps only on unjoined two-point strokes.
 export function writeQuads(
   pieces: Stroke[],
   from: number,
@@ -39,7 +25,7 @@ export function writeQuads(
     const y1 = -points[3]!;
     const dx = x1 - x0;
     const dy = y1 - y0;
-    // A segment of no length has no direction to stand across; it draws nothing.
+    // A zero-length segment has no direction and draws nothing.
     const length = Math.sqrt(dx * dx + dy * dy) || 1;
     const nx = (-dy / length) * half;
     const ny = (dx / length) * half;
@@ -57,7 +43,7 @@ export function writeQuads(
   return count;
 }
 
-/** Two triangles per segment, in the order `writeQuads` lays the corners down. */
+// Emit two triangles per segment in corner order.
 export function quadIndices(room: number): Uint32Array {
   const indices = new Uint32Array(room * 6);
   for (let at = 0; at < room; at += 1) {

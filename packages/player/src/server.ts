@@ -1,20 +1,3 @@
-/**
- * `tess run` 명령어가 띄우는 경량 정적 서버 설정입니다.
- *
- * 서버가 제공하는 주요 경로는 다음과 같습니다.
- * - `/` : 실행 페이지
- * - `/project.json` : 컴파일된 작품 데이터 (리소스 링크는 서버 제공 주소 사용)
- * - `/assets/...` : 디스크에 있는 원래 형태의 모양·소리 파일
- * - `/temp/...` : 엔트리 실행기가 기대하는 경로로 제공되는 동일한 리소스 파일
- * - `/<이름>.ent` : 다운로드용 묶음 파일 (요청 시점에 최초 생성)
- * - `/lib/...` : 로컬에 설치된 `@entrylabs/entry` 모듈 (존재 시)
- * - `/debug-ui.js` : 디버그 패널 UI 모듈
- * - `/arrow/...` : 디버그 패널 UI가 사용하는 arrow-js
- * - `/api/expansionBlock/tts/read.mp3` : TTS 프록시 (playentry.org로 요청 전달)
- *
- * `run` 모드는 사전에 전체 작품을 묶지 않고 리소스는 있는 그대로 서비스하며,
- * `.ent` 파일은 사용자가 다운로드 버튼을 누를 때에만 실시간으로 압축하여 생성합니다.
- */
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -27,18 +10,6 @@ import { assetRoutes, withServedAssets } from './asset-routes.ts';
 import { makeEntryBundle } from '@tess/compiler';
 import type { AssetFile, EntryProject, SourceMap } from '@tess/compiler';
 
-/** 
- * `serveProject` 함수가 서버를 띄울 때 사용하는 옵션입니다. 
- *
- * @example
- * ```typescript
- * const options: ServeOptions = {
- *   project: entryProject,
- *   name: 'My Project',
- *   port: 2013
- * };
- * ```
- */
 export interface ServeOptions {
   project: EntryProject;
   assets?: AssetFile[];
@@ -51,16 +22,6 @@ export interface ServeOptions {
   boost?: boolean;
 }
 
-/** 
- * 현재 실행 중인 서버 객체이며, CLI에서 서버를 제어하기 위한 핸들러를 제공합니다. 
- *
- * @example
- * ```typescript
- * const server = await serveProject(options);
- * console.log(`서버가 ${server.url} 에서 실행 중입니다.`);
- * await server.close();
- * ```
- */
 export interface RunningServer {
   url: string;
   runtime: string;
@@ -72,13 +33,7 @@ export interface RunningServer {
   }): void;
 }
 
-// entryjs 의 tts 읽어주기(block_ai_utilize_tts.js)는 `${Entry.baseUrl}/api/expansionBlock/tts/read.mp3?...`
-// 로 브라우저에서 직접 요청한다. Entry.baseUrl 기본값은 location.origin(우리 서버)이라
-// 이 경로가 여기로 들어오는데, playentry.org 로 바로 요청하게 바꾸면(baseUrl 을 그렇게
-// 정하면) playentry.org 가 CORS 허용 헤더를 안 줘서 브라우저가 그냥 막아 버린다(서버
-// 쪽 요청은 CORS 대상이 아니다). 그래서 이 서버가 대신 playentry.org 로 요청해서
-// 그 응답(mp3)을 그대로 돌려준다 — 브라우저 입장에서는 항상 같은 origin(우리 서버)
-// 이라 CORS 문제가 없다.
+// Proxy TTS through the local server because Entry's service does not allow browser CORS.
 const TTS_PROXY_PATH = '/api/expansionBlock/tts/read.mp3';
 
 const MIME: Record<string, string> = {
@@ -94,47 +49,19 @@ const MIME: Record<string, string> = {
   '.ent': 'application/octet-stream',
 };
 
-// jsDelivr 는 npm 패키지 전체 크기가 150MB 를 넘으면 그 패키지의 어떤 파일이든 403 으로
-// 거부한다(`Package size exceeded the configured limit of 150 MB.`) — @entrylabs/entry 는
-// 그 한도를 넘어서 jsDelivr 로는 아예 못 받아 온다(entry.min.js 조차 403). 같은 파일을
-// unpkg 는 문제없이 준다(같은 npm 레지스트리에서 직접 서빙하며 패키지 전체 크기 제한이 없다).
+// Use unpkg because Entry's package exceeds jsDelivr's package size limit.
 const CDN = 'https://unpkg.com/@entrylabs/entry@4.0.22';
 
 const DEBUG_UI_FILE = fileURLToPath(new URL('./debug-ui.ts', import.meta.url));
 
-/**
- * 브라우저로 내보낼 디버그 패널 소스입니다. tessvm 서버도 같은 파일을 같은 주소로
- * 내보내므로 두 실행기가 똑같은 패널을 씁니다.
- *
- * The debug panel is authored in TypeScript but served to a browser, so the
- * annotations are erased on the way out. Stripping replaces types with spaces,
- * keeping every line and column aligned with the source.
- */
+// Serve the same type-stripped debug UI module to both runtimes.
 export function debugUiSource() {
   return stripTypes(fs.readFileSync(DEBUG_UI_FILE, 'utf-8'));
 }
 
-/** 
- * `run` 명령어가 기본적으로 사용하는 포트 번호입니다. 
- *
- * @example
- * ```typescript
- * const port = options.port ?? DEFAULT_PORT;
- * ```
- */
 export const DEFAULT_PORT = 2013;
 
-// preact 는 dist/preact.mjs 한 파일이면 된다 — 다른 파일을 부르지 않는 ESM 이다.
-/** 
- * 디버그 패널이 사용하는 preact 패키지의 `dist` 폴더 경로를 찾습니다. 찾지 못하면 `null`을 반환합니다. 
- *
- * @returns preact의 dist 폴더 절대 경로 또는 `null`
- *
- * @example
- * ```typescript
- * const preactDir = findPreactDir();
- * ```
- */
+// Preact's standalone ESM file needs no additional module routes.
 export function findPreactDir() {
   try {
     return path.dirname(fileURLToPath(import.meta.resolve('preact')));
@@ -143,17 +70,6 @@ export function findPreactDir() {
   }
 }
 
-/** 
- * 프로젝트에 `entryjs`가 설치되어 있으면 해당 폴더 경로를 반환합니다.
- *
- * @param from 탐색을 시작할 경로 (기본값: 현재 작업 디렉터리)
- * @returns `@entrylabs/entry` 폴더 절대 경로 또는 `null`
- *
- * @example
- * ```typescript
- * const runtimeDir = findLocalRuntime('/path/to/project');
- * ```
- */
 export function findLocalRuntime(from = process.cwd()) {
   let dir = path.resolve(from);
   for (;;) {
@@ -165,20 +81,6 @@ export function findLocalRuntime(from = process.cwd()) {
   }
 }
 
-/**
- * 작품을 브라우저에서 실행할 수 있는 서버를 띄웁니다.
- *
- * 리소스는 디스크에 있는 파일을 그대로 내보내며(작품을 미리 묶지 않음), `.ent` 파일은 사용자가 다운로드를 요청할 때만 생성합니다.
- *
- * @param options 서버 실행 옵션
- * @returns 실행 중인 서버 제어 객체를 반환하는 프로미스
- *
- * @example
- * ```typescript
- * const server = await serveProject({ project, name: '테스트 작품' });
- * server.update({ project: newProject });
- * ```
- */
 export function serveProject({
   project, assets = [], assetDirs = [], name, port = DEFAULT_PORT, cwd = process.cwd(),
   reload = true, sourceMap = {}, boost = false,
@@ -186,20 +88,17 @@ export function serveProject({
   const localRuntime = findLocalRuntime(cwd);
   const preactDir = findPreactDir();
   const base = localRuntime ? '/lib' : CDN;
-  // 엔트리 기본 그림(확인 단추 · 좌표계 …)을 가져올 곳. 부스트 모드는 WebGL 이라
-  // 다른 origin 의 그림을 텍스처로 못 올리므로(entryjs 가 crossOrigin 없이 Image 를
-  // 만든다) 늘 우리 서버를 거치게 하고, 파일이 없으면 아래에서 CDN 으로 대신 받아 준다.
+  // Serve default images from this origin because Entry does not set crossOrigin for WebGL textures.
   const mediaBase = localRuntime || boost ? '/lib' : CDN;
   const entName = `${safeName(name)}.ent`;
 
   let currentProject = project;
   let currentAssets = assets;
   let currentSourceMap = sourceMap;
-  // 주소 -> 실제 파일. 엔트리의 temp/… 주소와 디스크 그대로의 주소를 함께 담는다.
   let assetFiles = new Map<string, string>();
-  // fileurl 을 서빙 주소로 바꾼 사본. 내려받는 .ent 는 원본 쪽으로 만든다.
+  // Rewrite a copy for serving; build downloaded archives from the original project.
   let servedProject = project;
-  // .ent 는 실제로 요청받기 전까지 만들지 않는다.
+  // Build the archive only when requested.
   let cachedBundle: Promise<Buffer> | null = null;
   const reloadClients = new Set<http.ServerResponse>();
 
@@ -242,7 +141,6 @@ export function serveProject({
     if (url === '/project.json') return send(response, 200, '.json', JSON.stringify(servedProject));
     if (url === '/sourcemap.json') return send(response, 200, '.json', JSON.stringify(currentSourceMap));
     if (url === `/${entName}`) {
-      // 여기서 처음으로 작품을 묶는다 — 내려받기를 누르지 않으면 묶을 일이 없다.
       cachedBundle ??= makeEntryBundle(currentProject, currentAssets);
       return cachedBundle.then(
         (bytes: Buffer) => send(response, 200, '.ent', bytes),
@@ -260,7 +158,6 @@ export function serveProject({
 
     if (url === DEBUG_UI_PATH) return send(response, 200, '.js', debugUiSource());
 
-    // 디버그 패널 UI 가 import 하는 preact
     if (preactDir && url.startsWith(PREACT_PATH)) {
       const target = path.join(preactDir, url.slice(PREACT_PATH.length));
       if (target.startsWith(preactDir) && fs.existsSync(target)) return sendFile(response, target);
@@ -270,9 +167,7 @@ export function serveProject({
   });
 
   return new Promise<RunningServer>((resolve, reject) => {
-    // The default port is a fixed one so the debugger keeps the same origin
-    // between runs (devtools state, bookmarks). Fall back to any free port when
-    // it is taken rather than refusing to start.
+    // Prefer a fixed port to preserve debugger state, then fall back to a free port.
     let retried = port === DEFAULT_PORT;
     server.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'EADDRINUSE' && retried) {
@@ -288,17 +183,13 @@ export function serveProject({
       resolve({
         url: `http://127.0.0.1:${actual}/`,
         runtime: localRuntime ? '설치된 @entrylabs/entry' : `CDN ${CDN.replace(/^https:\/\//, '')}`,
-        // /__reload 의 SSE 연결은 브라우저가 열려 있는 한 계속 붙어 있어서,
-        // 그냥 server.close() 만 부르면 콜백이 영영 안 불려 Ctrl+C 로도 못 끝난다
-        // (Node 는 켜져 있는 커넥션이 다 끝나야 close 콜백을 부른다). 그래서
-        // SSE 응답을 먼저 끝내고, 혹시 남은 커넥션까지 강제로 닫아 준다.
+        // Close SSE responses and remaining connections so shutdown cannot hang.
         close: () => {
           for (const client of reloadClients) client.end();
           reloadClients.clear();
           server.closeAllConnections?.();
           return new Promise<void>((done) => { server.close(() => done()); });
         },
-        /** 다시 컴파일한 작품으로 갈아 끼우고, 열려 있는 브라우저를 새로고침한다 */
         update({ project: nextProject, assets: nextAssets = [], sourceMap: nextSourceMap = {} }) {
           currentProject = nextProject;
           currentAssets = nextAssets;
@@ -311,7 +202,6 @@ export function serveProject({
   });
 }
 
-/** 브라우저에서 실행하다 난 panic 을 받아서 이 서버를 띄운 터미널에 그대로 찍는다 */
 function receiveLog(request: http.IncomingMessage, response: http.ServerResponse) {
   let body = '';
   request.on('data', (chunk: Buffer) => {
@@ -325,13 +215,12 @@ function receiveLog(request: http.IncomingMessage, response: http.ServerResponse
       console.error(`\n[${when}] 엔트리 실행 중 ${kind ?? '오류'}: ${message ?? '(메시지 없음)'}`);
       if (stack) console.error(stack);
     } catch {
-      // 로그 본문을 못 읽어도 서버는 계속 돈다
+      // Keep the server running if a browser log body cannot be read.
     }
     response.writeHead(204).end();
   });
 }
 
-/** tts 읽어주기 요청을 playentry.org 로 대신 보내고 mp3 응답을 그대로 돌려준다 (TTS_PROXY_PATH 주석 참고) */
 async function proxyTts(request: http.IncomingMessage, response: http.ServerResponse) {
   const target = `https://playentry.org${request.url}`;
   try {
@@ -347,17 +236,10 @@ async function proxyTts(request: http.IncomingMessage, response: http.ServerResp
   }
 }
 
-/**
- * 실행기 파일 하나를 CDN 에서 대신 받아 우리 origin 으로 내보낸다.
- *
- * 부스트 모드는 WebGL 로 그리는데, entryjs 는 기본 그림을 `crossOrigin` 없이
- * `new Image()` 로 받아서(GEHelper.newSpriteWithCallback) CDN 에서 온 그림이면
- * 캔버스가 오염된 것으로 취급돼 `texImage2D` 가 SecurityError 로 막힌다 — 확인
- * 단추 같은 기본 그림이 통째로 안 보이고 그 프레임 렌더가 끊긴다.
- */
+// Proxy images from the same origin so Entry's WebGL textures are not tainted.
 async function proxyRuntimeFile(url: string, response: http.ServerResponse) {
   const rest = url.slice('/lib/'.length);
-  // 남의 경로로 새어 나가지 않게 한다 — 이 프록시는 그 패키지 안만 내보낸다
+  // Restrict proxy paths to the Entry package.
   if (rest.split('/').includes('..')) return send(response, 404, '.html', '<h1>404</h1>');
   try {
     const upstream = await fetch(`${CDN}/${rest}`);
@@ -372,8 +254,7 @@ async function proxyRuntimeFile(url: string, response: http.ServerResponse) {
 function send(response: http.ServerResponse, status: number, ext: string, body: string | Buffer) {
   response.writeHead(status, {
     'content-type': MIME[ext] ?? 'application/octet-stream',
-    // 이 서버는 고칠 때마다 다시 띄우는 개발용이다. 브라우저가 한 번 받아 둔
-    // project.json 이나 debug-ui.js 를 계속 쓰면, 고친 게 새로고침해도 안 나온다.
+    // Disable caching so project and debug UI edits appear after reload.
     'cache-control': 'no-store',
   });
   response.end(body);

@@ -1,6 +1,3 @@
-/**
- * Tess 코드가 엔트리 프로젝트로 정상적으로 컴파일되는지 검사합니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,12 +9,6 @@ import { makeEntryBundle } from '@tess/compiler';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/**
- * 단일 문장을 오브젝트 내부에 포함하여 컴파일하고, 해당 스크립트 결과를 반환합니다.
- *
- * @example
- * const { thread } = compileScript('forward 10');
- */
 function compileScript(body: any, { before = '', kind = 'object', costumes = '' } = {}) {
   const source = `${before}
 scene "s":
@@ -34,12 +25,6 @@ end`;
   return { project: result.project, thread: JSON.parse(object!.script)[0], result };
 }
 
-/**
- * 블록 트리를 가독성이 높은 S-표현식 형태의 문자열로 변환합니다. 주로 블록의 타입(type)과 리터럴 정보를 표현합니다.
- *
- * @example
- * const str = sketch(block);
- */
 function sketch(block: any) {
   if (block === null || block === undefined) return '_';
   if (typeof block !== 'object') return String(block);
@@ -48,9 +33,6 @@ function sketch(block: any) {
   return `${block.type}(${[...params, ...statements].join(' ')})`;
 }
 
-/**
- * 기본 블록 및 스크립트 매핑 테스트
- */
 test('이벤트 블록으로 시작하는 스크립트를 만든다', () => {
   const { thread } = compileScript('forward 10');
   assert.equal(thread[0].type, 'when_run_button_click');
@@ -73,12 +55,6 @@ test('x = / x += 를 서로 다른 블록으로 바꾼다', () => {
 });
 
 test('costume / costume_number 로 자기·다른 오브젝트의 모양 이름·번호를 읽는다', () => {
-  /**
-   * coordinate_object 속성을 통해 자기 자신 또는 다른 오브젝트의 모양 이름(picture_name)과 번호(picture_index)를 읽어옵니다.
-   *
-   * @example
-   * const name = costume("다른");
-   */
   const source = `
 scene "s":
   object "다른":
@@ -149,10 +125,6 @@ test('stop 계열을 stop_object 의 대상으로 구분한다', () => {
     ['thisThread', 'otherThread', 'thisOnly', 'other_objects', 'all']);
 });
 
-/**
- * 자료형(변수, 리스트, 문자열 등) 및 인덱스 처리 컴파일 테스트
- * 리스트 및 문자열 인덱스는 엔트리 시스템과 동일하게 1부터 시작합니다.
- */
 test('리스트 인덱스를 엔트리와 같은 1부터로 그대로 옮긴다', () => {
   const { thread } = compileScript(
     '기록[1] = 9\nin 기록 insert 5 at 2\nremove 기록[1]\nvar a = 기록[1]',
@@ -194,9 +166,6 @@ test('리스트 초기값이 array 로 들어간다', () => {
   assert.deepEqual(list!.array, [{ data: 1 }, { data: '둘' }, { data: 3 }]);
 });
 
-/**
- * 신호(Signal) 및 장면(Scene) 처리 테스트
- */
 test('범위를 준 변수는 슬라이드 변수로 나간다', () => {
   const result = compileProject(`
 var depth = 2 from 0 to 4
@@ -268,9 +237,6 @@ end`;
   assert.equal(thread[1].params[0], project!.scenes[1].id);
 });
 
-/**
- * 함수 정의 및 호출 처리 테스트
- */
 test('return 이 없는 함수는 일반 함수, 있으면 값 함수가 된다', () => {
   const source = `function 알림(내용):
   say 내용
@@ -295,7 +261,7 @@ end`;
   assert.equal(JSON.parse(normal.content)[0][0].type, 'function_create');
   assert.equal(JSON.parse(value.content)[0][0].type, 'function_create_value');
 
-  // 호출 블록: 일반 함수는 끝에 아이콘 자리가 하나 더 붙는다
+  // Void calls include an extra icon slot.
   const thread = JSON.parse(project!.objects[0].script)[0];
   assert.equal(thread[1].type, `func_${normal.id}`);
   assert.equal(thread[1].params.length, 2);
@@ -322,7 +288,6 @@ end`;
   assert.equal(create.params[0].params[0], '더하기');
   assert.match(first.params[0].type, /^stringParam_/);
   assert.match(second.params[0].type, /^stringParam_/);
-  // 본문(반환식)에서 같은 타입을 참조한다
   const body = JSON.stringify(create.params[3]);
   assert.ok(body.includes(first.params[0].type));
   assert.ok(body.includes(second.params[0].type));
@@ -346,7 +311,7 @@ end`;
   assert.equal(fn.localVariables.length, 1);
   assert.equal(fn.localVariables[0].name, '총합');
   assert.equal(fn.localVariables[0].value, 0);
-  // 엔트리는 지역 변수를 이름이 아니라 `함수id_해시` 로 가리킨다
+  // Entry identifies function locals by generated IDs rather than their names.
   assert.match(fn.localVariables[0].id, new RegExp(`^${fn.id}_[a-z0-9]{4}$`));
   assert.equal(fn.useLocalVariables, true);
   assert.ok(fn.content.includes(`["${fn.localVariables[0].id}"`));
@@ -354,9 +319,6 @@ end`;
   assert.ok(fn.content.includes('get_func_variable'));
 });
 
-/**
- * 오브젝트 및 글상자(TextBox) 생성 및 속성 변환 테스트
- */
 test('오브젝트 속성이 entity 로 들어간다', () => {
   const source = `scene "s":
   object "o":
@@ -410,10 +372,6 @@ end`;
   assert.equal(object.entity.fontSize, 24);
 });
 
-/**
- * 글상자 크기(size) 명시적 지정 테스트
- * 컴파일러는 글자 수로 크기를 추정하므로, 명시된 크기 값이 우선 적용되는지 확인합니다.
- */
 test('글상자의 size 가로 세로 가 entity 크기가 된다', () => {
   const source = `scene "s":
   text "t":
@@ -442,9 +400,6 @@ end`;
   assert.equal(entity.height, 22);
 });
 
-/**
- * 크기(size) 배율과 명시적 크기(가로/세로) 설정의 독립적 동작을 확인합니다.
- */
 test('size = 배율과 size 가로 세로 는 서로 다른 것을 정한다', () => {
   const source = `scene "s":
   text "t":
@@ -461,16 +416,6 @@ end`;
   assert.equal(entity.scaleY, 1.5);
 });
 
-/**
- * 복잡한 수식 처리 및 연산 우선순위 테스트
- * 괄호, 좌결합 등의 연산자 우선순위가 올바른 엔트리 블록 트리로 변환되는지 실제 계산을 통해 검증합니다.
- */
-/**
- * 엔트리 계산 블록 트리를 실행기처럼 실제 연산하여 결과값을 반환합니다.
- *
- * @example
- * const result = runCalc(block);
- */
 function runCalc(block: any): number {
   if (block === null || typeof block !== 'object') return Number(block);
   const p = block.params ?? [];
@@ -496,7 +441,7 @@ function runCalc(block: any): number {
 const MATH_CASES = [
   ['3 - 2 * (3 + 7 - 2 * 5)', 3],
   ['(2 + 3) * 4', 20],
-  ['10 - 2 - 3', 5],           // 좌결합
+  ['10 - 2 - 3', 5],
   ['2 * 3 + 4 * 5', 26],
   ['100 / 5 / 2', 10],
   ['1 + 2 * 3 - 4 / 2', 5],
@@ -519,13 +464,12 @@ for (const [expr, expected] of MATH_CASES) {
 test('괄호가 블록 중첩으로 그대로 남는다', () => {
   const { thread } = compileScript('var r = 3 - 2 * (3 + 7 - 2 * 5)');
   const value = thread.find((block: any) => block.type === 'set_variable').params[1];
-  // 3 - (2 * ((3 + 7) - (2 * 5)))
   assert.equal(value.type, 'calc_basic');
   assert.equal(value.params[1], 'MINUS');
   assert.equal(value.params[0].params[0], '3');
   const rhs = value.params[2];
   assert.equal(rhs.params[1], 'MULTI');
-  assert.equal(rhs.params[2].params[1], 'MINUS'); // 괄호 안이 통째로 오른쪽에 들어간다
+  assert.equal(rhs.params[2].params[1], 'MINUS');
 });
 
 test('모양·소리를 엔트리 리소스 경로로 만든다', () => {
@@ -564,9 +508,6 @@ end`;
 });
 
 test('force id 로 고정된 id 는 이 오브젝트 소유가 아니어도 costume = 로 그대로 흘려보낸다', () => {
-  /**
-   * force id로 고정된 id는 타 오브젝트의 리소스이더라도 그대로 전달되는지 테스트합니다.
-   */
   const source = `
 scene "s":
   object "다른":
@@ -586,9 +527,6 @@ end`;
   assert.equal(sketch(thread[1]), 'change_to_some_shape(qio1)');
 });
 
-/**
- * 파일 참조(use, useobject, usetext) 컴파일 테스트
- */
 test('use 가 파일을 그 자리에 펼친다', () => {
   const files = {
     '/p/main.tess': `var 점수 = 0
@@ -618,9 +556,6 @@ end`,
   assert.equal(thread[1].type, 'change_variable');
 });
 
-/**
- * 엔트리에 기본 제공되지 않는 기능 및 확장 문법의 컴파일 테스트
- */
 test('키를 뗐을 때 이벤트는 감시 스크립트로 바뀐다', () => {
   const source = `scene "s":
   object "o":
@@ -643,7 +578,7 @@ test('거듭제곱은 제곱·제곱근으로 펼쳐진다', () => {
   const { thread } = compileScript('var a = 3 ** 2\nvar b = 16 ** 0.5\nvar c = 2 ** 3\nvar d = 5 ** 0');
   assert.equal(thread[1].params[1].params[3], 'square');
   assert.equal(thread[2].params[1].params[3], 'root');
-  // 2^3 = (2^1)^2 × 2  — 자릿수만큼만 펼친다
+  // Expand 2^3 as (2^1)^2 * 2 so growth follows the exponent's bit count.
   assert.equal(sketch(thread[3].params[1]), 'calc_basic(calc_operation(number(2) square) MULTI number(2))');
   assert.equal(sketch(thread[4].params[1]), 'number(1)');
 });
@@ -677,7 +612,6 @@ end`, { path: 'x.tess' });
   assert.equal(bad.ok, false);
   assert.match(bad.errors[0].message, /random/);
 
-  // 밑을 한 번만 쓰는 지수는 괜찮다
   const fine = compileProject(`scene "s":
   object "o":
     when start do
@@ -732,11 +666,7 @@ test('엔트리에 없는 오브젝트 · 장면은 에러로 알려 준다', ()
 });
 
 test('되돌린 작품의 지워진 오브젝트 참조는 아이디를 그대로 들고 간다', () => {
-  /**
-   * 엔트리는 오브젝트가 지워져도 그 아이디를 가리키던 블록을 그대로 두고, 실행할 때
-   * 찾다가 맙니다. 되돌린 소스는 그런 자리를 `_missing_object_<아이디>` 로 적고,
-   * 컴파일러는 아이디만 되돌려 놓은 뒤 주의로 알립니다.
-   */
+  // Restore missing object IDs from placeholder names and report a notice.
   const result = compileProject(inObject('go "_missing_object_7o00"'), { path: 'x.tess' });
   assert.equal(result.ok, true);
   assert.equal(result.errors.length, 0);
@@ -747,10 +677,7 @@ test('되돌린 작품의 지워진 오브젝트 참조는 아이디를 그대�
 });
 
 test('없는 모양 · 소리 이름은 주의로 알려 준다', () => {
-  /**
-   * 존재하지 않는 모양이나 소리 이름은 엔트리가 실행할 때 이름으로 찾으므로
-   * 에러도 경고도 아닌 주의로 알려 줍니다.
-   */
+  // Unknown resource names remain runtime lookups and produce notices.
   const cases: Array<[string, RegExp]> = [
     ['play sound "없는소리"', /소리를 이 오브젝트에서 찾지 못했습니다/],
     ['costume = "없는모양"', /모양을 이 오브젝트에서 찾지 못했습니다/],
@@ -768,7 +695,7 @@ test('strict 는 주의를 경고로 올려서 알려 준다', () => {
   const loose = compileProject(source, { path: 'x.tess' });
   const strict = compileProject(source, { path: 'x.tess', strict: true });
 
-  assert.equal(strict.ok, true); // 승격이지 에러가 되는 것은 아니다
+  assert.equal(strict.ok, true);
   assert.deepEqual(strict.notices, []);
   const promoted = strict.warnings.filter(
     (item) => !loose.warnings.some((kept) => kept.message === item.message),
@@ -792,9 +719,6 @@ end`;
   assert.match(result.project!.functions[0]!.content, /stop_object/);
 });
 
-/**
- * 주석 처리 및 엔트리 블록 주석 변환 테스트
- */
 test('문장 위의 주석이 그 블록의 엔트리 주석이 된다', () => {
   const { thread } = compileScript('# 앞으로 간다\nforward 10');
   assert.equal(thread[1].type, 'move_direction');
@@ -848,9 +772,6 @@ end`;
   assert.equal(project!.objects[0].name, '이름');
 });
 
-/**
- * useobject 및 usetext 모듈 스크립트 전개 처리 테스트
- */
 test('useobject 는 불러온 조각을 오브젝트로 감싼다', () => {
   const files = {
     '/p/main.tess': 'scene "무대":\n  useobject "objects/치로.tess"\n  usetext "objects/점수판.tess"\nend',
@@ -894,9 +815,6 @@ test('useobject 로 만든 오브젝트는 파일 이름으로 서로를 가리�
   assert.equal(thread[1].params[0].params[1], enemy.id);
 });
 
-/**
- * 미디어 리소스(이미지, 사운드 등) 선언 및 크기/길이 속성 유지 테스트
- */
 test('크기·길이를 적어 두면 파일이 없어도 알리지 않는다', () => {
   const declared = compileProject(`scene "s":
   object "o":
@@ -918,7 +836,6 @@ end`, { path: 'x.tess' });
   assert.match(bare.warnings[0].message, /찾지 못했습니다/);
 });
 
-// --- scale_x / scale_y 정하기 ----------------------------------------------------------
 test('scale_x = 값 은 컴파일러가 만든 함수를 부른다', () => {
   const { thread, project } = compileScript('scale_x = 50', {
     costumes: 'costume 기본 "a.png" size 100 100',
@@ -927,7 +844,7 @@ test('scale_x = 값 은 컴파일러가 만든 함수를 부른다', () => {
   assert.ok(setter, '가로 비율 정하기 함수가 만들어져야 합니다.');
   assert.equal(thread[1].type, `func_${setter.id}`);
   assert.equal(Number(thread[1].params[0].params[0]), 50);
-  assert.equal(Number(thread[1].params[1].params[0]), 1); // 시작 배율 100%
+  assert.equal(Number(thread[1].params[1].params[0]), 1);
   assert.deepEqual(verifyEntryProject(project!), []);
 });
 
@@ -946,7 +863,6 @@ end`, { path: 'x.tess' });
   assert.match(result.errors[0].message, /함수 안에서 할 수 없습니다/);
 });
 
-// --- 전체 예제 --------------------------------------------------------------------
 const examples = ['examples/all_blocks.tess', 'examples/functions.tess'];
 for (const example of examples) {
   test(`예제 컴파일: ${example}`, () => {
@@ -979,11 +895,6 @@ test('같은 소스는 항상 같은 결과로 컴파일된다', () => {
   assert.equal(JSON.stringify(first), JSON.stringify(second));
 });
 
-// --- 느슨한 실행: 에러가 있어도 만들다 만 작품 받아 가기 -----------------------
-// 컴파일러는 에러를 만나도 그 자리만 빼고 끝까지 가므로(한 번에 에러를 다 보여
-// 주기 위해서다), 만들다 만 작품이 이미 손에 있다. 기본값은 그걸 그대로 돌려주는
-// 느슨한 실행이다 — 큰 작품을 되돌려 놓고 아직 안 고친 부분이 남았을 때 나머지가
-// 제대로 도는지 먼저 실행해 보는 용도다. --strict / options.strict 는 그걸 끈다.
 const LOOSE_SOURCE = `project:
   title "느슨"
 end
@@ -1002,11 +913,11 @@ test('에러가 있어도 만들다 만 작품을 그대로 돌려주고, strict
   assert.equal(strict.project, null);
 
   const loose = compileProject(LOOSE_SOURCE, { path: 'x.tess' });
-  assert.equal(loose.ok, false); // 느슨하게 간다고 에러가 없어지는 건 아니다
+  assert.equal(loose.ok, false); // Loose mode still reports errors.
   assert.deepEqual(loose.errors.map((e) => e.message), strict.errors.map((e) => e.message));
   assert.ok(loose.project);
 
-  // 에러가 난 문장(jump "없는장면")은 빠지고, 그 뒤의 멀쩡한 블록은 그대로 남는다
+  // Keep valid statements after a failed jump.
   const script = JSON.parse(loose.project.objects[0].script);
   assert.deepEqual(script[0].map((block: any) => block.type), ['when_run_button_click', 'move_x']);
 });
@@ -1017,10 +928,7 @@ test('문법 에러는 작품 자체가 안 만들어져서 느슨한 실행으�
   assert.equal(result.project, null);
 });
 
-// --- 함수 머리: 라벨 + 매개변수 이름 (SPEC-ADDENDUM.md 4.6) ------------------------
-// 엔트리 함수 머리는 라벨과 매개변수 칸이 번갈아 나오는 사슬이다. 제자리 자동 이름
-// (a, b, c … z, a1, a2 …)은 라벨 없는 인수를, 그 밖의 이름은 그 이름을 라벨로 단
-// 인수를 뜻한다 — 되돌리기가 읽는 규칙(src/function-params.ts)의 정확한 반대다.
+// Automatic parameter names omit labels; other names become labels before their slots.
 function fieldChain(project: any, index = 0) {
   const chain = [];
   let node = JSON.parse(project.functions[index].content)[0][0].params[0];
@@ -1042,9 +950,6 @@ test('자동 이름 매개변수는 라벨 없이, 이름 붙인 매개변수는
     ['label:스폰', 'param:stringParam', 'label:체력', 'param:stringParam']);
 });
 
-// --- 판단 <-> 값 자동 변환 (SPEC-ADDENDUM.md 4) -----------------------------------
-// 엔트리는 판단 칸과 값 칸이 엄격히 나뉘어 있는데 Tess 에는 타입이 없다. 어긋나는
-// 자리는 엔트리가 실제로 쓰는 블록(참/거짓, `(<판단>의 값)`)으로 이어 준다.
 function firstBlocks(source: string) {
   const { project } = compileProject(`scene "s":\n  object "o":\n${source}\n  end\nend`, { path: 'x.tess' });
   return { project, thread: JSON.parse(project!.objects[0].script)[0] };
@@ -1117,15 +1022,13 @@ end`;
   assert.deepEqual(result.errors, [], result.errors.map((e) => e.message).join('\n'));
   assert.deepEqual(verifyEntryProject(result.project!), []);
 
-  // 머리: 라벨 -> 값 칸 -> 라벨(살았나) -> 판단 칸
   assert.deepEqual(fieldChain(result.project),
     ['label:스폰', 'param:stringParam', 'label:살았나', 'param:booleanParam']);
 
-  // 본문에서는 판단 자리에 그대로 꽂힌다 (== "TRUE" 로 감싸지 않는다)
+  // Keep the boolean parameter directly instead of comparing it with TRUE text.
   const create = JSON.parse(result.project!.functions[0].content)[0][0];
   assert.match(create.statements[0][0].params[0].type, /^booleanParam_/);
 
-  // 호출: 판단 칸에는 판단이 그대로, 리터럴 true 는 참 블록으로 들어간다
   const [, compare, literal] = JSON.parse(result.project!.objects[0].script)[0];
   assert.equal(compare.params[1].type, 'boolean_basic_operator');
   assert.equal(literal.params[1].type, 'True');
@@ -1229,7 +1132,7 @@ function 바꾸기():
 end`;
   const result = compileProject(source, { path: path.join(root, 'test.tess') });
   assert.deepEqual(result.errors, []);
-  // 엔트리는 이 값을 부르는 오브젝트의 모양과 맞춰 보므로, 이름이 그대로 남아야 한다.
+  // Keep the resource name because Entry resolves it on the calling object.
   const [fn] = result.project!.functions;
   assert.match(fn.content, /"점프"/);
   assert.ok(!/get_pictures/.test(fn.content));
@@ -1253,7 +1156,7 @@ end`;
   const script = JSON.parse(project!.objects[0]!.script);
   const [first, second] = script[0][1].statements[0];
   assert.equal(first.type, 'continue_repeat');
-  // 프레임을 넘기지 않는 건너뛰기 — 판단 자리의 '이번 반복 건너뛰기' 를 not 으로 감싼다.
+  // Wrap input loop control in not to skip without spending a frame.
   assert.equal(second.type, 'wait_until_true');
   assert.equal(second.params[0].type, 'boolean_not');
   assert.equal(second.params[0].params[1].type, 'continue_repeat');

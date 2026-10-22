@@ -1,24 +1,15 @@
-/**
- * @fileoverview 디버그 패널이 tessvm 을 몰 수 있게 하는 어댑터입니다.
- *
- * 패널(`@tess/player` 의 `debug-ui.ts`)은 실행기를 어댑터 하나로만 만납니다. 여기서
- * 그 어댑터를 VM 위에 만들어 `window.tessRuntime` 에 걸어 두면, 엔트리 실행기에서
- * 쓰던 그 패널이 그대로 tessvm 을 봅니다 — 실행 제어·변수·리스트·오브젝트·장면.
- */
 import type { TessVmHandle } from './boot.ts';
 import { stage, type Entity, type Target, type Variable } from '../runtime/model.ts';
 
-/** What the panel's environment fields are set to; `""` means "as it really is". */
 export interface EnvChoices {
   boost: string;
   device: string;
   touch: string;
-  /** `아이디`·`닉네임`. Both empty means signed out. */
+  // Empty username and nickname mean signed out.
   userId: string;
   nickname: string;
 }
 
-/** The object shape the panel expects — entry's object, as far as the panel reads it. */
 interface ObjectView {
   id: string;
   name: string;
@@ -39,7 +30,7 @@ function objectView(target: Target): ObjectView {
     getPicture: (value: unknown) => target.getPicture(value),
     setRotateMethod(method: string) {
       target.rotateMethod = method;
-      // The method decides the angle right away: anything but free rotation is 0.
+      // Non-free rotation modes report zero immediately.
       target.forEachEntity((entity) => {
         entity.setRotation(entity.rotation);
         entity.touch();
@@ -48,7 +39,6 @@ function objectView(target: Target): ObjectView {
   };
 }
 
-/** Wraps a variable or a list in the shape the panel knows — entry's own API. */
 function variableView(variable: Variable, redraw: () => void) {
   const seen = {
     getName: () => variable.name,
@@ -62,7 +52,7 @@ function variableView(variable: Variable, redraw: () => void) {
     return {
       ...seen,
       getArray: () => variable.array,
-      // Entry's list API counts from 1.
+      // Entry's list API uses one-based indices.
       replaceValue(index: number, data: string | number) {
         const item = variable.array[index - 1];
         if (item) {
@@ -93,7 +83,6 @@ function variableView(variable: Variable, redraw: () => void) {
   };
 }
 
-/** The window the debug panel sees tessvm through. Install it as `window.tessRuntime`. */
 export function makeVmRuntime(handle: TessVmHandle) {
   const { vm, renderer } = handle;
   const redraw = () => renderer.flush();
@@ -105,7 +94,6 @@ export function makeVmRuntime(handle: TessVmHandle) {
   return {
     state: () => vm.state,
     run: () => handle.start(),
-    /** Resumes when paused, holds when running — the panel drives both from one button. */
     pause: () => (vm.state === 'pause' ? handle.start() : handle.pause()),
     stop: () => handle.stop(),
 
@@ -125,7 +113,7 @@ export function makeVmRuntime(handle: TessVmHandle) {
       const target = vm.targetOf(objectId);
       return target ? { object: objectView(target), entity: target.entity } : null;
     },
-    /** This scene's objects, front-most first — the order they are drawn in. */
+    // Report current-scene objects in front-to-back draw order.
     currentObjects() {
       return vm.currentTargets().map((target) => ({
         id: target.id,
@@ -133,11 +121,7 @@ export function makeVmRuntime(handle: TessVmHandle) {
         entity: target.entity as Entity,
       }));
     },
-    /**
-     * Whether the entity's own pixels cover this stage point — the same test
-     * `when_object_click` uses. A costume with nothing at that spot answers no,
-     * so an empty full-stage board stops swallowing every pick.
-     */
+    // Use pixel tests so transparent full-stage textures do not hide objects below.
     hitTest(entity: Entity, x: number, y: number): boolean {
       return vm.collision.touchingMouse(
         entity,
@@ -145,7 +129,7 @@ export function makeVmRuntime(handle: TessVmHandle) {
         -y * stage.scale + stage.worldHeight / 2,
       );
     },
-    /** Jumps to a scene and runs it. Events are dropped unless the vm is running. */
+    // Run the VM before sending a scene event because stopped engines drop events.
     goToScene(sceneId: string) {
       if (vm.state !== 'run') {
         handle.start();
@@ -153,28 +137,19 @@ export function makeVmRuntime(handle: TessVmHandle) {
       vm.selectScene(sceneId);
       vm.fireEvent('when_scene_start');
     },
-    /** Draws one frame so edits show while the work is paused or stopped. */
+    // Draw one frame so edits appear while paused or stopped.
     requestUpdate: redraw,
 
-    /**
-     * 부스트 모드는 여기서도 그리는 방식을 고릅니다(채우기의 감김 규칙, 글상자의 세로
-     * 정렬 · 폭). 다만 엔트리의 `realBoost` 는 "이 브라우저가 실제로 켤 수 있는가" 를
-     * 뜻하는데 tessvm 은 언제나 켤 수 있으므로, 보여 줄 "지금 값" 이 따로 없습니다.
-     */
+    // Boost changes drawing rules, but tessvm has no separate hardware boost availability state.
     realBoost: () => null,
-    /**
-     * Writes the panel's answers straight into the vm. Entry has to wrap the
-     * block functions because they ask the browser; the vm keeps each answer in
-     * a field of its own.
-     */
+    // Set VM environment fields directly; Entry needs wrappers around browser-reading blocks.
     patchEnvironment(env: EnvChoices) {
       vm.boost = env.boost === '' ? handle.defaultBoost : env.boost === 'true';
       vm.touch = env.touch === '' ? handle.defaultTouch : env.touch === 'true';
       vm.deviceType = (env.device === ''
         ? handle.defaultDeviceType
         : env.device) as typeof vm.deviceType;
-      // Either field filled stands for a signed-in reader; both empty is the
-      // signed-out pair the runner started with.
+      // Either viewer field means signed in; both empty restores the initial signed-out viewer.
       const id = env.userId.trim();
       const nickname = env.nickname.trim();
       vm.user = id || nickname
@@ -185,7 +160,7 @@ export function makeVmRuntime(handle: TessVmHandle) {
     stageSize: () => ({ width: stage.width, height: stage.height }),
     stageCanvas: () => renderer.app.canvas as HTMLCanvasElement,
     layoutCanvas: () => handle.relayout(),
-    /** Entry caches the canvas rect; here it is measured on every event anyway. */
+    // Pointer events already remeasure the canvas rect, so no cached rect needs refreshing.
     refreshRect: () => {},
   };
 }

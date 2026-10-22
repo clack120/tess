@@ -1,7 +1,3 @@
-/**
- * @fileoverview String literal text, shared by both parsers.
- */
-
 const ESCAPES: Record<string, string> = {
   n: '\n',
   t: '\t',
@@ -12,7 +8,6 @@ const ESCAPES: Record<string, string> = {
   0: '\0',
 };
 
-/** Reads a string literal's text, resolving the escapes the grammar allows. */
 export function decodeString(image: string): string {
   const raw = image.slice(1, -1);
   let out = '';

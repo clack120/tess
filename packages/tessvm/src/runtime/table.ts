@@ -1,15 +1,8 @@
-/**
- * @fileoverview 데이터 테이블(엔트리의 '데이터 분석' 블록이 쓰는 표)입니다.
- *
- * 엔트리는 표를 `[필드 이름 줄, 자료 줄…]` 한 덩어리로 다루고 블록은 1부터 세는 행·열
- * 번호로 접근합니다(1행이 필드 이름 줄). 여기서도 그 규칙을 그대로 씁니다.
- */
+// Match Entry's one-based rows and columns; row one contains field names.
 import { isNumber, num } from './cast.ts';
 
-/** 표 한 줄 — 칸 배열이거나, 사이트가 붙인 줄 번호를 함께 단 모양이거나. */
 type RawRow = unknown[] | { value?: unknown } | null | undefined;
 
-/** 작품이 들고 온 표. 실행에 필요한 만큼만 본다. */
 interface RawTable {
   id?: unknown;
   name?: unknown;
@@ -19,10 +12,7 @@ interface RawTable {
   chart?: unknown;
 }
 
-/**
- * 표에 딸린 차트 한 벌. 엔트리가 저장하는 그대로 — 열 번호는 0부터 세고, 안 쓰는
- * 자리는 -1 이다.
- */
+// Chart columns start at zero; unused column slots hold -1.
 export interface ChartSpec {
   type: string;
   title: string;
@@ -31,7 +21,6 @@ export interface ChartSpec {
   categoryIndexes: number[];
 }
 
-/** 저장된 차트 한 벌을 읽는다. */
 function chartOf(raw: unknown): ChartSpec {
   const spec = (raw ?? {}) as Record<string, unknown>;
   const indexes = Array.isArray(spec.categoryIndexes) ? spec.categoryIndexes : [];
@@ -44,7 +33,6 @@ function chartOf(raw: unknown): ChartSpec {
   };
 }
 
-/** 어느 모양으로 담겨 있든 칸 배열로. */
 function cellsOf(row: RawRow): Array<string | number> {
   const cells = Array.isArray(row) ? row : (row as { value?: unknown } | null)?.value;
   return Array.isArray(cells) ? (cells as Array<string | number>) : [];
@@ -54,22 +42,15 @@ export class Table {
   readonly id: string;
   readonly name: string;
   fields: string[];
-  /** Data rows only; row 0 in block coordinates is `fields`. */
+  // Data excludes the field-name row, which block coordinates address separately.
   rows: Array<Array<string | number>>;
-  /** 표에 딸린 차트들 — `테이블 차트 창 열기` 가 번호로 고른다. */
   charts: ChartSpec[] = [];
-  /** 담긴 것이 바뀔 때마다 오른다 — 열려 있는 창이 이것을 보고 다시 그린다. */
+  // Bump the revision on edits so open views can redraw.
   revision = 0;
   private readonly initialFields: string[];
   private readonly initialRows: Array<Array<string | number>>;
 
-  /**
-   * 작품이 저장해 둔 표를 실행이 보는 모양으로 읽습니다.
-   *
-   * 엔트리는 표를 두 벌로 듭니다 — `data` 는 지금 값, `origin` 은 처음 값 — 그리고
-   * 정지할 때마다 `data` 를 `origin` 으로 되돌립니다(`DataTableSource` 의 stop 처리).
-   * 그래서 실행이 보는 것은 `origin` 이고, 그것이 비어 있을 때만 `data` 입니다.
-   */
+  // Restore origin on each run, falling back to data only when origin is absent.
   static from(raw: RawTable): Table {
     const origin = Array.isArray(raw.origin) ? (raw.origin as RawRow[]) : [];
     const data = Array.isArray(raw.data) ? (raw.data as RawRow[]) : [];
@@ -98,7 +79,7 @@ export class Table {
     this.revision += 1;
   }
 
-  /** Row 1 is the field-name row, so data row `i` sits at index `i + 1`. */
+  // Row one holds field names, so data rows need an extra index offset.
   private rowAt(row: number): Array<string | number> | null {
     if (row === 0) {
       return this.fields;
@@ -173,7 +154,7 @@ export class Table {
     }
   }
 
-  /** Every value of one column, unparseable entries counted as 0. */
+  // Count unparseable column values as zero.
   column(col: number): number[] {
     return this.rows.map((row) => {
       const value = row[col - 1];
@@ -181,7 +162,6 @@ export class Table {
     });
   }
 
-  /** Pearson correlation between two columns, as `get_coefficient` reports it. */
   coefficient(x: number, y: number): number {
     const left = this.column(x + 1);
     const right = this.column(y + 1);
@@ -212,7 +192,7 @@ export class Table {
   }
 }
 
-/** `DataTable.getColumnIndex` — a number stays a number, letters count base 26. */
+// Keep numeric column indices; convert letter names using base 26.
 export function columnIndex(value: unknown): number {
   if (isNumber(value)) {
     return parseFloat(String(value));
@@ -228,7 +208,6 @@ export function columnIndex(value: unknown): number {
   return total;
 }
 
-/** `Entry.Utils.cellToRowCol` — `"B3"` is column 2, row 3. */
 export function cellToRowCol(cell: string): { row: number; col: number } {
   const match = /^([A-Za-z]+)(\d+)$/.exec(cell.trim());
   if (!match) {

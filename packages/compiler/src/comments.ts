@@ -1,56 +1,15 @@
-/**
- * Tess 주석을 엔트리 블록 주석으로 변환하는 모듈입니다.
- * 
- * 원본 소스에서 주석의 위치를 찾아내어 소스 위치(loc)를 기준으로 
- * "바로 아래 문장" 또는 "같은 줄 문장" 에 해당하는 AST 노드와 연결합니다.
- */
-
 import { colorLiteralLength } from '@tess/core';
 import type { Node } from '@tess/parser';
 import type { EntryComment } from './types.ts';
 
-/**
- * 소스 코드에서 발견된 단일 주석과 그 위치 정보를 나타냅니다.
- *
- * @example
- * ```typescript
- * const comment: ScannedComment = {
- *   start: 10,
- *   end: 25,
- *   text: "이것은 주석입니다"
- * };
- * ```
- */
 interface ScannedComment {
   start: number;
   end: number;
   text: string;
 }
 
-/**
- * AST 순회 중 접근할 수 있는 일반적인 노드 타입입니다.
- * 
- * @example
- * ```typescript
- * const node: AnyNode = {
- *   type: 'If',
- *   loc: { file: 'main.tess', start: 100 }
- * };
- * ```
- */
 type AnyNode = Record<string, unknown> & { type?: string; loc?: { file?: string; start: number } };
 
-/**
- * 주석을 첨부할 수 있는 AST 노드 타입의 집합입니다.
- * 주로 엔트리 블록으로 변환되는 노드들이 포함됩니다.
- * 
- * @example
- * ```typescript
- * if (ATTACHABLE.has(node.type)) {
- *   // 주석 첨부 가능
- * }
- * ```
- */
 const ATTACHABLE = new Set([
   'Event',
   'If', 'Switch', 'Repeat', 'For', 'While', 'Until', 'Forever', 'Wait', 'Break', 'Continue', 'Skip', 'Restart', 'Return',
@@ -64,17 +23,6 @@ const ATTACHABLE = new Set([
   'VarDecl', 'ListDecl', 'Assign', 'ExpressionStatement',
 ]);
 
-/**
- * 엔트리 블록에 붙일 주석 객체를 생성합니다.
- *
- * @param value - 주석 내용
- * @returns 엔트리 블록 주석 객체
- * 
- * @example
- * ```typescript
- * const comment = makeComment("반복문 시작");
- * ```
- */
 export function makeComment(value: string): EntryComment {
   return {
     x: 240,
@@ -92,18 +40,6 @@ export function makeComment(value: string): EntryComment {
   };
 }
 
-/**
- * 소스 코드에서 주석을 찾아냅니다. 
- * 문자열 내부의 `#` 기호나 색상 리터럴은 주석으로 처리하지 않습니다.
- *
- * @param source - 분석할 소스 코드 문자열
- * @returns 추출된 주석들의 배열
- * 
- * @example
- * ```typescript
- * const comments = scanComments("a = 10 # 변수 선언");
- * ```
- */
 export function scanComments(source: string): ScannedComment[] {
   const comments: ScannedComment[] = [];
 
@@ -121,7 +57,7 @@ export function scanComments(source: string): ScannedComment[] {
 
     if (ch !== '#') continue;
 
-    // 색상 리터럴은 주석이 아니다 — 렉서와 같은 규칙으로 가른다
+    // Use the lexer's color rules so hex colors are not treated as comments.
     const color = colorLiteralLength(source, i);
     if (color) {
       i += color - 1;
@@ -136,13 +72,6 @@ export function scanComments(source: string): ScannedComment[] {
   return comments;
 }
 
-/**
- * AST 의 노드와 주석을 이어 준다.
- *
- * @param ast     use 까지 펼친 Program
- * @param sources 파일 -> 소스
- * @returns `파일 시작오프셋` -> 주석 내용
- */
 export function buildCommentMap(ast: Node, sources: Map<string, string>): Map<string, string> {
   const nodesByFile = new Map<string, AnyNode[]>();
   collectNodes(ast, nodesByFile);
@@ -156,7 +85,6 @@ export function buildCommentMap(ast: Node, sources: Map<string, string>): Map<st
   return map;
 }
 
-/** 주석 찾아보기 열쇠 */
 export function commentKey(node: Node | AnyNode | null | undefined): string {
   const loc = (node as AnyNode | null | undefined)?.loc;
   return `${loc?.file ?? ''} ${loc?.start ?? -1}`;
@@ -187,9 +115,7 @@ function attachInFile(source: string, file: string, nodes: AnyNode[], map: Map<s
   const sorted = [...nodes].sort((a, b) => a.loc!.start - b.loc!.start);
   const remaining: ScannedComment[] = [];
 
-  // 1) 같은 줄 뒤쪽에 붙은 주석: 그 줄의 문장에 붙인다.
-  //    시작 위치로 정렬해 두었으니 줄 번호도 함께 오르고, 주석 바로 앞의 문장이
-  //    곧 "그 줄의 마지막 문장" 이다.
+  // Attach a trailing comment to the last statement on its line.
   for (const comment of comments) {
     const before = sorted[firstAfter(sorted, comment.start - 1) - 1];
     const owner = before && lineOf(before.loc!.start) === lineOf(comment.start) ? before : null;
@@ -197,7 +123,7 @@ function attachInFile(source: string, file: string, nodes: AnyNode[], map: Map<s
     else remaining.push(comment);
   }
 
-  // 2) 문장 바로 위에 있는 주석 묶음: 아래 문장에 붙인다
+  // Attach a comment group to the statement directly below it.
   for (let i = 0; i < remaining.length; i += 1) {
     const group = [remaining[i]!];
     while (
@@ -219,10 +145,6 @@ function append(map: Map<string, string>, key: string, text: string) {
   map.set(key, map.has(key) ? `${map.get(key)}\n${text}` : text);
 }
 
-/**
- * Index of the first node starting after `offset`, in a list sorted by start.
- * `list.length` when there is none.
- */
 function firstAfter(list: AnyNode[], offset: number): number {
   let low = 0;
   let high = list.length;

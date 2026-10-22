@@ -1,12 +1,3 @@
-/**
- * @fileoverview The tessvm runner that takes the entry player's place.
- *
- * The stage sits on top and entry's control bar underneath: stop and pause on
- * the left, the pointer position in the middle, the boost flag and full screen
- * on the right. A work that has not started yet shows its thumbnail, and a work
- * that an error brought down goes back to that screen with the message written
- * along the bottom.
- */
 import { boot, type TessVmHandle } from "../../../tessvm/src/web/boot.ts";
 import { formatVmError } from "../../../tessvm/src/runtime/diagnostics.ts";
 import { ASK_FIELD_STYLE } from "../../../tessvm/src/web/ask-style.ts";
@@ -34,13 +25,7 @@ const ICONS = {
 
 const STAGE_STYLE_ID = "tessvm-stage-style";
 
-/**
- * Lets the browser paint before the next thing takes the thread.
- *
- * A frame is what the paint really waits for, but a page in a background tab is
- * given none — waiting only on that would leave the work sitting on its loading
- * line until someone looked at the tab. The timer is the way out of that.
- */
+// A timer also releases background tabs where animation frames may not arrive.
 const nextFrame = () =>
   new Promise<void>((done) => {
     let settled = false;
@@ -58,7 +43,6 @@ export interface MountedPlayer {
   dispose(): void;
 }
 
-/** 대답 입력칸과 차트 창은 tessvm 이 얹는 것이므로 그 모양도 함께 옵니다. */
 function ensureStageStyle(): void {
   if (document.getElementById(STAGE_STYLE_ID)) {
     return;
@@ -94,21 +78,13 @@ function iconButton(
   return button;
 }
 
-/** One line of the right-click menu. A `null` is a divider. */
 interface MenuItem {
   label: string;
   run(): void;
   disabled?: boolean;
 }
 
-/**
- * The right-click menu on the stage.
- *
- * Entry has no such thing, but the bar it copies is gone in full screen and was
- * never there for the scenes, which only the debug panel could move — and the
- * extension has no panel. The lines are built when the menu opens, so they say
- * what the work can do right then.
- */
+// Rebuild the menu on open because available actions depend on current player state.
 function mountMenu(
   root: HTMLElement,
   lines: () => Array<MenuItem | null>,
@@ -137,7 +113,6 @@ function mountMenu(
         line.run();
       };
     }
-    // Measured where it will stand, then pulled back inside the player.
     const box = root.getBoundingClientRect();
     menu.hidden = false;
     menu.style.left = "0px";
@@ -154,7 +129,6 @@ function mountMenu(
     const pointer = event as MouseEvent;
     open(pointer.clientX, pointer.clientY);
   };
-  // Anywhere outside takes it down, including a press the page around us gets.
   const onDown = (event: Event) => {
     if (!menu.hidden && !menu.contains(event.target as Node)) {
       close();
@@ -182,10 +156,7 @@ function mountMenu(
   };
 }
 
-/**
- * Builds the player into `host` and loads the work. The returned handle is live
- * from the first call, so a host that goes away mid-load is still cleaned up.
- */
+// Return a live handle immediately so unmounting during load still cleans up.
 export function mountPlayer(
   host: HTMLElement,
   projectId: string,
@@ -193,18 +164,14 @@ export function mountPlayer(
   svg = true,
 ): MountedPlayer {
   ensureStageStyle();
-  // Idle from the start so the cover shows while the work is still on its way.
   const root = el("div", "tessvm-player is-idle", host);
-  // Keys belong to the work only while the player has focus; the page around it
-  // has its own text fields.
+  // Capture work keys only inside the player so page inputs remain usable.
   root.tabIndex = 0;
 
   const view = el("div", "tessvm-view", root);
   const cover = el("div", "tessvm-cover", view);
   const startButton = el("button", "tessvm-start", cover);
   startButton.type = "button";
-  // Only once the work is loaded does this do anything, so it stays out of the
-  // way until then.
   startButton.hidden = true;
   startButton.title = "시작하기";
   startButton.setAttribute("aria-label", "시작하기");
@@ -247,7 +214,6 @@ export function mountPlayer(
     errorBox.textContent = text;
     errorBox.hidden = false;
   };
-  /** A standing note, not a failure: kept until an error takes the row over. */
   let notice = "";
   const drawNotice = () => {
     if (!notice) {
@@ -289,8 +255,7 @@ export function mountPlayer(
     fullButton.title = full ? "전체화면 끄기" : "전체화면";
     fullButton.setAttribute("aria-label", fullButton.title);
     root.classList.toggle("is-full", full);
-    // The bar goes away in full screen, and the button the press landed on goes
-    // with it — the keys would then be nobody's. The work takes them back.
+    // Restore work focus when fullscreen hides the clicked control.
     if (full) {
       root.focus({ preventScroll: true });
     }
@@ -298,8 +263,7 @@ export function mountPlayer(
   }
   document.addEventListener("fullscreenchange", onFullscreen);
 
-  // One beat drives both the readout and the check that the page still holds us:
-  // playentry replaces this part of the page on its own when the route changes.
+  // Also check whether navigation removed the player while updating the readout.
   const timer = window.setInterval(() => {
     if (!host.isConnected) {
       dispose();
@@ -318,10 +282,7 @@ export function mountPlayer(
     }
   };
 
-  // A control clicked with the mouse holds the focus afterwards, and the keys go
-  // with it — the page would scroll under a live work. The work takes them back.
-  // `detail` is 0 when a key worked the control, and that press belongs to
-  // someone on their way through the bar with the keyboard.
+  // Restore focus after mouse clicks, but preserve keyboard navigation through controls.
   bar.addEventListener("click", (event) => {
     if (event.detail > 0 && handle && handle.vm.state !== "stop") {
       root.focus({ preventScroll: true });
@@ -347,7 +308,7 @@ export function mountPlayer(
       cover.style.backgroundImage = `url("${thumb}")`;
     }
 
-    // The work's own blocks run as they are, so its ids are entry's ids.
+    // Execute original blocks directly to preserve Entry IDs.
     status.textContent = "실행기를 준비하는 중…";
     await nextFrame();
     if (disposed) {
@@ -373,8 +334,7 @@ export function mountPlayer(
       handle = await boot({
         project: work,
         store: cloud,
-        // What the work saves belongs to the extension, so the settings panel
-        // can show it and throw it away (`src/store-db.ts`).
+        // Keep saves in extension storage so the popup can manage them.
         saveStore: bridgeSaveStore(projectId, String(work.name ?? projectId)),
         container: view,
         autoStart: false,
@@ -382,7 +342,7 @@ export function mountPlayer(
         boost: true,
         svg,
         user: signedInUser(),
-        // Nothing may be pressed until the work's files are all in.
+        // Wait for assets before enabling input.
         onProgress: (done, all) => {
           status.textContent = all
             ? `불러오는 중… ${Math.floor((done / all) * 100)}%`
@@ -409,12 +369,7 @@ export function mountPlayer(
     ready(handle);
   }
 
-  /**
-   * Blocks this runner does not have yet are compiled away to nothing, so a work
-   * that leans on one runs with a piece of it quietly missing — a scene that
-   * never builds, a script that never starts. Say so rather than let it look
-   * like the work itself is broken.
-   */
+  // Report unsupported blocks so skipped code cannot look like a broken project.
   function reportUnsupported(live: TessVmHandle): void {
     const blocks = [...live.vm.unknownBlocks.keys()].filter(
       (type) => !type.startsWith("variable:"),
@@ -422,7 +377,6 @@ export function mountPlayer(
     reportDropped(blocks);
   }
 
-  /** The same notice for blocks that fell out on the way in. */
   function reportDropped(blocks: string[]): void {
     if (!blocks.length) {
       return;
@@ -440,9 +394,7 @@ export function mountPlayer(
 
     const showState = () => {
       const state = live.vm.state;
-      // Only when it really changed. Rewriting the button's markup on every beat
-      // takes the node the press landed on out of the document before the release,
-      // and the browser then never makes that a click.
+      // Replace button markup only when it changes; replacing it mid-press cancels the click.
       if (state !== shown) {
         shown = state;
         root.classList.toggle("is-idle", state === "stop");
@@ -465,9 +417,7 @@ export function mountPlayer(
       showState();
     };
 
-    // Entry stops the whole work on a script error and pops a toast. The work
-    // goes back to its start screen here instead, with the reason written small
-    // along the bottom.
+    // Match Entry by stopping the whole work when a script fails.
     live.vm.onError = (error) => {
       const key = `${error.blockId}:${error.message}`;
       if (!seen.has(key)) {
@@ -524,7 +474,7 @@ export function mountPlayer(
       ];
     });
 
-    // The work can stop itself, so the bar follows the vm rather than clicks.
+    // Read player state from the VM because works can stop themselves.
     onTick = showState;
     showState();
   }
