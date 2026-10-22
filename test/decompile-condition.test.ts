@@ -193,3 +193,28 @@ test('a judgement stored in a variable keeps its truth after round-trip', () => 
     }
   }
 });
+
+test('text blocks reading "true" and "false" stay text after round-trip', () => {
+  const source = `var a = 0
+var b = 0
+var same = 0
+object "o":
+  when start do
+    a = "true"
+    b = "false"
+    if (a == "true"):
+      same = 1
+    end
+  end
+end`;
+  const built = compileProject(source);
+  assert.deepEqual(built.errors, []);
+  for (const proj of [built.project!, roundtrip(built.project!)]) {
+    const vm = new Vm({ renderer: null, audio: null });
+    vm.load(proj as never);
+    vm.start();
+    vm.tick();
+    const value = (name: string) => vm.variables.find((v) => v.name === name)!.getValue();
+    assert.deepEqual([value('a'), value('b'), Number(value('same'))], ['true', 'false', 1]);
+  }
+});

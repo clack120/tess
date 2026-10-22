@@ -276,7 +276,6 @@ export function exprOf(block: any, ctx: DecompileContext): string {
      */
     case 'number': case 'text': {
       const raw = String(at(0) ?? '');
-      if (raw === 'true' || raw === 'false') return raw;
       if (raw === 'transparent') return 'transparent';
       if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw;
       return isExactNumber(raw) ? raw : tessString(raw);
