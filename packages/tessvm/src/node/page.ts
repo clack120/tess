@@ -199,6 +199,7 @@ ${fonts}
 <script type="module" src="${DEBUG_UI_PATH}"></script>
 <script type="module">
 import { boot } from '/vm/web/boot.ts';
+import { formatVmError } from '/vm/runtime/diagnostics.ts';
 import { makeVmRuntime } from '/vm/web/debug.ts';
 
 const config = ${config};
@@ -230,15 +231,15 @@ function reportVmErrors(handle, sourceMap) {
     const key = error.blockId + ':' + error.message;
     if (seen.has(key)) return;
     seen.add(key);
-    const target = handle.vm.targetOf(error.targetId);
     const at = error.blockId && sourceMap[error.blockId];
     const where = at
       ? (at.file ? at.file + ':' : '') + at.line + ':' + at.column
       : error.blockId
         ? '블록 ' + error.blockId
         : '위치를 알 수 없음';
-    const label = error.where ? error.where + ' — ' : target ? target.name + ' — ' : '';
-    window.tessReportError('실행 오류', new Error(label + error.message + ' (' + where + ')'));
+    const reported = new Error(formatVmError(error) + ' (' + where + ')');
+    if (error.stack) reported.stack = error.stack;
+    window.tessReportError('실행 오류', reported);
     if (error.blockId) window.tessHighlightBlock(error.blockId);
   };
 }

@@ -33,6 +33,7 @@ import { Table } from './table.ts';
 import { ThreadStop, createOps, type Ops } from './ops.ts';
 import { SaveStore, functionName } from './save.ts';
 import { Extras } from './extras.ts';
+import { blockOfError, RuntimeBlockError, type GeneratedTrace, type RuntimeValue } from './diagnostics.ts';
 
 /**
  * Tick rate used when the project does not declare one. Entry drives its loop
@@ -192,6 +193,23 @@ export interface VmError {
   targetId: string | null;
   /** Where it happened, for a person: scene, object, and the function calls it was inside. */
   where?: string;
+  name?: string;
+  stack?: string;
+  blockType?: string;
+  inputs?: Record<string, RuntimeValue>;
+  context?: {
+    frame: number;
+    clock: number;
+    sceneId: string;
+    sceneName: string;
+    targetName: string | null;
+    entityId: string | null;
+    isClone: boolean;
+    event: string | null;
+    eventFilter: string | null;
+    eventBlockId: string | null;
+    calls: Array<{ name: string; count: number }>;
+  };
 }
 
 export class Vm implements Project {
@@ -260,6 +278,7 @@ export class Vm implements Project {
   private pendingMessages: string[] = [];
 
   private scripts: CompiledScript[] = [];
+  private readonly traces = new WeakMap<CompiledScript['body'], GeneratedTrace>();
   private kernelOn: boolean;
   /** What the last `load` found it could move to the kernel, for `tessvm check`. */
   kernelPlan: KernelPlan | null = null;
@@ -485,12 +504,10 @@ export class Vm implements Project {
       runtime: Vm,
     ) => { scripts: CompiledScript['body'][]; functions: CompiledFunction[] };
     const built = factory(this);
+    built.scripts.forEach(body => this.traces.set(body, program.trace));
     // A call frame is a generator, and its prototype says which function made it.
-    this.functionOf = new Map();
-    const names = input.functions.map((fn) => functionName(fn.content) || fn.id);
-    const note = () => built.functions.forEach((fn, index) => {
-      if (fn?.prototype) this.functionOf.set(fn.prototype as object, names[index]!);
-    });
+    this.functionOf = new WeakMap();
+    const note = () => this.rememberFunctions(built.functions, input.functions);
     note();
     this.installKernel(input, built.functions);
     note();
@@ -573,8 +590,11 @@ export class Vm implements Project {
     if (!target || !this.compileInput) {
       return undefined;
     }
-    const source = new Codegen(this.compileInput).compileProbe(block);
-    const built = (new Function('R', source) as (runtime: Vm) => { scripts: CompiledScript['body'][] })(this);
+    const codegen = new Codegen(this.compileInput);
+    const source = codegen.compileProbe(block);
+    const built = (new Function('R', source) as (runtime: Vm) => { scripts: CompiledScript['body'][]; functions: CompiledFunction[] })(this);
+    built.scripts.forEach(body => this.traces.set(body, codegen.trace));
+    this.rememberFunctions(built.functions, this.compileInput.functions);
     const thread = new Thread(target, target.entity, {
       event: 'probe',
       filter: null,
@@ -582,10 +602,19 @@ export class Vm implements Project {
       body: built.scripts[0]!,
     });
     const until = Date.now() + timeoutMs;
-    thread.step();
-    while (!thread.done && Date.now() < until) {
-      await new Promise((resolve) => setTimeout(resolve, 16));
+    try {
       thread.step();
+      while (!thread.done && Date.now() < until) {
+        await new Promise((resolve) => setTimeout(resolve, 16));
+        thread.step();
+      }
+    } catch (error) {
+      if (!(error instanceof ThreadStop)) {
+        const record = this.errorRecord(error, thread);
+        this.errors.push(record);
+        this.onError?.(record);
+      }
+      throw error;
     }
     return thread.done ? thread.state.result : undefined;
   }
@@ -612,8 +641,11 @@ export class Vm implements Project {
     const input = extraFunctions.length
       ? { ...this.compileInput, functions: [...this.compileInput.functions, ...extraFunctions] }
       : this.compileInput;
-    const source = new Codegen(input).compileStackProbe(stack);
-    const built = (new Function('R', source) as (runtime: Vm) => { scripts: CompiledScript['body'][] })(this);
+    const codegen = new Codegen(input);
+    const source = codegen.compileStackProbe(stack);
+    const built = (new Function('R', source) as (runtime: Vm) => { scripts: CompiledScript['body'][]; functions: CompiledFunction[] })(this);
+    built.scripts.forEach(body => this.traces.set(body, codegen.trace));
+    this.rememberFunctions(built.functions, input.functions);
     return built.scripts[0] ?? null;
   }
 
@@ -627,7 +659,7 @@ export class Vm implements Project {
       return false;
     }
     const thread = new Thread(target, target.entity, { event: 'probe', filter: null, blockId, body });
-    thread.step();
+    this.runThread(thread);
     if (!thread.done) {
       target.threads.push(thread);
     }
@@ -920,11 +952,7 @@ export class Vm implements Project {
    * a script error is, which is what puts it on screen.
    */
   fail(error: unknown, blockId: string | null = null, targetId: string | null = null): void {
-    const record: VmError = {
-      message: error instanceof Error ? error.message : String(error),
-      blockId,
-      targetId,
-    };
+    const record = this.errorRecord(error, null, blockId, targetId);
     this.errors.push(record);
     this.stop();
     // The message alone rarely says where a frame-level throw came from, and the
@@ -979,30 +1007,51 @@ export class Vm implements Project {
         // The script asked to end itself; that is not a failure.
         return;
       }
-      const record: VmError = {
-        message: error instanceof Error ? error.message : String(error),
-        blockId: thread.script.blockId,
-        targetId: thread.target.id,
-        where: this.whereOf(thread),
-      };
+      const record = this.errorRecord(error, thread);
       this.errors.push(record);
       this.onError?.(record);
     }
   }
 
   /** Function each call frame's generator belongs to, by its prototype. */
-  private functionOf = new Map<object, string>();
+  private functionOf = new WeakMap<object, string>();
 
-  /** `장면 '1' · 오브젝트 '쉘' (복제본) · 함수 a → b` for the thread an error stopped. */
-  private whereOf(thread: Thread): string {
-    const target = thread.target;
-    const scene = this.scenes.find((item) => item.id === target.sceneId);
-    const parts = [
-      `장면 '${scene?.name ?? target.sceneId}'`,
-      `오브젝트 '${target.name}'${thread.entity.isClone ? ' (복제본)' : ''}`,
-    ];
-    // A call repeated back to back is one step with its count, and a long
-    // chain keeps its two ends.
+  private rememberFunctions(functions: CompiledFunction[], entries: FunctionEntry[]): void {
+    functions.forEach((fn, index) => {
+      if (fn?.prototype) this.functionOf.set(fn.prototype as object, functionName(entries[index]!.content) || entries[index]!.id);
+    });
+  }
+
+  private errorRecord(error: unknown, thread: Thread | null, blockId: string | null = null, targetId: string | null = null): VmError {
+    const stack = error instanceof Error ? error.stack : undefined;
+    const site = blockOfError(stack, thread ? this.traces.get(thread.script.body) : undefined);
+    const target = thread?.target ?? (targetId ? this.targetOf(targetId) : null);
+    const sceneId = target?.sceneId ?? this.currentSceneId;
+    const calls = thread ? this.callsOf(thread) : [];
+    return {
+      message: error instanceof Error ? error.message : String(error),
+      name: error instanceof Error ? error.name : typeof error,
+      stack,
+      blockId: site?.blockId ?? blockId ?? thread?.script.blockId ?? null,
+      blockType: site?.blockType ?? (error instanceof RuntimeBlockError ? error.blockType : undefined),
+      targetId: target?.id ?? targetId,
+      ...(thread ? { where: this.whereOf(thread, calls) } : {}),
+      ...(error instanceof RuntimeBlockError ? { inputs: error.inputs } : {}),
+      context: {
+        frame: this.frame, clock: this.clock, sceneId,
+        sceneName: this.sceneOf(sceneId)?.name ?? sceneId,
+        targetName: target?.name ?? null,
+        entityId: thread?.entity.id ?? null,
+        isClone: thread?.entity.isClone ?? false,
+        event: thread?.script.event ?? null,
+        eventFilter: thread?.script.filter ?? null,
+        eventBlockId: thread?.script.blockId ?? null,
+        calls,
+      },
+    };
+  }
+
+  private callsOf(thread: Thread): Array<{ name: string; count: number }> {
     const steps: Array<{ name: string; count: number }> = [];
     for (const frame of thread.failedFrames ?? []) {
       const name = this.functionOf.get(Object.getPrototypeOf(frame) as object);
@@ -1011,6 +1060,19 @@ export class Vm implements Project {
       if (last?.name === name) last.count += 1;
       else steps.push({ name, count: 1 });
     }
+    return steps;
+  }
+
+  /** `장면 '1' · 오브젝트 '쉘' (복제본) · 함수 a → b` for the thread an error stopped. */
+  private whereOf(thread: Thread, steps: Array<{ name: string; count: number }>): string {
+    const target = thread.target;
+    const scene = this.scenes.find((item) => item.id === target.sceneId);
+    const parts = [
+      `장면 '${scene?.name ?? target.sceneId}'`,
+      `오브젝트 '${target.name}'${thread.entity.isClone ? ' (복제본)' : ''}`,
+    ];
+    // A call repeated back to back is one step with its count, and a long
+    // chain keeps its two ends.
     const shown = steps.map((step) => (step.count > 1 ? `${step.name} ×${step.count}` : step.name));
     const calls = shown.length > 8 ? [...shown.slice(0, 3), '…', ...shown.slice(-3)] : shown;
     if (calls.length) parts.push(`함수 ${calls.join(' → ')}`);

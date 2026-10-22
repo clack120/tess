@@ -8,6 +8,9 @@
  * 미리 풀어 둡니다.
  */
 import { SAVE_FUNCTIONS, functionLabel } from '../runtime/save.ts';
+import type { GeneratedTrace } from '../runtime/diagnostics.ts';
+
+let nextSourceId = 0;
 
 /** A block as it appears in `project.json`. */
 export interface RawBlock {
@@ -49,6 +52,7 @@ export interface CompiledProgram {
   unknown: Map<string, number>;
   /** Key codes the work reacts to or reads, or null when it may read any key. */
   keys: Set<number> | null;
+  trace: GeneratedTrace;
 }
 
 /** Hat blocks and the runtime event each one waits for. */
@@ -103,7 +107,8 @@ interface Value {
 const NULL_VALUE: Value = { code: 'undefined', kind: 'any' };
 
 function literal(value: unknown): string {
-  return JSON.stringify(value === undefined ? null : value);
+  // Work text must never be mistaken for a generated block marker.
+  return JSON.stringify(value === undefined ? null : value).replaceAll('/*@tessvm:', '/\\u002a@tessvm:');
 }
 
 /**
@@ -218,6 +223,8 @@ function carriedTrick(block: RawBlock): 'continue' | 'break' | null {
 }
 
 export class Codegen {
+  readonly trace: GeneratedTrace = { sourceId: `tessvm-generated-${++nextSourceId}.js`, sites: [] };
+  private readonly traceBlocks: RawBlock[] = [];
   private readonly input: CompileInput;
   private readonly varIndex = new Map<string, number>();
   private readonly targetIndex = new Map<string, number>();
@@ -292,7 +299,7 @@ export class Codegen {
         this.bodies.push(`function* (e, th) {\n${body}}`);
       }
     });
-    return { source: this.emitModule(), plans: this.plans, unknown: this.unknown, keys: this.keys };
+    return { source: this.emitModule(), plans: this.plans, unknown: this.unknown, keys: this.keys, trace: this.trace };
   }
 
   /**
@@ -327,7 +334,27 @@ export class Codegen {
       parts.push(`F[${index}] = ${source};`);
     });
     parts.push(`return { scripts: [\n${this.bodies.join(',\n')}\n], functions: F };`);
-    return parts.join('\n');
+    const source = parts.join('\n');
+    let line = 3, column = 1, previous = 0; // new Function adds two header lines.
+    const clean: string[] = [];
+    this.trace.sites = [];
+    for (const match of source.matchAll(/\/\*@tessvm:(\d+)\*\//g)) {
+      const gap = source.slice(previous, match.index);
+      clean.push(gap);
+      for (let index = 0; index < gap.length; index++) {
+        if (gap[index] === '\n') { line++; column = 1; }
+        else column++;
+      }
+      previous = match.index + match[0].length;
+      const block = this.traceBlocks[Number(match[1])]!;
+      this.trace.sites.push({ line, column, blockId: block.id, blockType: block.type });
+    }
+    clean.push(source.slice(previous));
+    return `${clean.join('')}\n//# sourceURL=${this.trace.sourceId}`;
+  }
+
+  private marker(block: RawBlock): string {
+    return `/*@tessvm:${this.traceBlocks.push(block) - 1}*/`;
   }
 
   private compileFunction(fn: FunctionEntry): string {
@@ -380,9 +407,9 @@ export class Codegen {
     this.funcLocals = null;
     this.loopDepth = previousLoopDepth;
     // Marked once on the prototype, so a call costs nothing extra.
-    return returnsValue
+    return this.marker(define) + (returnsValue
       ? `((g) => { g.prototype.finishes = true; return g; })(${source})`
-      : source;
+      : source);
   }
 
   /**
@@ -405,6 +432,10 @@ export class Codegen {
   //  Statements
   // -------------------------------------------------------------------------
   private statement(block: RawBlock, ind: string): string {
+    return this.marker(block) + this.statementCode(block, ind);
+  }
+
+  private statementCode(block: RawBlock, ind: string): string {
     const p = block.params;
     const line = (code: string) => `${ind}${code}\n`;
 
@@ -929,7 +960,11 @@ export class Codegen {
       }
       return { code: literal(param), kind: typeof param === 'number' ? 'num' : 'any', constant: param as string };
     }
-    const block = param;
+    const value = this.blockValue(param);
+    return value.constant !== undefined ? value : { ...value, code: this.marker(param) + value.code };
+  }
+
+  private blockValue(block: RawBlock): Value {
     const p = block.params;
 
     switch (block.type) {
