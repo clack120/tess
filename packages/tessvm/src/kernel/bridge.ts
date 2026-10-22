@@ -10,6 +10,7 @@
 import { BAIL_SLOT, canonical, judged, type KernelPlan, type KernelSlot } from './plan.ts';
 import { decimals } from '../runtime/cast.ts';
 import { kernelOps, type KernelMarks } from './runtime-js.ts';
+import { scalarPlaces } from './values.ts';
 import type { Variable } from '../runtime/model.ts';
 
 /** Entry unwinds a call chain this deep; the kernel needs room for its own. */
@@ -34,11 +35,11 @@ const REST_MAX = 4096;
 const RETRY_FIRST = 8192;
 const RETRY_MAX = 1 << 20;
 
-type KernelFn = (...args: number[]) => number;
+type KernelFn = (...args: unknown[]) => unknown;
 
 export interface KernelHandle {
   /** Runs one root, or returns null when the caller should use javascript. */
-  run(root: number, args: number[]): number | null;
+  run(root: number, args: unknown[]): unknown;
   /** Roots the kernel can take, by function table index. */
   roots: Map<number, { name: string; arity: number }>;
   depth: number;
@@ -57,7 +58,7 @@ export function attachJsKernel(
   variables: Variable[],
 ): KernelHandle | null {
   const cells = new Float64Array(plan.size);
-  const marks: KernelMarks = { flags: new Uint8Array(plan.size), span: new Int32Array([plan.size, -1]) };
+  const marks: KernelMarks = { flags: new Uint8Array(plan.size), strings: new Uint8Array(plan.size), span: new Int32Array([plan.size, -1]) };
   let built: Record<string, unknown>;
   try {
     const factory = new Function('R', plan.javascript) as (ops: unknown) => Record<string, unknown>;
@@ -202,6 +203,7 @@ function marshal(
           return 'stop';
         }
         cells[slot.base + at] = Number(item);
+        marks.strings[slot.base + at] = typeof item === 'string' ? 1 : 0;
       }
       // A table the kernel only reads carries its tails across with it, counted
       // here once instead of inside every loop that reads it.
@@ -217,21 +219,13 @@ function marshal(
     moved += 1;
     const raw = variable.value;
     const value = Number(raw);
-    if (!Number.isFinite(value) || String(raw).trim() === '') {
+    const places = scalarPlaces(raw);
+    if (places === null) {
       return 'skip';
     }
     cells[slot.base] = value;
     // How the stored text is written decides the next `change_variable`, so the
     // places come across with the value.
-    const source = String(raw);
-    const dot = source.indexOf('.');
-    const places = typeof raw === 'number' || dot === -1 && !/^-?\d+$/.test(source)
-      ? -1
-      : Math.min(dot === -1 ? 0 : source.length - dot - 1, 20);
-    // A branch may leave this variable untouched; copying it out must preserve its text.
-    if (typeof raw === 'string' && (places >= 0 ? value.toFixed(places) : String(value)) !== raw) {
-      return 'skip';
-    }
     cells[slot.places] = places;
     agree(slot, variable);
     return 'ok';
@@ -250,7 +244,8 @@ function marshal(
       let wrote = false;
       for (let at = from; at <= to; at += 1) {
         if (!stored(slot.base + at)) continue;
-        array[at] = { data: slot.judgement ? (cells[slot.base + at] !== 0) as never : cells[slot.base + at]! };
+        const value = cells[slot.base + at]!;
+        array[at] = { data: slot.judgement ? (value !== 0) as never : marks.strings[slot.base + at] ? String(value) : value };
         moved += 1;
         wrote = true;
       }
@@ -260,7 +255,7 @@ function marshal(
       const value = cells[slot.base]!;
       moved += 1;
       // Entry keeps what `toFixed` wrote, so a counter holds "1", not 1.
-      variable.setValue(places >= 0 ? value.toFixed(places) : value);
+      variable.setValue(places >= 0 ? value.toFixed(places) : places === -2 ? String(value) : value);
     }
     // The kernel and the work now hold the same thing, so nothing crosses back
     // until something outside writes it.
@@ -291,7 +286,7 @@ function marshal(
     roots: plan.roots,
     depth: plan.depth,
     stats,
-    run(root: number, args: number[]): number | null {
+    run(root: number, args: unknown[]): unknown {
       const fn = entries.get(root);
       const state = roots.get(root);
       if (!fn || !state || state.stopped) {
@@ -326,6 +321,7 @@ function marshal(
       const left = trial ? performance.now() : 0;
       if (cells[BAIL_SLOT] !== 0) {
         clearMarks();
+        for (const slot of state.writing) stamp.delete(slot.variable);
         return fell(state);
       }
       const written = data();

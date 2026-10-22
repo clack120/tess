@@ -274,11 +274,11 @@ test('10진 반올림은 배정밀도가 담아내는 자리까지만 움직인�
   assert.equal(cast.mulNum(Infinity, 0.1), Infinity);
 });
 
-test('숫자 판별은 지수도 앞의 점도 숫자로 보지 않는다', () => {
-  for (const yes of ['0', '-0', '12', '-12', '12.', '12.5', '-0.75']) {
+test('숫자 판별은 지수 표기를 받아들이고 앞의 점과 불완전한 지수는 거부한다', () => {
+  for (const yes of ['0', '-0', '12', '-12', '12.', '12.5', '-0.75', '1e5', '1E+5', '-1.2e-3', '1.e2', '01e0', '1e309']) {
     assert.equal(cast.isNumber(yes), true, yes);
   }
-  for (const no of ['', '-', '.', '.5', '-.5', '1e5', '+1', ' 1', '1 ', '1.2.3', 'abc', '1a']) {
+  for (const no of ['', '-', '.', '.5', '-.5', '+1', ' 1', '1 ', '1.2.3', 'abc', '1a', '1e', '1e+', '1.e-', 'e2', '1e2.0', '1e2e3', '1e 2', 'Infinity']) {
     assert.equal(cast.isNumber(no), false, no);
   }
   assert.equal(cast.isNumber(12), true);

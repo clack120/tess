@@ -223,15 +223,12 @@ function runWork(source: string, ticks: number, withKernel: boolean): Vm {
   return vm;
 }
 
-/** Every variable and list of a run, as text, for comparing two runs. */
+/** Compare stored values and types, including numeric-looking strings. */
 function snapshot(vm: Vm): string {
-  return vm.variables
-    .map((variable) =>
-      variable.isList
-        ? `${variable.name}=[${variable.array.map((item) => String(item.data)).join(',')}]`
-        : `${variable.name}=${String(variable.getValue())}`,
-    )
-    .join('\n');
+  return JSON.stringify(vm.variables.map((variable) => ({ name: variable.name,
+    value: variable.isList ? variable.array.map((item) => item.data) : variable.getValue(),
+  })), (_key, value) => typeof value === 'number' && (!Number.isFinite(value) || Object.is(value, -0))
+    ? { number: Object.is(value, -0) ? '-0' : String(value) } : value);
 }
 
 /** Both runs of one work agree, value for value. */

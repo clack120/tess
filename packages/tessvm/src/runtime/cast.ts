@@ -46,8 +46,8 @@ const ZERO = 48;
 const NINE = 57;
 
 /**
- * `Entry.Utils.isNumber` — plain decimal literals only, no exponent or leading
- * dot, which is `/^-?\d+\.?\d*$/` read off the characters. Every value a block
+ * `Entry.Utils.isNumber` — decimal literals with an optional exponent, but no
+ * leading dot. Every value a block
  * reads goes through here, and a regex match costs more than the walk does.
  */
 export function isNumber(value: unknown): boolean {
@@ -73,16 +73,25 @@ export function isNumber(value: unknown): boolean {
   if (at === length) {
     return true;
   }
-  if (value.charCodeAt(at) !== DOT) {
-    return false;
+  if (value.charCodeAt(at) === DOT) {
+    for (at += 1; at < length; at += 1) {
+      const code = value.charCodeAt(at);
+      if (code < ZERO || code > NINE) break;
+    }
+    if (at === length) return true;
   }
-  for (at += 1; at < length; at += 1) {
+  const exponent = value.charCodeAt(at++);
+  if (exponent !== 69 && exponent !== 101) return false;
+  const sign = value.charCodeAt(at);
+  if (sign === MINUS || sign === 43) at++;
+  const exponentStart = at;
+  for (; at < length; at += 1) {
     const code = value.charCodeAt(at);
     if (code < ZERO || code > NINE) {
       return false;
     }
   }
-  return true;
+  return at > exponentStart;
 }
 
 /** Decimals beyond this cannot be recovered by rounding, so plain doubles are used. */

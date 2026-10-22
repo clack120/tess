@@ -90,6 +90,44 @@ end`);
   assert.equal(vm.errors[0]!.blockType, 'move_x');
 });
 
+test('a false increment stops at its statement with the evaluated input and no repeated call', () => {
+  for (const kernel of [false, true]) {
+    const { vm, blocks } = load(`var total = 12
+var calls = 0
+var after = 0
+function amount() do
+  calls += 1
+  return false
+end
+function change() do
+  total += amount()
+  return total
+end
+object "actor":
+  when start do
+    say change()
+    after = 1
+  end
+end`, kernel);
+    vm.onError = () => vm.stop();
+    vm.tick();
+    assert.equal(vm.errors.length, 1);
+    const error = vm.errors[0]!;
+    const total = vm.variables.find((item) => item.name === 'total')!;
+    assert.equal(error.blockType, 'change_variable');
+    assert.equal(error.blockId, blocks.find((block) => block.type === 'change_variable' && block.params[0] === total.id)!.id);
+    assert.match(error.message, /false/);
+    assert.deepEqual(error.inputs!.increment, { type: 'boolean', value: false });
+    assert.deepEqual(error.inputs!.variable, { type: 'string', value: 'total', length: 5, truncated: false });
+    assert.equal(vm.state, 'stop');
+    const stored = (name: string) => vm.variables.find((item) => item.name === name)!.value;
+    assert.equal(stored('calls'), '1');
+    assert.equal(stored('total'), 12);
+    assert.equal(stored('after'), 0);
+    if (kernel) assert.ok(vm.kernel!.stats.fallbacks > 0);
+  }
+});
+
 test('block-like comments inside work strings stay text and cannot forge trace sites', () => {
   const text = '/*@tessvm:999999*/ "🙂" \\ /*@tessvm:0*/';
   const { vm, blocks } = load(`var text = ${JSON.stringify(text)}

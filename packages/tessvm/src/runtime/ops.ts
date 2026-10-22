@@ -706,6 +706,10 @@ export function createOps(vm: Vm) {
 
     /** Adds when both sides read as numbers, joins as text otherwise. */
     changeVariable(entity: Entity, index: number, value: unknown): void {
+      if (value === false) {
+        throw new RuntimeBlockError('변수 증가량으로 판단값 false를 사용할 수 없습니다 (숫자 0은 허용됩니다)',
+          'change_variable', { variable: variable(entity, index)?.name ?? index, increment: value });
+      }
       const target = variable(entity, index);
       if (!target) {
         return;
@@ -713,8 +717,9 @@ export function createOps(vm: Vm) {
       const current = target.getValue();
       if (cast.isNumber(value) && target.isNumber()) {
         // Entry stores the result of `toFixed`, so a counter holds "1", not 1.
-        const places = maxFloatPoint([value as string | number, current as string | number]);
-        target.setValue(cast.addNum(Number(value), Number(current)).toFixed(places));
+        const increment = cast.parseNumber(value) as string | number;
+        const places = maxFloatPoint([increment, current as string | number]);
+        target.setValue(cast.addNum(Number(increment), Number(current)).toFixed(places));
         return;
       }
       target.setValue(`${current}${value}`);
