@@ -118,6 +118,16 @@ export interface Stroke {
   fill: boolean;
 }
 
+let penOrder = 0;
+
+/** Pens keep the order in which their shapes were created. */
+export function newBrush(): BrushState {
+  return {
+    color: '#ff0000', thickness: 1, opacity: 0, stop: false,
+    started: ++penOrder, path: [], strokes: [], fill: false,
+  };
+}
+
 /** What a canvas draws with when it refuses a font string outright. */
 const CANVAS_DEFAULT_FONT = { size: 10, family: 'sans-serif' };
 
@@ -591,6 +601,16 @@ export class Target {
     clone.strike = source.strike;
     clone.textAlign = source.textAlign;
     clone.lineBreak = source.lineBreak;
+    if (source.brush) {
+      clone.brush = {
+        ...newBrush(),
+        color: source.brush.color,
+        thickness: source.brush.thickness,
+        opacity: source.brush.opacity,
+        stop: source.brush.stop,
+        path: [clone.x, clone.y],
+      };
+    }
     this.clones.push(clone);
     // The renderer slots a clone right under the entity it came from, so it
     // needs to know which one that was.
