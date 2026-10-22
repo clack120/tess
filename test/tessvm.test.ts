@@ -62,6 +62,30 @@ test('stop and restart restore table cells, field names and shape', () => {
   assert.deepEqual(table.rows, [[1]], 'restored rows do not alias the snapshot');
 });
 
+test('clones inherit pen settings with an independent new drawing path', () => {
+  const vm = runVm(wrap('draw_color = #0000ff\ndraw_width = 7\ndraw_alpha = 30\nstart draw\nforward 5\nclone'));
+  vm.tick();
+  const target = vm.targets[0]!;
+  const parent = target.entity;
+  const clone = target.clones[0]!;
+  assert.ok(parent.brush && clone.brush);
+  assert.notEqual(clone.brush, parent.brush);
+  assert.equal(clone.brush.color, '#0000ff');
+  assert.equal(clone.brush.thickness, 7);
+  assert.equal(clone.brush.opacity, parent.brush.opacity);
+  assert.equal(clone.brush.stop, false);
+  assert.ok(clone.brush.started > parent.brush.started);
+  assert.deepEqual(clone.brush.strokes, []);
+  assert.deepEqual(clone.brush.path, [clone.x, clone.y]);
+  clone.brush.color = '#ff0000';
+  clone.brush.path.push(99, 99);
+  assert.equal(parent.brush.color, '#0000ff');
+  assert.notDeepEqual(clone.brush.path, parent.brush.path);
+  parent.brush.stop = true;
+  const stopped = target.addClone(parent);
+  assert.equal(stopped.brush!.stop, true);
+});
+
 /** Compiles Tess source and hands back a started VM. */
 function runVm(source: string): Vm {
   const result = compileProject(source, { path: 'test.tess' });

@@ -9,6 +9,7 @@ import { BOUNCE_THRESHOLD, TOUCH_THRESHOLD } from '../collision/detect.ts';
 import * as cast from './cast.ts';
 import {
   COLLISION,
+  newBrush,
   stage,
   type BrushState,
   type Entity,
@@ -128,23 +129,6 @@ function roundedDecimals(value: unknown, decimals: number): unknown {
     return value;
   }
   return Number(`${Math.round(Number(`${value}e${decimals}`))}e-${decimals}`);
-}
-
-/** Counts pens as they are made, which is the order their layers stack in. */
-let penOrder = 0;
-
-function newBrush(): BrushState {
-  penOrder += 1;
-  return {
-    color: '#ff0000',
-    thickness: 1,
-    opacity: 0,
-    stop: false,
-    started: penOrder,
-    path: [] as number[],
-    strokes: [] as Stroke[],
-    fill: false,
-  };
 }
 
 /** `Entry.setBasicBrush` / `setBasicPaint` — made idle so it draws nothing yet. */
