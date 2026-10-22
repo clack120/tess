@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { icon } from './icons.ts';
 import { crxIdText, packCrx, publicKeyOf, signingKey, zipDirectory } from './pack.ts';
@@ -26,25 +26,9 @@ const DIST = path.join(ROOT, 'dist');
 const VENDOR = path.join(DIST, 'vendor');
 const VM_OUT = path.join(VENDOR, 'tessvm');
 const PIXI_OUT = path.join(VENDOR, 'pixi.mjs');
-const CHEVROTAIN_OUT = path.join(VENDOR, 'chevrotain.mjs');
 const DEXIE_OUT = path.join(VENDOR, 'dexie.mjs');
 const DEXIE_IO_OUT = path.join(VENDOR, 'dexie-export-import.mjs');
 
-/**
- * The toolchain the extension carries: a work is decompiled to Tess and
- * compiled back before it runs, exactly as `tessvm run` does with a `.ent`.
- * Each package keeps its own folder under `vendor/tess`.
- */
-const TESS_PACKAGES = ['core', 'parser', 'compiler', 'decompiler'];
-const TESS_ROOTS = TESS_PACKAGES.map((name) => ({
-  name,
-  src: path.resolve(ROOT, `../${name}`),
-  out: path.join(VENDOR, 'tess', name),
-}));
-/** `@tess/<name>` resolves to that package's entry file. */
-const WORKSPACE_ENTRY = new Map(
-  TESS_ROOTS.map((root) => [`@tess/${root.name}`, path.join(root.src, 'index.ts')]),
-);
 const ZIP = path.join(ROOT, 'tessvm-extension.zip');
 const CHROME_ZIP = path.join(ROOT, 'tessvm-extension-chrome.zip');
 const CRX = path.join(ROOT, 'tessvm-extension.crx');
@@ -60,24 +44,21 @@ const ICON_SIZES = [16, 32, 48, 128];
 /** Relative `.ts` specifiers and the bare ones the sources use. */
 const RELATIVE_IMPORT = /(['"])(\.\.?\/[^'"]*\.ts)\1/g;
 const PIXI_IMPORT = /(['"])pixi\.js\1/g;
-const CHEVROTAIN_IMPORT = /(['"])chevrotain\1/g;
 const DEXIE_IMPORT = /(['"])dexie\1/g;
 const DEXIE_IO_IMPORT = /(['"])dexie-export-import\1/g;
-const WORKSPACE_IMPORT = /(['"])(@tess\/[a-z]+)\1/g;
 /** `import … from '…';`, and the side-effect form. */
 const IMPORT_STATEMENT = /^import\s[\s\S]*?from\s*['"][^'"]*['"];?[^\S\n]*$/gm;
 const BARE_IMPORT = /^import\s*['"][^'"]*['"];?[^\S\n]*$/gm;
 const EXPORT_KEYWORD = /^export\s+(?=(?:const|let|var|function|class|async)\b)/gm;
 const LEFTOVER_MODULE = /^\s*(?:import|export)\b/m;
 
-const read = (file: string) => stripTypeScriptTypes(fs.readFileSync(file, 'utf-8'), { mode: 'strip' });
+const read = (file: string) => stripTypes(fs.readFileSync(file, 'utf-8'));
 
 /** Where one source file lands in the build, by the tree it came from. */
 function outputFor(file: string): string {
   const roots = [
     { src: SRC, out: DIST },
     { src: VM_SRC, out: VM_OUT },
-    ...TESS_ROOTS,
   ];
   for (const root of roots) {
     const inside = path.relative(root.src, file);
@@ -86,15 +67,6 @@ function outputFor(file: string): string {
     }
   }
   throw new Error(`확장에 포함할 수 없는 모듈입니다: ${file}`);
-}
-
-/** The file a bare `@tess/…` specifier points at. */
-function workspaceFile(specifier: string): string {
-  const entry = WORKSPACE_ENTRY.get(specifier);
-  if (!entry) {
-    throw new Error(`확장이 모르는 패키지입니다: ${specifier}`);
-  }
-  return entry;
 }
 
 function link(from: string, to: string): string {
@@ -109,9 +81,6 @@ function importsOf(file: string): string[] {
   for (const [, , specifier] of text.matchAll(RELATIVE_IMPORT)) {
     found.push(path.resolve(path.dirname(file), specifier!));
   }
-  for (const [, , specifier] of text.matchAll(WORKSPACE_IMPORT)) {
-    found.push(workspaceFile(specifier!));
-  }
   return found;
 }
 
@@ -125,16 +94,7 @@ function emitModule(file: string): string[] {
       found.push(target);
       return `${quote}${link(out, outputFor(target))}${quote}`;
     })
-    .replace(WORKSPACE_IMPORT, (_match, quote: string, specifier: string) => {
-      const target = workspaceFile(specifier);
-      found.push(target);
-      return `${quote}${link(out, outputFor(target))}${quote}`;
-    })
     .replace(PIXI_IMPORT, (_match, quote: string) => `${quote}${link(out, PIXI_OUT)}${quote}`)
-    .replace(
-      CHEVROTAIN_IMPORT,
-      (_match, quote: string) => `${quote}${link(out, CHEVROTAIN_OUT)}${quote}`,
-    )
     .replace(DEXIE_IMPORT, (_match, quote: string) => `${quote}${link(out, DEXIE_OUT)}${quote}`)
     .replace(
       DEXIE_IO_IMPORT,
@@ -323,12 +283,6 @@ for (const entry of CLASSIC_ENTRIES) {
   flattened += emitClassic(path.join(SRC, entry));
 }
 copyVendor(path.join(ROOT, '../tessvm/package.json'), 'pixi.js', 'dist/pixi.min.mjs', PIXI_OUT);
-copyVendor(
-  path.join(ROOT, '../parser/package.json'),
-  'chevrotain',
-  'lib/chevrotain.min.mjs',
-  CHEVROTAIN_OUT,
-);
 copyVendor(
   path.join(ROOT, '../tessvm/package.json'),
   'dexie',

@@ -5,10 +5,10 @@
 ```bash
 git clone https://github.com/ddtt786/tess.git
 cd tess
-pnpm install
-pnpm tess check examples/tour.tess
-pnpm tess run   examples/all_blocks.tess
-pnpm tess build examples/all_blocks.tess -o blocks.ent
+bun install
+bun tess check examples/all_blocks.tess
+bun tess run   examples/all_blocks.tess
+bun tess build examples/all_blocks.tess -o blocks.ent
 ```
 
 ## 라이브러리

@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 
@@ -29,9 +29,7 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
   const written: Array<[string, boolean]> = [];
   const dropped: string[] = [];
   let rows: any[] = saved.slice();
-  const source = stripTypeScriptTypes(fs.readFileSync(path.join(POPUP, 'popup.ts'), 'utf-8'), {
-    mode: 'strip',
-  });
+  const source = stripTypes(fs.readFileSync(path.join(POPUP, 'popup.ts'), 'utf-8'));
   const settings = { enabled: true, svg: true, ...stored };
   const sandbox: Record<string, unknown> = {
     document: dom.window.document,

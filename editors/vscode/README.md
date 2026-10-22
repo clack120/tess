@@ -45,7 +45,7 @@ code --install-extension tess-lang-1.0.0.vsix
 언어에 키워드를 더했다면 다시 만들어 주세요.
 
 ```bash
-node editors/vscode/build-grammar.mjs
+bun run build:grammar
 ```
 
-`pnpm test` 가 이 파일이 최신인지도 함께 확인합니다.
+`bun run test` 가 이 파일이 최신인지도 함께 확인합니다.

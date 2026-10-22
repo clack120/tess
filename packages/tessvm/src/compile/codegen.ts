@@ -1221,6 +1221,15 @@ export class Codegen {
   }
 }
 
+/** playentry leaves `params` out of a block that has none; the compiler reads it on every block. */
+function withParams(_key: string, value: unknown): unknown {
+  if (value && typeof value === 'object' && !Array.isArray(value) &&
+    typeof (value as RawBlock).type === 'string' && !Array.isArray((value as RawBlock).params)) {
+    (value as RawBlock).params = [];
+  }
+  return value;
+}
+
 function parseScript(script: string | RawBlock[][] | undefined): RawBlock[][] {
   if (!script) {
     return [];
@@ -1230,7 +1239,7 @@ function parseScript(script: string | RawBlock[][] | undefined): RawBlock[][] {
       return [];
     }
     try {
-      return JSON.parse(script) as RawBlock[][];
+      return JSON.parse(script, withParams) as RawBlock[][];
     } catch {
       return [];
     }

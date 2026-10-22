@@ -18,7 +18,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
@@ -111,7 +111,7 @@ const DEBUG_UI_FILE = fileURLToPath(new URL('./debug-ui.ts', import.meta.url));
  * keeping every line and column aligned with the source.
  */
 export function debugUiSource() {
-  return stripTypeScriptTypes(fs.readFileSync(DEBUG_UI_FILE, 'utf-8'), { mode: 'strip' });
+  return stripTypes(fs.readFileSync(DEBUG_UI_FILE, 'utf-8'));
 }
 
 /** 

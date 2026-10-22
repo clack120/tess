@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 
@@ -26,10 +26,7 @@ function readerFor(payload: string | null) {
       ? '<!doctype html><body></body>'
       : `<!doctype html><body><script id="__NEXT_DATA__" type="application/json">${payload}</script></body>`,
   );
-  const source = stripTypeScriptTypes(
-    fs.readFileSync(path.join(root, 'packages/extension/src/page/signed-in.ts'), 'utf-8'),
-    { mode: 'strip' },
-  );
+  const source = stripTypes(fs.readFileSync(path.join(root, 'packages/extension/src/page/signed-in.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = { document: dom.window.document };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
@@ -81,7 +78,7 @@ test('아이디나 닉네임 한쪽만 있어도 로그인한 것으로 본다',
  * 확장은 엔트리 작품을 그대로 돌리지 않고 `tessvm run` 이 `.ent` 를 다룰 때와 같이
  * Tess 로 되돌린 뒤 다시 컴파일해서 돌립니다. 그대로 넘어가는 것은 파일 주소뿐입니다.
  */
-test('확장이 쓰는 길: 엔트리 작품 -> Tess -> 다시 엔트리 작품', async () => {
+test('엔트리 작품 -> Tess -> 다시 엔트리 작품에서 자산 주소가 남는다', async () => {
   const { decompileProject } = await import('../packages/decompiler/src/index.ts');
   const { compileProject } = await import('../packages/compiler/src/index.ts');
   const work = {

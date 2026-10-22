@@ -14,9 +14,9 @@
   ],
   "dependencies": {
     "@tess/compiler": "workspace:*",
-    "preact": "^10.29.8"
+    "preact": "^11.0.1"
   },
   "devDependencies": {
-    "@entrylabs/entry": "^4.0.22"
+    "@entrylabs/entry": "^4.0.23"
   }
 }

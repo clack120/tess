@@ -1991,14 +1991,6 @@ test('변수 상자 자리는 positions 를 켰을 때만 적는다', () => {
 });
 
 /** 확장은 사이트에서 보던 자리를 그대로 옮긴다. */
-test('확장의 되돌리기는 자리를 적는다', () => {
-  const source = fs.readFileSync(
-    new URL('../packages/extension/src/page/tess-project.ts', import.meta.url),
-    'utf-8',
-  );
-  assert.match(source, /positions: true,/);
-});
-
 /**
  * 표의 열 고르기 드롭다운(`get_table_fields`)은 이름을 보여 주지만 담고 있는 것은
  * 1부터 세는 열 번호입니다. 옮기지 못하면 어느 열인지가 통째로 사라집니다.

@@ -12,7 +12,6 @@
     "@tess/vm": "workspace:*",
     "dexie": "^4.4.6",
     "dexie-export-import": "^4.4.1",
-    "pixi.js": "^8.20.1",
-    "socket.io-client": "^4.8.3"
+    "pixi.js": "^8.20.1"
   }
 }

@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 
@@ -45,10 +45,7 @@ function mountExtras(t: any) {
     return nextTimer++;
   }) as never;
 
-  const source = stripTypeScriptTypes(
-    fs.readFileSync(path.join(root, 'packages/tessvm/src/web/extras.ts'), 'utf-8'),
-    { mode: 'strip' },
-  );
+  const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/web/extras.ts'), 'utf-8'));
   // 복사는 1초에 한 번까지라 시계를 손에 쥐고 돌린다.
   let clock = 100_000;
   const copied: string[] = [];

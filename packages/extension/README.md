@@ -3,8 +3,8 @@
 엔트리 작품 페이지(`playentry.org/project/…`)의 실행기를 tessvm 으로 바꾸는 확장입니다.
 
 ```bash
-pnpm build:extension                      # dist 폴더와 zip 생성
-node packages/extension/build.ts --crx     # crx 까지 함께 생성
+bun run build:extension                   # dist 폴더와 zip 생성
+bun packages/extension/build.ts --crx      # crx 까지 함께 생성
 ```
 
 | 파일                            | 쓰는 곳                                  |

@@ -2,13 +2,13 @@
  * @fileoverview `tessvm run` 이 띄우는 정적 서버입니다.
  *
  * 번들 단계가 없습니다 — 브라우저 쪽 소스는 `.ts` 그대로 두고 내보낼 때 타입만
- * 지웁니다(`stripTypeScriptTypes`). 줄과 열이 그대로라 개발자 도구에서 본 위치가
- * 저장소의 위치와 같습니다.
+ * 지웁니다(`stripTypes`). Bun 의 변환기는 코드를 다시 찍으므로 개발자 도구의 줄
+ * 위치가 저장소와 다를 수 있습니다.
  */
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import {
@@ -224,7 +224,7 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
         return send(response, 404, 'text/plain', 'not found');
       }
       const source = fs.readFileSync(file, 'utf-8');
-      const code = file.endsWith('.ts') ? stripTypeScriptTypes(source, { mode: 'strip' }) : source;
+      const code = file.endsWith('.ts') ? stripTypes(source) : source;
       return send(response, 200, MIME['.js']!, code);
     }
 
