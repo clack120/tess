@@ -413,16 +413,16 @@ export class EntryTtsEngine implements SpeechEngine {
   private readonly playing = new Set<Reading>();
 
   private address(text: string, voice: VoiceProps): string {
-    const query = new URLSearchParams({
+    const query = encodeURI(Object.entries({
       text,
       speaker: voice.speaker || 'kyuri',
       speed: String(voice.speed || 0),
       pitch: String(voice.pitch || 0),
       volume: String(voice.volume ?? 1),
-    });
+    }).map(([key, value]) => `${key}=${value}`).join('&'));
     // Same origin on the site itself; elsewhere the reading comes from there.
     const here = (globalThis as { location?: Location }).location?.origin;
-    return `${here === TTS_ORIGIN ? '' : TTS_ORIGIN}${TTS_PATH}?${query.toString()}`;
+    return `${here === TTS_ORIGIN ? '' : TTS_ORIGIN}${TTS_PATH}?${query}`;
   }
 
   async speak(text: string, voice: VoiceProps): Promise<void> {
