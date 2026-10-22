@@ -96,6 +96,33 @@ function runVm(source: string): Vm {
   return vm;
 }
 
+test('out-of-range char_at and substring run on and are noted once per object', () => {
+  const vm = runVm(`var s = "ABC"
+var a = 0
+var b = 0
+var c = 0
+object "o":
+  when start do
+    a = s[2]
+    b = slice(s, 1, 3)
+    repeat 3:
+      a = s[4]
+    end
+    b = slice(s, 0, 2)
+    c = 1
+  end
+end`);
+  for (let i = 0; i < 5; i++) vm.tick();
+  assert.equal(valueOf(vm, 'c'), 1);
+  assert.deepEqual(vm.errors, []);
+  assert.deepEqual(vm.divergences.map((note) => note.message), [
+    '글자 위치가 범위를 벗어났습니다 (char_at)',
+    '글자 범위가 벗어났습니다 (substring)',
+  ]);
+  const target = vm.targetOf(vm.divergences[0]!.targetId!);
+  assert.equal(target?.name, 'o');
+});
+
 test('function labels inherited from Object.prototype execute their own bodies', () => {
   for (const name of ['ordinary', 'constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
     const vm = runVm(`var out = 0
