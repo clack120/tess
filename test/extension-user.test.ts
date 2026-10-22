@@ -78,7 +78,7 @@ test('아이디나 닉네임 한쪽만 있어도 로그인한 것으로 본다',
  * 확장은 엔트리 작품을 그대로 돌리지 않고 `tessvm run` 이 `.ent` 를 다룰 때와 같이
  * Tess 로 되돌린 뒤 다시 컴파일해서 돌립니다. 그대로 넘어가는 것은 파일 주소뿐입니다.
  */
-test('확장이 쓰는 길: 엔트리 작품 -> Tess -> 다시 엔트리 작품', async () => {
+test('엔트리 작품 -> Tess -> 다시 엔트리 작품에서 자산 주소가 남는다', async () => {
   const { decompileProject } = await import('../packages/decompiler/src/index.ts');
   const { compileProject } = await import('../packages/compiler/src/index.ts');
   const work = {

@@ -15,7 +15,6 @@ import { fetchWork, thumbUrl } from "./entry-project.ts";
 import { bridgeSaveStore } from "./save-bridge.ts";
 import { CloudClient } from "./cloud.ts";
 
-import { toTessProject } from "./tess-project.ts";
 import { signedInUser } from "./signed-in.ts";
 
 const ICONS = {
@@ -347,41 +346,21 @@ export function mountPlayer(
       cover.style.backgroundImage = `url("${thumb}")`;
     }
 
-    // Building the work is one long stretch of work on this thread, so the
-    // line above it is given a frame to appear in first.
-    status.textContent = "작품을 Tess 로 옮기는 중…";
+    // The work's own blocks run as they are, so its ids are entry's ids.
+    status.textContent = "실행기를 준비하는 중…";
     await nextFrame();
-    let built;
-    try {
-      built = toTessProject(work);
-    } catch (error) {
-      status.textContent = "";
-      showError(error instanceof Error ? error.message : String(error));
-      return;
-    }
     if (disposed) {
       return;
     }
-    reportDropped(built.dropped);
-    status.textContent = "실행기를 준비하는 중…";
 
-    const entryVarsByName = new Map<string, any>();
-    for (const v of work.variables ?? []) {
-        entryVarsByName.set(String(v.name), v);
-    }
-    
     const tessIdToEntryId = new Map<string, string>();
     const entryIdToTessId = new Map<string, string>();
     const variableMongoIds = new Map<string, string>();
-    
-    for (const v of built.project.variables) {
+    for (const v of work.variables ?? []) {
       if (v.isCloud || v.isRealTime) {
-        const entryVar = entryVarsByName.get(String(v.name));
-        if (entryVar) {
-          tessIdToEntryId.set(String(v.id), String(entryVar.id));
-          entryIdToTessId.set(String(entryVar.id), String(v.id));
-          variableMongoIds.set(String(v.id), String(entryVar._id));
-        }
+        tessIdToEntryId.set(String(v.id), String(v.id));
+        entryIdToTessId.set(String(v.id), String(v.id));
+        variableMongoIds.set(String(v.id), String(v._id));
       }
     }
     const csrfToken = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
@@ -391,7 +370,7 @@ export function mountPlayer(
 
     try {
       handle = await boot({
-        project: built.project,
+        project: work,
         store: cloud,
         // What the work saves belongs to the extension, so the settings panel
         // can show it and throw it away (`src/store-db.ts`).
