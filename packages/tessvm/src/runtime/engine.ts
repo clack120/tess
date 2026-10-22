@@ -846,6 +846,9 @@ export class Vm implements Project {
     this.audio?.resume?.();
     this.speech?.resume?.();
     this.clearQuestion();
+    for (const table of this.tables) {
+      table.reset();
+    }
     this.extras.stopped();
   }
 
@@ -871,6 +874,9 @@ export class Vm implements Project {
     }
     for (const variable of this.variables) {
       variable.loadSnapshot();
+    }
+    for (const table of this.tables) {
+      table.reset();
     }
     this.answer = '';
     this.errors = [];
