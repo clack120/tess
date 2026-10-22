@@ -16,6 +16,8 @@ import { localVariableStore } from './store.ts';
 import { dexieSaveStore } from './save-store.ts';
 import type { SaveHost } from '../runtime/save.ts';
 import { bindExtras } from './extras.ts';
+import { RuntimeDiagnostics } from './diagnostics.ts';
+import { mountDiagnostics } from './diagnostics-view.ts';
 
 export interface BootOptions {
   projectUrl?: string;
@@ -82,6 +84,9 @@ export interface TessVmHandle {
   start(): void;
   stop(): void;
   pause(): void;
+  /** Opens the stage's status and most recent failure, without pausing the work. */
+  inspect(): void;
+  downloadDiagnostics(): void;
   /** Re-fits the canvas after the window or the quality setting changed. */
   relayout(): void;
   /** Resizes the stage itself, in entry units. */
@@ -397,6 +402,16 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
   }
 
   const stats = options.showStats ? makeStats(frame) : null;
+  const diagnostics = new RuntimeDiagnostics(vm);
+  for (const type of ['focus', 'blur', 'focusin']) {
+    const listener = () => diagnostics.recordFocus(type);
+    window.addEventListener(type, listener);
+    cleanups.push(() => window.removeEventListener(type, listener));
+  }
+  const diagnosticView = mountDiagnostics(container, diagnostics, () => {
+    (options.keyTarget ?? view).focus({ preventScroll: true });
+  });
+  cleanups.push(() => diagnosticView.dispose());
   let last = performance.now();
   let frames = 0;
   let accumulated = 0;
@@ -405,11 +420,13 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     // `advance` reports what it can itself; this is the last net, so a throw
     // from anywhere in a frame ends the run with a reason instead of leaving a
     // frozen canvas and a driver that keeps calling back into the same throw.
+    const began = performance.now();
     try {
       vm.advance(now);
     } catch (error) {
       vm.fail(error);
     }
+    diagnostics.record(now, performance.now() - began);
     syncCursor();
     chartWindow.sync();
     if (stats) {
@@ -448,6 +465,8 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
       renderer.flush();
     },
     pause: () => vm.pause(),
+    inspect: () => diagnosticView.open(),
+    downloadDiagnostics: () => diagnosticView.download(),
     relayout: resize,
     setStageSize(width: number, height: number) {
       setStageSize(width, height);

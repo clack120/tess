@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileProject } from '@tess/compiler';
 import { Vm, formatVmError } from '@tess/vm';
-import { blockOfError, runtimeValue } from '../packages/tessvm/src/runtime/diagnostics.ts';
+import { blockOfError, runtimeValue, snapshotVm } from '../packages/tessvm/src/runtime/diagnostics.ts';
 import type { RawBlock } from '../packages/tessvm/src/compile/codegen.ts';
 
 function load(source: string, kernel = false) {
@@ -104,6 +104,20 @@ end`);
   assert.deepEqual(vm.errors[0]!.inputs!.text, { type: 'string', value: text, length: text.length, truncated: false });
 });
 
+test('Unicode line separators in literals cannot shift a failing block location', () => {
+  const text = 'first\u2028second\u2029third';
+  const { vm } = load('object "actor":\nend');
+  const access: RawBlock = { id: 'bad-index', type: 'char_at', params: [null, text, null, 0, null], statements: [] };
+  const join: RawBlock = { id: 'join', type: 'combine_something', params: [null, text, null, access, null], statements: [] };
+  vm.runStack([
+    { id: 'print', type: 'dialog', params: [join, 'speak', null], statements: [] },
+    { id: 'later', type: 'dialog', params: ['later', 'speak', null], statements: [] },
+    { id: 'after', type: 'dialog', params: ['after', 'speak', null], statements: [] },
+  ], vm.targets[0]!.id);
+  assert.equal(vm.errors[0]!.blockId, access.id);
+  assert.deepEqual(vm.errors[0]!.inputs!.text, { type: 'string', value: text, length: text.length, truncated: false });
+});
+
 test('ad hoc stacks get their own trace and slice inputs survive JSON export', () => {
   const { vm } = load('object "actor":\nend');
   const block: RawBlock = { id: 'slice-failed', type: 'substring', params: [null, 'abc', null, 0, null, 2, null], statements: [] };
@@ -137,6 +151,40 @@ test('value probes still reject and also report their exact failing block', asyn
   await assert.rejects(vm.evaluate(block, vm.targets[0]!.id), /글자 위치 7/);
   assert.deepEqual(reported, ['bad-index']);
   assert.equal(vm.errors[0]!.context!.event, 'probe');
+});
+
+test('the last failure retains pre-reset variables and input after the host resets the work', () => {
+  const { vm } = load(`var text = "abc"
+var index = 9
+object "actor":
+  when start do
+    text = "changed"
+    say text[index]
+  end
+end`);
+  vm.pressedKeys.add(13);
+  vm.onError = () => { vm.stop(); vm.reset(); };
+  vm.tick();
+  assert.equal(vm.errors.length, 0);
+  assert.equal(vm.variables.find((item) => item.name === 'text')!.getValue(), 'abc');
+  const before = vm.lastError!.snapshot!;
+  assert.equal(before.state, 'run');
+  assert.deepEqual(before.input.keys, [13]);
+  assert.deepEqual(before.variables.find((item) => item.name === 'text')!.values[0],
+    { type: 'string', value: 'changed', length: 7, truncated: false });
+});
+
+test('state previews are detached, bounded and report the full list length', () => {
+  const { vm } = load('list items = [1, 2]\nobject "actor":\nend');
+  const list = vm.variables.find((item) => item.name === 'items')!;
+  list.array = Array.from({ length: 10000 }, (_, i) => ({ data: i }));
+  const snapshot = snapshotVm(vm);
+  const preview = snapshot.variables.find((item) => item.name === 'items')!;
+  assert.equal(preview.length, 10000);
+  assert.equal(preview.values.length, 20);
+  list.array[0]!.data = 999;
+  assert.deepEqual(preview.values[0], { type: 'number', value: 0 });
+  assert.equal(snapshot.counts.listItems, 10000);
 });
 
 test('runtime value snapshots bound text and preserve falsy and nonfinite values without coercion', () => {

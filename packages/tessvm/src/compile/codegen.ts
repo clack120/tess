@@ -342,7 +342,8 @@ export class Codegen {
       const gap = source.slice(previous, match.index);
       clean.push(gap);
       for (let index = 0; index < gap.length; index++) {
-        if (gap[index] === '\n') { line++; column = 1; }
+        const char = gap.charCodeAt(index);
+        if (char === 10 || char === 0x2028 || char === 0x2029) { line++; column = 1; }
         else column++;
       }
       previous = match.index + match[0].length;

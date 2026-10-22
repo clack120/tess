@@ -277,6 +277,11 @@ try {
   window.tessPatchEnvironmentBlocks();
   window.tessLayoutCanvas();
   reportVmErrors(handle, sourceMap);
+  document.getElementById('stage').addEventListener('contextmenu', (event) => {
+    if (event.target.closest?.('input, textarea, select, button, .tessvm-diagnostics')) return;
+    event.preventDefault();
+    handle.inspect();
+  });
   // One button carries both halves: it starts a stopped project, holds a running
   // one, and resumes a held one.
   const runButton = runButtonEarly;
