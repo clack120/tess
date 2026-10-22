@@ -256,17 +256,14 @@ export function mountPlayer(
    * without the work being loaded again.
    */
   let notice = "";
-  /** Blocks entry would have stopped the work on, one line each. */
-  const divergences: string[] = [];
   const drawNotice = () => {
-    const text = [notice, ...divergences].filter(Boolean).join("\n");
-    if (!text || !showNotice) {
+    if (!notice || !showNotice) {
       errorBox.hidden = true;
       errorBox.textContent = "";
       return;
     }
     errorBox.classList.add("is-notice");
-    errorBox.textContent = text;
+    errorBox.textContent = notice;
     errorBox.hidden = false;
   };
   const showsError = () => !errorBox.hidden && !errorBox.classList.contains("is-notice");
@@ -511,13 +508,6 @@ export function mountPlayer(
       if (live.vm.state !== "stop") {
         stop();
       }
-    };
-    live.vm.onDivergence = (note) => {
-      const target = note.targetId ? live.vm.targetOf(note.targetId) : null;
-      divergences.push(
-        `${target ? `${target.name}: ` : ""}${note.message} — 엔트리에서는 여기서 작품이 멈춥니다`,
-      );
-      if (!showsError()) drawNotice();
     };
 
     startButton.onclick = start;

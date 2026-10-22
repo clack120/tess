@@ -46,7 +46,7 @@ export const api = (globals.browser ?? globals.chrome) as ExtensionApi;
 export const ENABLED_KEY = 'enabled';
 /** Whether a costume drawn as a vector is loaded as one. */
 export const SVG_KEY = 'svg';
-/** Whether the runner notes blocks it lacks and blocks entry stops on. On by default. */
+/** Whether the runner says which blocks it does not have yet. On by default. */
 export const NOTICE_KEY = 'notice';
 
 export interface Settings {
