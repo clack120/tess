@@ -11,10 +11,11 @@ test('diagnostic positions use each included source and retain UTF-16 columns', 
     ['one.tess', 'object "one":\nvar local_one = 0\nwhen start do\nwrite "x"\nclear text\nend\nend\nfunction f():\nreturn local_one\nend'],
     ['two.tess', '# 😀\n\nobject "two":\nvar local_two = 0\nwhen start do\nwrite "😀"\nclear text\nend\nend\nfunction g():\nreturn local_two\nend'],
   ]);
-  const program: ProgramNode = { type: 'Program', body: [] };
+  const program: ProgramNode = { type: 'Program', body: [], loc: { start: 0, end: 0 } };
   for (const [file, source] of sources) {
     const parsed = parse(source, { validate: false });
-    assert.ok(parsed.ok && parsed.ast.type === 'Program');
+    assert.ok(parsed.ok && parsed.ast);
+    assert.equal((parsed.ast as ProgramNode).type, 'Program');
     const stamped: ProgramNode = JSON.parse(JSON.stringify(parsed.ast,
       (key, value) => key === 'loc' ? { ...value, file } : value));
     program.body.push(...stamped.body);
