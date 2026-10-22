@@ -34,7 +34,7 @@ function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 })
   const dom = new JSDOM(
     '<!doctype html><body><div id="root" tabindex="0" draggable="true">'
       + '<div id="view"><input id="ask" type="text"></div><button id="stop"></button>'
-      + '</div><input id="outside" type="text"></body>',
+      + '</div><input id="outside" type="text"><dialog id="dialog"><button id="modal"></button></dialog></body>',
     { pretendToBeVisual: true },
   );
   t.after(() => dom.window.close());
@@ -69,9 +69,17 @@ function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 })
     fireEventOn: () => [],
   };
   const document_ = dom.window.document;
+  let windowFocused = true;
+  let hidden = false;
+  let fullscreen: HTMLElement | null = null;
+  Object.defineProperties(document_, {
+    hasFocus: { value: () => windowFocused },
+    hidden: { get: () => hidden },
+    fullscreenElement: { get: () => fullscreen },
+  });
   const view = document_.getElementById('view')!;
   const player = document_.getElementById('root')!;
-  (sandbox.bind as any)(stage, { ...stubRenderer(), canvasRect: () => rect }, view, player, []);
+  const frame = (sandbox.bind as any)(stage, { ...stubRenderer(), canvasRect: () => rect }, view, player, [], () => '');
 
   /** 키를 눌러 보고, 페이지가 그 키를 그대로 쓸 수 있었는지 돌려준다. */
   const press = (on: string, init: Record<string, unknown>, type = 'keydown') => {
@@ -84,12 +92,23 @@ function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 })
     return { prevented: event.defaultPrevented, reachedPage: sawIt };
   };
   const pointer = (on: 'view' | 'root' | 'ask' | 'window', type: string, clientX: number, clientY: number) => {
+    if (on === 'window' && type === 'blur') windowFocused = false;
+    if (on === 'window' && type === 'focus') windowFocused = true;
     const target = on === 'window' ? dom.window : document_.getElementById(on)!;
     const event = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY });
     target.dispatchEvent(event);
     return event;
   };
-  return { press, pointer, stage, fired,
+  return { press, pointer, stage, fired, frame,
+    fullscreen: (enabled: boolean) => {
+      fullscreen = enabled ? player : null;
+      document_.dispatchEvent(new dom.window.Event('fullscreenchange'));
+    },
+    visible: (enabled: boolean) => {
+      hidden = !enabled;
+      document_.dispatchEvent(new dom.window.Event('visibilitychange'));
+    },
+    openDialog: () => document_.getElementById('dialog')!.setAttribute('open', ''),
     focus: (id: string) => (document_.getElementById(id) as HTMLElement).focus(),
     blurFocused: () => (document_.activeElement as HTMLElement).blur(),
     focused: () => document_.activeElement?.id,
@@ -179,6 +198,52 @@ test('returning to the window preserves answer fields and unrelated page focus',
   focus('outside');
   pointer('window', 'focus', 0, 0);
   assert.equal(focused(), 'outside', 'a page moving focus while away must not be overridden');
+});
+
+test('fullscreen recovers lost or stolen focus even without a remembered window blur', (t) => {
+  const page = mountInput(t);
+  page.focus('outside'); page.fullscreen(true);
+  assert.equal(page.focused(), 'root');
+  page.focus('outside');
+  assert.equal(page.focused(), 'root', 'external page focus cannot take keys from a fullscreen work');
+  page.blurFocused(); page.frame();
+  assert.equal(page.focused(), 'root', 'a missing focus event is recovered on the next frame');
+  page.stage.state = 'stop';
+  page.blurFocused(); page.frame();
+  assert.equal(page.focused(), 'root', 'fullscreen keeps owning focus while stopped too');
+});
+
+test('fullscreen retries window and visibility return while preserving player fields and dialogs', (t) => {
+  const page = mountInput(t);
+  page.fullscreen(true);
+  for (let index = 0; index < 2; index++) {
+    page.pointer('window', 'blur', 0, 0);
+    page.visible(false); page.focus('outside'); page.frame();
+    assert.equal(page.focused(), 'outside', 'another app keeps its focus while away');
+    page.pointer('window', 'blur', 0, 0);
+    page.visible(true); page.frame();
+    assert.equal(page.focused(), 'outside');
+    page.pointer('window', 'focus', 0, 0);
+    assert.equal(page.focused(), 'root');
+  }
+  for (const control of ['ask', 'stop']) {
+    page.focus(control); page.frame();
+    page.pointer('window', 'blur', 0, 0); page.pointer('window', 'focus', 0, 0);
+    assert.equal(page.focused(), control);
+  }
+  page.openDialog(); page.focus('modal'); page.frame();
+  assert.equal(page.focused(), 'modal', 'an open dialog keeps its keyboard navigation');
+  page.fullscreen(false); page.focus('outside'); page.frame();
+  assert.equal(page.focused(), 'outside', 'normal page inputs work after leaving fullscreen');
+});
+
+test('window focus arriving before document focus recovery can retry on the next frame', (t) => {
+  const page = mountInput(t);
+  page.focus('root'); page.pointer('window', 'blur', 0, 0);
+  page.focus('outside'); page.pointer('window', 'focus', 0, 0);
+  assert.equal(page.focused(), 'outside');
+  page.blurFocused(); page.frame();
+  assert.equal(page.focused(), 'root');
 });
 
 test('losing focus clears a held stage press and raises its release', (t) => {

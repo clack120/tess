@@ -538,7 +538,7 @@ function worksKey(vm: Vm, event: KeyboardEvent, code: number): boolean {
 
 /**
  * Binds the page's keys and pointer to the vm. Hands back the per-frame job of
- * keeping the cursor in step with what is under it — the stage moves under a
+ * keeping focus and the cursor in step — the stage moves under a
  * still pointer, so a pointer event alone would leave the cursor behind.
  */
 function bindInput(
@@ -586,24 +586,42 @@ function bindInput(
     vm.pressedKeys.delete(code);
     claim(event, code);
   });
+  let syncFocus = () => {};
   // Focus may move between a press and release, while keydown stays scoped to the player.
   if (keyTarget !== window) {
     on(window, 'keyup', (raw) => vm.pressedKeys.delete(keyCodeOf(raw as KeyboardEvent)), true);
     const player = keyTarget as HTMLElement;
     let playerFocused = document.activeElement === player;
     let restoreFocus = false;
-    on(window, 'focusin', (event) => { playerFocused = event.target === player; });
-    on(window, 'blur', () => { restoreFocus = playerFocused; });
-    on(window, 'focus', () => {
-      if (!restoreFocus) return;
-      restoreFocus = false;
+    const fullscreen = () => {
+      const full = document.fullscreenElement;
+      return full === player || !!full && player.contains(full);
+    };
+    syncFocus = () => {
+      const full = fullscreen();
+      if ((!full && !restoreFocus) || !player.isConnected || document.hidden || !document.hasFocus()) return;
       const active = document.activeElement;
-      // A return from another app can leave focus on the document instead.
-      if (vm.state === 'run' && player.isConnected &&
-        (!active || active === document.body || active === document.documentElement || active === player)) {
+      if (full) {
+        if (player.contains(active) || active?.closest('dialog[open]')) return;
+      } else if (vm.state !== 'run' || active && active !== document.body &&
+        active !== document.documentElement && active !== player) return;
+      // Browser activation can finish after the focus event; retain the retry until it succeeds.
+      if (active !== player) {
         player.focus({ preventScroll: true });
       }
+      if (document.activeElement === player) restoreFocus = false;
+    };
+    on(window, 'focusin', () => {
+      const active = document.activeElement;
+      playerFocused = active === player;
+      if (!fullscreen() && document.hasFocus() && active && active !== document.body &&
+        active !== document.documentElement && !playerFocused) restoreFocus = false;
+      syncFocus();
     });
+    on(window, 'blur', () => { restoreFocus ||= playerFocused || document.activeElement === player; });
+    on(window, 'focus', syncFocus);
+    on(document, 'visibilitychange', syncFocus);
+    on(document, 'fullscreenchange', syncFocus);
   }
   // A window that loses focus never sees the key come back up, whatever the keys
   // are read from.
@@ -774,6 +792,7 @@ function bindInput(
   /** What `$CURSOR` last put on the canvas, so giving it back is noticed. */
   let forced = '';
   return () => {
+    syncFocus();
     const asked = workCursor();
     if (asked) {
       forced = asked;
