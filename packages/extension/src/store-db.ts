@@ -17,7 +17,7 @@ import { exportDB, importInto, peakImportFile } from 'dexie-export-import';
 const DATABASE = 'tessvm-store';
 
 /** A value as the work holds it: a variable's own, or a list's items. */
-export type StoredValue = string | number | Array<{ data: string | number }>;
+export type StoredValue = string | number | boolean | Array<{ data: string | number | boolean }>;
 
 /** One work's kept names. */
 export interface SavedWork {
