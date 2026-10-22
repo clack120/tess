@@ -820,6 +820,8 @@ export class Thread {
     return FINISH;
   }
   done = false;
+  /** The call stack, outermost first, as it stood when an error left a frame. */
+  failedFrames: CallFrame[] | null = null;
   /** True while this thread's generator is on the stack. */
   running = false;
   /** Scratch space the compiled body keeps between frames. */
@@ -886,6 +888,8 @@ export class Thread {
         fresh = false;
       } catch (caught) {
         fresh = false;
+        // Only the frame the error started in has the whole stack above it.
+        if (!thrown) this.failedFrames = frames.slice();
         frames.pop();
         if (!frames.length) {
           this.done = true;

@@ -235,7 +235,7 @@ function reportVmErrors(handle, sourceMap) {
       : error.blockId
         ? '블록 ' + error.blockId
         : '위치를 알 수 없음';
-    const label = target ? target.name + ' — ' : '';
+    const label = error.where ? error.where + ' — ' : target ? target.name + ' — ' : '';
     window.tessReportError('실행 오류', new Error(label + error.message + ' (' + where + ')'));
     if (error.blockId) window.tessHighlightBlock(error.blockId);
   };

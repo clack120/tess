@@ -130,6 +130,40 @@ end`);
   assert.deepEqual([vm.variables.find((v) => v.name === 'a')!.getValue(), vm.variables.find((v) => v.name === 'b')!.getValue()], ['C', 'ABC']);
 });
 
+test('a runtime error says which scene, object and function calls it happened in', () => {
+  const source = `var s = "ABC"
+var a = 0
+function pick(i):
+  return s[i]
+end
+function outer(i):
+  return pick((i + 3))
+end
+scene "메인":
+  object "쉘":
+    when start do
+      clone
+      a = s[9]
+    end
+    when cloned do
+      a = outer(2)
+    end
+  end
+end`;
+  for (const kernel of [undefined, () => null]) {
+    const result = compileProject(source, { path: 'test.tess' });
+    const vm = new Vm({ renderer: null, audio: null, kernel } as never);
+    vm.load(result.project as unknown as never);
+    vm.start();
+    vm.tick();
+    vm.tick();
+    assert.deepEqual(vm.errors.map((error) => error.where), [
+      "장면 '메인' · 오브젝트 '쉘'",
+      "장면 '메인' · 오브젝트 '쉘' (복제본) · 함수 outer i ( ) → pick i ( )",
+    ]);
+  }
+});
+
 test('function labels inherited from Object.prototype execute their own bodies', () => {
   for (const name of ['ordinary', 'constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
     const vm = runVm(`var out = 0

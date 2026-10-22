@@ -56,8 +56,6 @@ const nextFrame = () =>
 
 export interface MountedPlayer {
   dispose(): void;
-  /** Whether the row about blocks this runner does not have yet is shown. */
-  setShowNotice(show: boolean): void;
 }
 
 /** 대답 입력칸과 차트 창은 tessvm 이 얹는 것이므로 그 모양도 함께 옵니다. */
@@ -193,7 +191,6 @@ export function mountPlayer(
   projectId: string,
   groupId: string | null = null,
   svg = true,
-  showNotice = false,
 ): MountedPlayer {
   ensureStageStyle();
   // Idle from the start so the cover shows while the work is still on its way.
@@ -250,14 +247,10 @@ export function mountPlayer(
     errorBox.textContent = text;
     errorBox.hidden = false;
   };
-  /**
-   * A standing note, not a failure: kept until an error takes the row over.
-   * It is held whether or not it is shown, so the switch can put it up later
-   * without the work being loaded again.
-   */
+  /** A standing note, not a failure: kept until an error takes the row over. */
   let notice = "";
   const drawNotice = () => {
-    if (!notice || !showNotice) {
+    if (!notice) {
       errorBox.hidden = true;
       errorBox.textContent = "";
       return;
@@ -266,7 +259,6 @@ export function mountPlayer(
     errorBox.textContent = notice;
     errorBox.hidden = false;
   };
-  const showsError = () => !errorBox.hidden && !errorBox.classList.contains("is-notice");
   const setNotice = (text: string) => {
     notice = text;
     drawNotice();
@@ -501,9 +493,8 @@ export function mountPlayer(
       if (!seen.has(key)) {
         seen.add(key);
         const target = error.targetId ? live.vm.targetOf(error.targetId) : null;
-        showError(
-          `오류로 멈췄습니다 — ${target ? `${target.name}: ` : ""}${error.message}`,
-        );
+        const where = error.where ?? target?.name;
+        showError(`오류로 멈췄습니다 — ${error.message}${where ? `\n${where}` : ""}`);
       }
       if (live.vm.state !== "stop") {
         stop();
@@ -559,13 +550,5 @@ export function mountPlayer(
 
   return {
     dispose,
-    setShowNotice(show: boolean) {
-      showNotice = show;
-      // Only while the row is not carrying a failure — that one is always shown.
-      if (showsError()) {
-        return;
-      }
-      drawNotice();
-    },
   };
 }

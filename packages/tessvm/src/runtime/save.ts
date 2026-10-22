@@ -155,6 +155,24 @@ export function functionLabel(content: unknown): string {
   return String(field.params?.[0] ?? '');
 }
 
+/**
+ * A function's name the way entry shows it on the block: its labels in order,
+ * with `( )` where an argument goes. Empty when it has no definition.
+ */
+export function functionName(content: unknown): string {
+  const stacks = typeof content === 'string' ? safeParse(content) : content;
+  const create = (Array.isArray(stacks) ? stacks.flat() : []).find(
+    (block) => (block as { type?: string })?.type?.startsWith('function_create'),
+  ) as { params?: unknown[] } | undefined;
+  const words: string[] = [];
+  let field = create?.params?.[0] as { type?: string; params?: unknown[] } | undefined;
+  for (let guard = 0; field && typeof field === 'object' && guard < 64; guard += 1) {
+    words.push(field.type === 'function_field_label' ? String(field.params?.[0] ?? '') : '( )');
+    field = field.params?.[1] as typeof field;
+  }
+  return words.join(' ').trim();
+}
+
 function safeParse(text: string): unknown {
   try {
     return JSON.parse(text);

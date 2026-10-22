@@ -5,14 +5,13 @@
  * The runner itself is one button — pressing it turns it on, pressing it again
  * takes it off — and the rows under it are that runner's own settings.
  */
-import { readSettings, write, ENABLED_KEY, SVG_KEY, NOTICE_KEY } from '../browser.ts';
+import { readSettings, write, ENABLED_KEY, SVG_KEY } from '../browser.ts';
 import {
   clearWorks, exportAll, exportName, importAll, listWorks, removeWork, type SavedSummary,
 } from '../store-db.ts';
 
 const power = document.getElementById('enabled') as HTMLButtonElement;
 const svg = document.getElementById('svg') as HTMLInputElement;
-const notice = document.getElementById('notice') as HTMLInputElement;
 const chip = document.getElementById('chip') as HTMLElement;
 const saves = document.getElementById('saves') as HTMLElement;
 const savesEmpty = document.getElementById('saves-empty') as HTMLElement;
@@ -65,13 +64,8 @@ svg.addEventListener('change', () => {
   void write(SVG_KEY, svg.checked);
 });
 
-notice.addEventListener('change', () => {
-  void write(NOTICE_KEY, notice.checked);
-});
-
 void readSettings().then((settings) => {
   svg.checked = settings.svg;
-  notice.checked = settings.notice;
   paint(settings.enabled);
 });
 
