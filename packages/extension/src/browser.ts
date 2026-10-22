@@ -48,7 +48,7 @@ export const ENABLED_KEY = 'enabled';
 export const SVG_KEY = 'svg';
 /** Whether the `아이디` block hides all but the first two letters. */
 export const MASK_KEY = 'mask';
-/** Whether the runner says which blocks it does not have yet. On by default. */
+/** Whether the runner notes blocks it lacks and blocks entry stops on. On by default. */
 export const NOTICE_KEY = 'notice';
 
 export interface Settings {

@@ -1456,12 +1456,16 @@ export function createOps(vm: Vm) {
     },
 
     charAt(text: string, index: number): string {
+      // Entry throws on these bounds and stops the work.
+      if (index - 1 < 0 || index - 1 > text.length - 1) vm.diverge('글자 위치가 범위를 벗어났습니다 (char_at)');
       return text[index - 1] ?? '';
     },
 
     substring(text: string, start: number, end: number): string {
       const from = start - 1;
       const to = end - 1;
+      const last = text.length - 1;
+      if (from < 0 || to < 0 || from > last || to > last) vm.diverge('글자 범위가 벗어났습니다 (substring)');
       return text.substring(Math.min(from, to), Math.max(from, to) + 1);
     },
 
