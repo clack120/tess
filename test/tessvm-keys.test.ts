@@ -55,6 +55,7 @@ function mountInput(t: any) {
   const stage = {
     state: 'run',
     pressedKeys: new Set<number>(),
+    usedKeys: new Set<number>() as Set<number> | null,
     targets: [],
     mouseX: 0,
     mouseY: 0,
@@ -115,6 +116,20 @@ test('브라우저 단축키 조합은 그대로 둔다', (t) => {
   assert.equal(press('root', { code: 'ArrowLeft', altKey: true }).prevented, false);
   // ctrl 자체를 읽는 작품이 있으므로, 조합이 아니라 그 키 하나는 작품의 것이다
   assert.equal(press('root', { code: 'ControlLeft', ctrlKey: true }).prevented, true);
+});
+
+test('a shortcut on a key the work uses is the work\'s, and Escape never is', (t) => {
+  const { press, stage } = mountInput(t);
+  stage.usedKeys = new Set([189, 27]);
+  // Entry takes the key for a running work, so the page does not zoom out.
+  assert.equal(press('root', { code: 'Minus', ctrlKey: true }).prevented, true);
+  assert.equal(press('root', { code: 'Equal', ctrlKey: true }).prevented, false);
+  for (const init of [{ code: 'Escape' }, { code: 'Escape', ctrlKey: true }, { code: 'Escape', shiftKey: true }]) {
+    assert.equal(press('root', init).prevented, false, JSON.stringify(init));
+  }
+  // A work that reads keys worked out at run time may want any of them.
+  stage.usedKeys = null;
+  assert.equal(press('root', { code: 'Equal', ctrlKey: true }).prevented, true);
 });
 
 test('작품이 돌지 않는 동안에는 페이지가 키를 그대로 쓴다', (t) => {
