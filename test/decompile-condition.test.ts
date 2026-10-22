@@ -138,3 +138,28 @@ test('boolean return types are preserved through chained value functions', () =>
   assert.deepEqual(run(project, 1), expected);
   assert.deepEqual(run(roundtrip(project), 1), expected);
 });
+
+test('empty condition slots stay false after round-trip', () => {
+  const empty = [
+    null,
+    { type: 'boolean_not', params: [null, null, null] },
+    { type: 'boolean_and_or', params: [null, 'OR', null] },
+    { type: 'boolean_or', params: [null, null, null] },
+  ];
+  for (const slot of empty) {
+    const { project, stacks, condition } = fixture();
+    condition.params[0] = slot;
+    project.objects[0]!.script = JSON.stringify(stacks);
+    assert.deepEqual(run(roundtrip(project), 1), run(project, 1), JSON.stringify(slot));
+  }
+});
+
+test('legacy and/or keep numeric condition conversion for value calls', () => {
+  for (const type of ['boolean_and', 'boolean_or']) {
+    const { project, stacks, condition, call } = fixture();
+    condition.params[0] = { type, params: [call, null, { type: 'True', params: [null] }] };
+    project.objects[0]!.script = JSON.stringify(stacks);
+    const converted = roundtrip(project);
+    for (const input of [0, 1]) assert.deepEqual(run(converted, input), run(project, input), `${type}: ${input}`);
+  }
+});

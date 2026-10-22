@@ -29,6 +29,8 @@ function booleanResult(block: any, ctx: DecompileContext): boolean {
 
 /** Preserve Entry's numeric condition conversion without changing Tess conditions. */
 export function conditionOf(block: any, ctx: DecompileContext): string {
+  // Entry reads an empty condition slot as false; a Tess literal there is true.
+  if (block === null || block === undefined) return 'false';
   const expression = exprOf(block, ctx);
   if (booleanResult(block, ctx)) {
     return block?.type?.startsWith('func_') ? `(${expression} == true)` : expression;
@@ -354,10 +356,14 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       if (isStoreFlagTest(block, ctx)) return 'can_save';
       return `(${exprOf(at(0), ctx)} ${op} ${exprOf(at(2), ctx)})`;
     }
-    case 'boolean_and_or': return `(${exprOf(at(0), ctx)} ${at(1) === 'AND' ? 'and' : 'or'} ${exprOf(at(2), ctx)})`;
+    case 'boolean_and_or': {
+      // Entry applies Boolean() here, so an empty side is false.
+      const side = (i: number) => at(i) == null ? 'false' : exprOf(at(i), ctx);
+      return `(${side(0)} ${at(1) === 'AND' ? 'and' : 'or'} ${side(2)})`;
+    }
     /** Entry's older and/or pair, kept for works saved before `boolean_and_or`. */
-    case 'boolean_and': return `(${exprOf(at(0), ctx)} and ${exprOf(at(2), ctx)})`;
-    case 'boolean_or': return `(${exprOf(at(0), ctx)} or ${exprOf(at(2), ctx)})`;
+    case 'boolean_and': return `(${conditionOf(at(0), ctx)} and ${conditionOf(at(2), ctx)})`;
+    case 'boolean_or': return `(${conditionOf(at(0), ctx)} or ${conditionOf(at(2), ctx)})`;
     case 'boolean_not': return `not (${conditionOf(at(1), ctx)})`;
     case 'True': return 'true';
     case 'False': return 'false';
