@@ -78,18 +78,21 @@ function languageCode(value: string): string {
   return value;
 }
 
-// Yield across frames until the promise settles; use the fallback if it rejects.
-function* settle(answer: Promise<string>, fallback: string): Generator<number, string> {
-  let value: string | null = null;
+// Yield across frames; an optional fallback handles rejected or empty answers.
+function* settle<T>(answer: Promise<T>, fallback?: T): Generator<number, T> {
+  let value: T | undefined;
+  let failure: unknown;
+  let failed = false;
   let done = false;
   void answer.then(
     (result) => { value = result; done = true; },
-    () => { done = true; },
+    (error) => { failure = error; failed = true; done = true; },
   );
   while (!done) {
     yield 1;
   }
-  return value || fallback;
+  if (failed && fallback === undefined) throw failure;
+  return fallback === undefined ? value! : value || fallback;
 }
 
 function factorial(n: number): number {
@@ -1210,6 +1213,19 @@ export function createOps(vm: Vm) {
 
     setVoice(entity: Entity, speaker: string, speed: unknown, pitch: unknown): void {
       entity.voice = { speaker, speed: Number(speed) || 0, pitch: Number(pitch) || 0, volume: 1 };
+    },
+
+    *blockCount(entity: Entity, target: unknown, counts: Record<string, number>): Generator<number, number> {
+      return yield* settle((async () => {
+        if (!target) return 0;
+        // Entry reads the dropdown directly without evaluating or coercing it.
+        const key = target as string;
+        if (key.indexOf('scene-') === 0) return counts[`scene-${key.substr(6)}`] ?? 0;
+        if (key === 'all') return counts.all!;
+        if (key === 'self') return counts[`object-${entity.target.id}`] ?? counts.all!;
+        if (key.indexOf('object-') === 0) return counts[`object-${key.substr(7)}`] ?? counts.all!;
+        return 0;
+      })());
     },
 
     *translate(sourceName: string, text: string, targetName: string): Generator<number, string> {
