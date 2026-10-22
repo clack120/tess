@@ -86,12 +86,15 @@ export class TessParser extends CstParser {
   declare readonly flowStatement: Rule;
   declare readonly forceId: Rule;
   declare readonly foreverStatement: Rule;
+  declare readonly forStatement: Rule;
   declare readonly forwardStatement: Rule;
   declare readonly functionDecl: Rule;
   declare readonly functionParam: Rule;
   declare readonly goStatement: Rule;
   declare readonly identifier: Rule;
   declare readonly ifStatement: Rule;
+  declare readonly switchStatement: Rule;
+  declare readonly caseClause: Rule;
   declare readonly indexSuffix: Rule;
   declare readonly jumpStatement: Rule;
   declare readonly listAddStatement: Rule;
@@ -616,7 +619,9 @@ export class TessParser extends CstParser {
         IGNORE_AMBIGUITIES: true,
         DEF: [
           { GATE: () => $.leads(kw.if), ALT: () => $.SUBRULE($.ifStatement) },
+          { GATE: () => $.leads(kw.switch), ALT: () => $.SUBRULE($.switchStatement) },
           { GATE: () => $.leads(kw.repeat), ALT: () => $.SUBRULE($.repeatStatement) },
+          { GATE: () => $.leads(kw.for), ALT: () => $.SUBRULE($.forStatement) },
           { GATE: () => $.leads(kw.while), ALT: () => $.SUBRULE($.whileStatement) },
           { GATE: () => $.leads(kw.until), ALT: () => $.SUBRULE($.untilStatement) },
           { GATE: () => $.leads(kw.forever), ALT: () => $.SUBRULE($.foreverStatement) },
@@ -678,9 +683,43 @@ export class TessParser extends CstParser {
       $.SUBRULE($.block, { LABEL: 'body' });
       $.CONSUME(kw.end);
     });
+    $.RULE('switchStatement', () => {
+      $.CONSUME(kw.switch);
+      $.SUBRULE($.expr, { LABEL: 'value' });
+      $.SUBRULE($.blockOpen);
+      $.MANY(() => $.SUBRULE($.caseClause, { LABEL: 'cases' }));
+      $.OPTION(() => {
+        $.CONSUME(kw.default);
+        $.SUBRULE2($.blockOpen);
+        $.SUBRULE($.block, { LABEL: 'alternate' });
+      });
+      $.CONSUME(kw.end);
+    });
+    $.RULE('caseClause', () => {
+      $.CONSUME(kw.case);
+      $.AT_LEAST_ONE_SEP({ SEP: Comma, DEF: () => $.SUBRULE($.expr, { LABEL: 'values' }) });
+      $.SUBRULE($.blockOpen);
+      $.SUBRULE($.block, { LABEL: 'body' });
+    });
     loopRule('repeatStatement', kw.repeat);
     loopRule('whileStatement', kw.while);
     loopRule('untilStatement', kw.until);
+
+    $.RULE('forStatement', () => {
+      $.CONSUME(kw.for);
+      $.SUBRULE($.identifier, { LABEL: 'name' });
+      $.CONSUME(kw.from);
+      $.SUBRULE($.expr, { LABEL: 'from' });
+      $.CONSUME(kw.to);
+      $.SUBRULE2($.expr, { LABEL: 'to' });
+      $.OPTION(() => {
+        $.CONSUME(kw.step);
+        $.SUBRULE($.signedNumber, { LABEL: 'step' });
+      });
+      $.SUBRULE($.blockOpen);
+      $.SUBRULE($.block, { LABEL: 'body' });
+      $.CONSUME(kw.end);
+    });
 
     $.RULE('foreverStatement', () => {
       $.CONSUME(kw.forever);

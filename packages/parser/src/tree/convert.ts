@@ -413,6 +413,13 @@ function statement(wrapper: SyntaxNode): Stmt {
       loc: at,
     } as Stmt;
     case 'repeat_statement': return { type: 'Repeat', count: e('test'), body: block(field(node, 'body')), loc: at } as Stmt;
+    case 'switch_statement': return { type: 'Switch', value: e('value'),
+      cases: fields(node, 'cases').map(clause => ({ values: fields(clause, 'values').map(expr), body: block(field(clause, 'body')), loc: loc(clause) })),
+      alternate: has(node, 'alternate') ? block(field(node, 'alternate')) : hasToken(node, 'default') ? [] : null,
+      loc: at } as Stmt;
+    case 'for_statement': return { type: 'For', name: word('name'), from: e('from'), to: e('to'),
+      step: has(node, 'step') ? signedNumber(field(node, 'step')!).value : 1,
+      body: block(field(node, 'body')), loc: at } as Stmt;
     case 'while_statement': return { type: 'While', test: e('test'), body: block(field(node, 'body')), loc: at } as Stmt;
     case 'until_statement': return { type: 'Until', test: e('test'), body: block(field(node, 'body')), loc: at } as Stmt;
     case 'forever_statement': return { type: 'Forever', body: block(field(node, 'body')), loc: at } as Stmt;

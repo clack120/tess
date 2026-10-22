@@ -289,9 +289,30 @@ export interface IfNode extends Base {
   alternate: Stmt[] | null;
 }
 
+export interface SwitchCase extends Base {
+  values: Expr[];
+  body: Stmt[];
+}
+
+export interface SwitchNode extends Base {
+  type: 'Switch';
+  value: Expr;
+  cases: SwitchCase[];
+  alternate: Stmt[] | null;
+}
+
 export interface RepeatNode extends Base {
   type: 'Repeat';
   count: Expr;
+  body: Stmt[];
+}
+
+export interface ForNode extends Base {
+  type: 'For';
+  name: string;
+  from: Expr;
+  to: Expr;
+  step: number;
   body: Stmt[];
 }
 
@@ -543,6 +564,8 @@ export interface AssignNode extends Base {
 }
 
 export type Stmt =
+  | SwitchNode
+  | ForNode
   | IfNode
   | RepeatNode
   | WhileNode

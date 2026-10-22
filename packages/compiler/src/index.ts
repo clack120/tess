@@ -523,6 +523,7 @@ function collectObjectMembers(object: CompiledObject, ctx: Context) {
 
 function collectHandlerVariables(statements: Stmt[], object: CompiledObject, ctx: Context) {
   for (const statement of statements) {
+    if (statement.type === 'Switch') for (const clause of statement.cases) collectHandlerVariables(clause.body, object, ctx);
     if (statement.type === 'VarDecl' || statement.type === 'ListDecl') {
       if (!object.locals.has(statement.name) && !ctx.globals.has(statement.name)) {
         const entry = makeVariable(
@@ -593,6 +594,7 @@ function collectFunctions(program: ProgramNode, ctx: Context) {
 
 function findReturns(statements: Stmt[], found: ReturnNode[] = []): ReturnNode[] {
   for (const statement of statements) {
+    if (statement.type === 'Switch') for (const clause of statement.cases) findReturns(clause.body, found);
     if (statement.type === 'Return') found.push(statement);
     const fields = statement as unknown as AnyNode;
     for (const key of ['consequent', 'alternate', 'body']) {

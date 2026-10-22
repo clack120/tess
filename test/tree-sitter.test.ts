@@ -18,6 +18,8 @@ const SNIPPETS = [
   inObject('play sound "x" and wait\nplay sound "y" from 1 to 2'),
   inObject('if (a == 1):\n  say (1)\nelse:\nend\nname(1)\nmove(1) 2'),
   inObject('say "abc"[1]\nsay join("a", "b")[2]\nsay (name)[1]\nsay items[1][2]\nsay (name)[1, 2]'),
+  inObject('for i from 1 to 10:\n  say i\nend\nfor j from 5 to 1 step -2 do\n  continue\nend'),
+  inObject('switch n:\ncase 1, -2:\n  say n\ncase "a":\ndefault:\nend\nswitch n:\nend'),
   inObject('x = "\u0000\\"\\n"\ny = #fff\nz = #red # comment'),
   'function f():\nend\nfunction g(a, b?):\n  return a\nend\n',
   'function f(n):\n  if n:\n    return\n  end\n  return n\nend\n',

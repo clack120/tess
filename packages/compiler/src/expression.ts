@@ -7,7 +7,8 @@
  */
 import { KEY_CODES, keyCodeOf } from '@tess/core';
 import { didYouMean, orHint } from '@tess/core';
-import { requirePowerRefiner, requireStoreFlag } from './runtime.ts';
+import { requireMinMax, requirePowerRefiner, requireStoreFlag } from './runtime.ts';
+import { requireStringHelper } from './string-functions.ts';
 import { BUILTIN_FUNCTIONS, OPTION_KEYWORDS, STATE_VALUES, STORE_FLAG_ON } from '@tess/core';
 import { expansionBlock } from '@tess/core';
 import type {
@@ -685,6 +686,40 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
   }
 
   switch (callee) {
+    case 'trim': case 'trim_start': case 'trim_end': case 'repeat_text': case 'pad_start': case 'pad_end': {
+      const pad = callee.startsWith('pad');
+      if (pad) {
+        if (args.length !== 2 && args.length !== 3) {
+          return ctx.error(node, `${callee}() 는 인자가 2개 또는 3개여야 합니다. (${args.length}개를 받았습니다)\n호출 형태: ${callee}(문자열, 목표길이, 채울글자). 채울글자는 생략하면 공백입니다.`);
+        }
+      } else if (!arity(callee.startsWith('trim') ? 1 : 2)) return null;
+      const params = args.map(argument => compileValue(argument, ctx));
+      if (params.some(param => param === null)) return null;
+      if (pad && params.length === 2) params.push(ctx.text(' '));
+      const fn = requireStringHelper(callee, ctx);
+      return ctx.block(`func_${fn.id}`, params as EntryParam[]);
+    }
+
+    case 'min': case 'max': {
+      if (!arity(2)) return null;
+      const first = value(0);
+      const second = value(1);
+      if (!first || !second) return null;
+      const fn = requireMinMax(callee, ctx);
+      return ctx.block(`func_${fn.id}`, [first, second]);
+    }
+
+    case 'starts_with': case 'ends_with': {
+      if (!arity(2)) return null;
+      const string = value(0);
+      const target = value(1);
+      if (!string || !target) return null;
+      const text = (block: EntryBlock) => callee === 'ends_with'
+        ? ctx.block('reverse_of_string', [null, block, null]) : block;
+      const index = ctx.block('index_of_string', [null, text(string), null, text(target), null]);
+      return ctx.block('boolean_basic_operator', [index, 'EQUAL', ctx.number(1)]);
+    }
+
     case 'log2': {
       // 엔트리에는 밑이 2인 로그가 없다 -> ln(x) / ln(2)
       if (!arity(1)) return null;

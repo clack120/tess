@@ -36,7 +36,7 @@ interface WalkContext {
 /** A node reached by the generic walk, which reads fields it cannot name ahead. */
 type AnyNode = Record<string, unknown>;
 
-const LOOP_TYPES = new Set(['Repeat', 'While', 'Until', 'Forever']);
+const LOOP_TYPES = new Set(['Repeat', 'For', 'While', 'Until', 'Forever']);
 
 /**
  * 한 파일의 줄 찾기표를 만든다.
@@ -231,6 +231,36 @@ export function validate(
   }
 
   function walkStatement(statement: Stmt, ctx: WalkContext) {
+    if (statement.type === 'Switch') {
+      walkExpressions(statement.value, ctx);
+      const seen = new Map<string, Expr>();
+      for (const clause of statement.cases) {
+        for (const expression of clause.values) {
+          const value = caseValue(expression);
+          if (value === null) {
+            const item = error(expression, 'case 에는 숫자·문자열·판단·색 리터럴만 쓸 수 있습니다.');
+            item.code = 'E0003';
+            item.help = '여러 값은 case 1, 2: 처럼 묶으세요. 계산한 값끼리 비교하려면 if/else를 쓰세요.';
+            continue;
+          }
+          const normalized = typeof value === 'string' && value.length && !Number.isNaN(Number(value)) ? Number(value) : value;
+          const key = `${typeof normalized}:${normalized}`;
+          const previous = seen.get(key);
+          if (previous) {
+            const item = warn(expression, '앞의 case 와 같은 값이라 이 항목은 선택되지 않습니다.');
+            item.code = 'W0002';
+            item.related = [report([], previous, '먼저 일치하는 항목입니다. Entry 비교에서는 숫자 문자열도 숫자로 비교합니다.')];
+          } else seen.set(key, expression);
+        }
+        if (ctx.inFunction) checkDeclarations(clause.body);
+        walkStatements(clause.body, { ...ctx, scope: new Set(ctx.scope) });
+      }
+      if (statement.alternate) {
+        if (ctx.inFunction) checkDeclarations(statement.alternate);
+        walkStatements(statement.alternate, { ...ctx, scope: new Set(ctx.scope) });
+      }
+      return;
+    }
     switch (statement.type) {
       case 'VarDecl':
       case 'ListDecl':
@@ -288,9 +318,10 @@ export function validate(
 
     // 자식 문장 블록
     const blocks = childBlocks(statement);
-    const innerCtx = LOOP_TYPES.has(statement.type)
+    let innerCtx = LOOP_TYPES.has(statement.type)
       ? { ...ctx, loopDepth: ctx.loopDepth + 1 }
       : ctx;
+    if (statement.type === 'For') innerCtx = { ...innerCtx, scope: new Set([...ctx.scope, statement.name]) };
 
     const fields = statement as unknown as AnyNode;
     for (const [key, value] of Object.entries(fields)) {
@@ -389,6 +420,16 @@ function mayRunOrFail(value: unknown): boolean {
   return Object.entries(node).some(([key, child]) => key !== 'loc' && mayRunOrFail(child));
 }
 
+/** Literal labels have no effects between caching a switch selector and selecting its branch. */
+export function caseValue(node: Expr): string | number | boolean | null {
+  switch (node.type) {
+    case 'Number': case 'String': case 'Boolean': case 'Color': return node.value;
+    case 'Transparent': return 'transparent';
+    case 'Unary': return node.operator === '-' && node.argument.type === 'Number' ? -node.argument.value : null;
+    default: return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 //  헬퍼
 // ---------------------------------------------------------------------------
@@ -432,6 +473,7 @@ function objectLocalNames(object: ObjectNode): Set<string> {
   const walk = (statements: Stmt[]) => {
     for (const statement of statements) {
       if (statement.type === 'VarDecl' || statement.type === 'ListDecl') names.add(statement.name);
+      if (statement.type === 'Switch') for (const clause of statement.cases) walk(clause.body);
       const fields = statement as unknown as AnyNode;
       for (const key of ['consequent', 'alternate', 'body']) {
         const block = fields[key];
@@ -460,6 +502,7 @@ function childBlocks(statement: Stmt): string[] {
     case 'If':
       return statement.alternate ? ['consequent', 'alternate'] : ['consequent'];
     case 'Repeat':
+    case 'For':
     case 'While':
     case 'Until':
     case 'Forever':

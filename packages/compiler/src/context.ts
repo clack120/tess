@@ -111,6 +111,7 @@ export class Context {
   locals: Map<string, EntryVariable>;
 
   funcScope: FunctionScope | null;
+  loopUpdate: (() => EntryBlock) | null = null;
 
   constructor(source: string, options: CompileOptions = {}) {
     this.source = source;
