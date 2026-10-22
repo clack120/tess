@@ -15,7 +15,6 @@ import { setStageSize, stage, type Entity } from '../runtime/model.ts';
 import { localVariableStore } from './store.ts';
 import { dexieSaveStore } from './save-store.ts';
 import type { SaveHost } from '../runtime/save.ts';
-import { fingerprint } from '../kernel/plan.ts';
 import { bindExtras } from './extras.ts';
 
 export interface BootOptions {
@@ -47,19 +46,8 @@ export interface BootOptions {
   svg?: boolean;
   /** Who `아이디` and `닉네임` answer with. Left unset, both answer a space. */
   user?: EntryUser | null;
-  /**
-   * Where a built wasm kernel is served, for a page that has one behind it.
-   * Left unset, the kernel runs in javascript instead — which is what a page
-   * on someone else's site has. `null` turns the whole thing off and leaves
-   * every function to the block runner.
-   */
-  kernelUrl?: string | null;
-  /**
-   * The fingerprint of that kernel, for a page whose host cannot mark the file
-   * itself — an exported bundle on a plain static server, or a single file.
-   * Left unset, the mark comes from the `x-tessvm-kernel` response header.
-   */
-  kernelFingerprint?: string | null;
+  /** Runs numeric functions in the kernel. On unless turned off. */
+  kernel?: boolean;
   /** Called while the work's files come in, before it is allowed to run. */
   onProgress?(loaded: number, total: number): void;
   /**
@@ -232,37 +220,11 @@ function storeKey(project: EntryProjectLike): string {
   return String(raw ?? 'project').slice(0, 120);
 }
 
-/** The built module the run server left for the page, when there is a server. */
-async function fetchKernel(
-  url: string | null | undefined,
-  given: string | null | undefined,
-): Promise<{ module: WebAssembly.Module; fingerprint: string } | null> {
-  if (!url) {
-    return null;
-  }
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      return null;
-    }
-    const mark = response.headers.get('x-tessvm-kernel') ?? given;
-    if (!mark) {
-      return null;
-    }
-    return { module: await WebAssembly.compile(await response.arrayBuffer()), fingerprint: mark };
-  } catch {
-    return null;
-  }
-}
-
 export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
   const container = options.container ?? document.body;
   const project =
     options.project ??
     ((await (await fetch(options.projectUrl ?? '/project.json')).json()) as EntryProjectLike);
-  // The page has no moonbit toolchain, so whoever served it builds the kernel
-  // and the page takes it only for the plan it works out to be the same one.
-  const kernel = await fetchKernel(options.kernelUrl, options.kernelFingerprint);
 
   if (options.stageWidth && options.stageHeight) {
     setStageSize(options.stageWidth, options.stageHeight);
@@ -301,11 +263,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     deviceType,
     user: options.user,
     store: options.store === null ? null : (options.store ?? localVariableStore(storeKey(project))),
-    // A supply that answers null still gets the javascript kernel, which is
-    // what a page outside the run server — the extension on playentry — has.
-    kernel: options.kernelUrl === null
-      ? null
-      : (plan) => (kernel && fingerprint(plan.source) === kernel.fingerprint ? kernel.module : null),
+    kernel: options.kernel !== false,
   });
 
   vm.load(project);

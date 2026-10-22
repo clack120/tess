@@ -21,7 +21,6 @@ import { ASK_FIELD_STYLE } from '../web/ask-style.ts';
 import { CHART_WINDOW_STYLE } from '../web/chart-view.ts';
 import { EXTRAS_DIALOG_STYLE } from '../web/extras.ts';
 import { zipFiles, type ZipFile } from './zip.ts';
-import { prepareKernel } from '../kernel/prepare.ts';
 import { DEFAULT_STAGE_HEIGHT, DEFAULT_STAGE_WIDTH } from '../runtime/model.ts';
 
 const SRC_DIR = fileURLToPath(new URL('../', import.meta.url));
@@ -33,9 +32,6 @@ const VM_PREFIX = 'vm/';
 
 /** The bare name the single file maps each module to, through an import map. */
 const BARE_PREFIX = 'tessvm/';
-
-/** Where the kernel is asked for; the single file answers this from memory. */
-const KERNEL_NAME = 'kernel.wasm';
 
 /** Media types the work's files come as. */
 const MEDIA: Record<string, string> = {
@@ -65,8 +61,8 @@ export interface ExportResult {
   /** What went in, for the line the cli prints. */
   modules: number;
   assets: number;
-  /** Where the page will run its numeric functions; `none` is `--no-kernel`. */
-  kernel: 'wasm' | 'javascript' | 'none';
+  /** Whether the page runs numeric functions in the kernel; off is `--no-kernel`. */
+  kernel: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,8 +214,7 @@ try {
     svg: config.svg,
     stageWidth: config.stageWidth,
     stageHeight: config.stageHeight,
-    kernelUrl: config.kernelUrl,
-    kernelFingerprint: config.kernelFingerprint,
+    kernel: config.kernel,
   });
   // The page has no controls of its own; this is where a console reaches the run.
   window.tessvm = handle;
@@ -279,7 +274,6 @@ interface Asset {
 interface Built {
   modules: Map<string, string>;
   assets: Asset[];
-  kernel: { wasm: Uint8Array; fingerprint: string } | null;
   config: Record<string, unknown>;
 }
 
@@ -297,13 +291,9 @@ function build(options: ExportOptions): Built {
       type: MEDIA[path.extname(asset.target).toLowerCase()] ?? 'application/octet-stream',
     });
   }
-  const prepared = options.kernel === false ? null : prepareKernel(options.project);
   return {
     modules: collectModules(['web/boot.ts']),
     assets,
-    kernel: prepared?.kernel
-      ? { wasm: prepared.kernel.wasm, fingerprint: prepared.kernel.fingerprint }
-      : null,
     config: {
       quality: options.quality ?? 1,
       fps: options.fps ?? null,
@@ -312,30 +302,9 @@ function build(options: ExportOptions): Built {
       svg: options.svg ?? true,
       stageWidth: options.stageWidth ?? DEFAULT_STAGE_WIDTH,
       stageHeight: options.stageHeight ?? DEFAULT_STAGE_HEIGHT,
+      kernel: options.kernel !== false,
     },
   };
-}
-
-/**
- * Where the page looks for its kernel. A built one is pointed at; without one
- * the address is left out, which is what puts the kernel on its javascript path
- * — `null` there would mean no kernel at all, and that is what `--no-kernel`
- * asks for.
- */
-const kernelKind = (options: ExportOptions, built: Built): ExportResult['kernel'] =>
-  built.kernel ? 'wasm' : options.kernel === false ? 'none' : 'javascript';
-
-function kernelLinks(
-  options: ExportOptions,
-  built: Built,
-  url: string,
-): { kernelUrl?: string | null; kernelFingerprint: string | null } {
-  if (built.kernel) {
-    return { kernelUrl: url, kernelFingerprint: built.kernel.fingerprint };
-  }
-  return options.kernel === false
-    ? { kernelUrl: null, kernelFingerprint: null }
-    : { kernelFingerprint: null };
 }
 
 /**
@@ -348,7 +317,7 @@ export function exportZip(options: ExportOptions): ExportResult {
   const built = build(options);
   const rewrites = new Map(built.assets.map((asset) => [asset.target, `assets/${asset.target}`]));
   const project = withServedAssets(options.project, rewrites);
-  const config = { ...built.config, ...kernelLinks(options, built, `./${KERNEL_NAME}`) };
+  const config = built.config;
   const files: ZipFile[] = [
     {
       name: 'index.html',
@@ -379,14 +348,11 @@ export function exportZip(options: ExportOptions): ExportResult {
   for (const asset of built.assets) {
     files.push({ name: `assets/${asset.target}`, data: asset.data });
   }
-  if (built.kernel) {
-    files.push({ name: KERNEL_NAME, data: Buffer.from(built.kernel.wasm) });
-  }
   return {
     data: zipFiles(files),
     modules: built.modules.size + 2,
     assets: built.assets.length,
-    kernel: kernelKind(options, built),
+    kernel: options.kernel !== false,
   };
 }
 
@@ -420,10 +386,7 @@ export function exportHtml(options: ExportOptions): ExportResult {
   for (const asset of built.assets) {
     files[asset.target] = [asset.type, asset.data.toString('base64')];
   }
-  if (built.kernel) {
-    files[KERNEL_NAME] = ['application/wasm', Buffer.from(built.kernel.wasm).toString('base64')];
-  }
-  const config = { ...built.config, ...kernelLinks(options, built, KERNEL_NAME) };
+  const config = built.config;
   const runner = bootModule(
     {
       boot: literal(`${BARE_PREFIX}web/boot.ts`),
@@ -489,6 +452,6 @@ document.body.appendChild(script);
     data: Buffer.from(html, 'utf-8'),
     modules: Object.keys(sources).length,
     assets: built.assets.length,
-    kernel: kernelKind(options, built),
+    kernel: options.kernel !== false,
   };
 }

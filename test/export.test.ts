@@ -65,7 +65,7 @@ test('zip 으로 내보내면 페이지·작품·모듈·에셋이 모두 들어
   assert.ok(files.has('vm/web/boot.js'));
   assert.ok(files.has('vm/pixi.mjs'));
   assert.equal(made.assets, 1);
-  assert.equal(made.kernel, 'none');
+  assert.equal(made.kernel, false);
 
   // 정적 서버는 `.ts` 를 브라우저가 실행하지 않는 형식으로 내주므로 `.js` 로 나가야 한다.
   for (const name of files.keys()) {
@@ -97,7 +97,7 @@ test('단일 html 은 모듈·작품·에셋을 글 안에 담고 커널을 끈 
   assert.match(html, /\\"fileurl\\":\\"temp\//);
   assert.match(html, new RegExp(PNG.toString('base64').slice(0, 24)));
   // 실행 모듈은 글 안에 문자열로 들어 있으므로 따옴표가 한 번 더 감싸 있습니다.
-  assert.match(html, /\\"kernelUrl\\":null/);
+  assert.match(html, /\\"kernel\\":false/);
   assert.equal(made.assets, 1);
 });
 

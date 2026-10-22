@@ -21,7 +21,6 @@ import {
 } from '@tess/player';
 import type { AssetFile, EntryProject, SourceMap } from '@tess/compiler';
 import { playerPage } from './page.ts';
-import { prepareKernel, type PrepareResult } from '../kernel/prepare.ts';
 import { DEFAULT_STAGE_HEIGHT, DEFAULT_STAGE_WIDTH } from '../runtime/model.ts';
 
 export const DEFAULT_PORT = 2014;
@@ -53,8 +52,6 @@ export interface RunningServer {
   port: number;
   /** What the CLI shows as the runner behind this server. */
   runtime: string;
-  /** What was built for the page to run its numeric functions in wasm. */
-  kernel: PrepareResult;
   close(): Promise<void>;
   update(next: {
     project: EntryProject;
@@ -138,10 +135,6 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
   let routes = assetRoutes(options.assets, options.assetDirs);
   let served = withServedAssets(options.project, routes.rewrites);
   let projectJson = JSON.stringify(served);
-  let kernel: PrepareResult =
-    options.kernel === false
-      ? { kernel: null, reason: '껐습니다 (--no-kernel)' }
-      : prepareKernel(served);
   let sourceMapJson = JSON.stringify(options.sourceMap ?? {});
   const preactDir = findPreactDir();
   const listeners = new Set<http.ServerResponse>();
@@ -173,22 +166,6 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
 
     if (url === '/project.json') {
       return send(response, 200, MIME['.json']!, projectJson);
-    }
-
-    if (url === '/kernel.wasm') {
-      const built = kernel.kernel;
-      if (!built) {
-        return send(response, 404, 'text/plain', kernel.reason);
-      }
-      response.writeHead(200, {
-        'content-type': 'application/wasm',
-        'content-length': built.wasm.byteLength,
-        // The page plans its own kernel and takes this one only when the two
-        // plans are the same, so the mark travels with the module.
-        'x-tessvm-kernel': built.fingerprint,
-        'cache-control': 'no-store',
-      });
-      return void response.end(built.wasm);
     }
 
     if (url === '/sourcemap.json') {
@@ -264,7 +241,6 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
     url: `http://127.0.0.1:${port}/`,
     port,
     runtime: 'tessvm (PixiJS)',
-    kernel,
     async close() {
       for (const listener of listeners) {
         listener.end();
@@ -276,9 +252,6 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
       served = withServedAssets(next.project, routes.rewrites);
       projectJson = JSON.stringify(served);
       sourceMapJson = JSON.stringify(next.sourceMap ?? {});
-      kernel = options.kernel === false
-        ? { kernel: null, reason: '껐습니다 (--no-kernel)' }
-        : prepareKernel(served);
       for (const listener of listeners) {
         listener.write('data: reload\n\n');
       }

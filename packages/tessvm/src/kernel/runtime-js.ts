@@ -1,8 +1,7 @@
 /**
- * @fileoverview 커널이 자바스크립트로 돌 때 쓰는 받침입니다.
+ * @fileoverview 커널이 돌 때 쓰는 받침입니다.
  *
- * `runtime.mbt` 와 같은 일을 하되 wasm 선형 메모리 대신 `Float64Array` 하나를
- * 씁니다. 산술은 `runtime/cast.ts` 의 것을 그대로 부르므로, 블록 실행기와 커널이
+ * 작품의 숫자는 `Float64Array` 하나에 담깁니다. 산술은 `runtime/cast.ts` 의 것을 그대로 부르므로, 블록 실행기와 커널이
  * 같은 한 벌의 10진 규칙을 씁니다 — 두 벌이 어긋날 자리가 없습니다.
  *
  * 남는 것은 상자와 이름 찾기입니다. 블록 실행기는 값 하나를 읽을 때마다
@@ -89,9 +88,8 @@ export interface KernelMarks {
 }
 
 /** Builds the helper set the generated javascript reads its world through. */
-export function kernelOps(cells: Float64Array, marks?: KernelMarks): KernelOps {
-  const flags = marks?.flags;
-  const span = marks?.span;
+export function kernelOps(cells: Float64Array, marks: KernelMarks): KernelOps {
+  const { flags, span } = marks;
   const item = (base: number, length: number, index: number): number =>
     index !== Math.trunc(index) || index < 1 || index > length
       ? 0
@@ -107,10 +105,10 @@ export function kernelOps(cells: Float64Array, marks?: KernelMarks): KernelOps {
         const cell = base + index - 1;
         cells[cell] = value;
         // Only an item's first store in a run does any bookkeeping.
-        if (flags && flags[cell] === 0) {
+        if (flags[cell] === 0) {
           flags[cell] = 1;
-          if (cell < span![0]!) span![0] = cell;
-          if (cell > span![1]!) span![1] = cell;
+          if (cell < span[0]!) span[0] = cell;
+          if (cell > span[1]!) span[1] = cell;
         }
       }
     },
