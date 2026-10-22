@@ -96,6 +96,23 @@ function runVm(source: string): Vm {
   return vm;
 }
 
+test('function labels inherited from Object.prototype execute their own bodies', () => {
+  for (const name of ['ordinary', 'constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+    const vm = runVm(`var out = 0
+function ${name}():
+  return 7
+end
+object "o":
+  when start do
+    out = ${name}()
+  end
+end`);
+    vm.tick();
+    assert.equal(valueOf(vm, 'out'), 7, name);
+    assert.deepEqual(vm.errors, []);
+  }
+});
+
 /**
  * 변수 값을 숫자로 읽습니다. 엔트리의 `변수 바꾸기`·`정하기` 는 값을 문자열로
  * 담아 두므로(`toFixed` 의 결과), 비교는 숫자로 맞춰서 합니다.

@@ -337,7 +337,7 @@ export class Codegen {
   private compileFunction(fn: FunctionEntry): string {
     // The save manager's own functions are empty in the work — the extension
     // takes their call. This runner takes it here instead.
-    const saving = SAVE_FUNCTIONS[functionLabel(fn.content)];
+    const saving = pick(SAVE_FUNCTIONS, functionLabel(fn.content));
     if (saving) {
       return saving === 'wait'
         ? 'function* (e, th, P) { yield* O.saveStoreWait(); }'
