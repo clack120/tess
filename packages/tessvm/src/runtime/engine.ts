@@ -859,6 +859,9 @@ export class Vm implements Project {
       // `Entry.engine.togglePause` holds the sounds rather than ending them.
       this.audio?.pause?.();
       this.speech?.pause?.();
+      for (const target of this.targets) {
+        for (const thread of target.threads.slice()) this.runThread(thread, true);
+      }
     }
   }
 
@@ -977,9 +980,10 @@ export class Vm implements Project {
     this.flushMessages();
   }
 
-  private runThread(thread: Thread): void {
+  private runThread(thread: Thread, finishingValues = false): void {
     try {
-      thread.step();
+      if (finishingValues) thread.finishValueCalls();
+      else thread.step();
     } catch (error) {
       thread.done = true;
       if (error instanceof ThreadStop) {

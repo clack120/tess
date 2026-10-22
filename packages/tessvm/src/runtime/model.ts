@@ -757,13 +757,13 @@ export interface CompiledScript {
 }
 
 /**
- * What compiled code yields: a number ends the frame, a generator is a function
- * call the thread runs first and whose result it sends back.
+ * A number ends the frame (1 holds a promise); a generator is a function call
+ * the thread runs first and whose result it sends back.
  */
 export type Yielded = number | CallFrame;
 
 /** One function call in progress on a thread's call stack. */
-export type CallFrame = Generator<Yielded, unknown, unknown>;
+export type CallFrame = Generator<Yielded, unknown, unknown> & { onPause?: () => CallFrame };
 
 export type ScriptBody = (entity: Entity, thread: Thread) => Generator<Yielded, void, unknown>;
 
@@ -778,6 +778,7 @@ export class Thread {
   iterator: Generator<Yielded, void, unknown>;
   /** The body and the calls nested in it, innermost last. Kept off the JS stack. */
   private frames: CallFrame[];
+  private waitingAsync = false;
   done = false;
   /** True while this thread's generator is on the stack. */
   running = false;
@@ -806,13 +807,32 @@ export class Thread {
     }
   }
 
+  /** Entry completes a frame-waiting value call on pause, but keeps promise waits. */
+  finishValueCalls(): void {
+    if (this.done || this.running || this.waitingAsync || !this.frames.some((frame) => frame.onPause)) return;
+    this.running = true;
+    try {
+      this.resume(true);
+    } finally {
+      this.running = false;
+    }
+  }
+
   /** Runs the innermost frame until one yields a number or the body ends. */
-  private resume(): void {
+  private resume(finishingValues = false): void {
     const frames = this.frames;
     let input: unknown;
     let thrown = false;
     let error: unknown;
     for (;;) {
+      if (finishingValues) {
+        const at = frames.findLastIndex((frame) => frame.onPause);
+        if (at !== -1) {
+          const finish = frames[at]!.onPause!;
+          while (frames.length > at) frames.pop()!.return(undefined);
+          frames.push(finish());
+        }
+      }
       const frame = frames[frames.length - 1]!;
       let result: IteratorResult<Yielded, unknown>;
       try {
@@ -839,6 +859,8 @@ export class Thread {
       }
       const value = result.value;
       if (typeof value === 'number') {
+        this.waitingAsync = value === 1;
+        if (finishingValues && !this.waitingAsync && frames.some((frame) => frame.onPause)) continue;
         return;
       }
       frames.push(value);
