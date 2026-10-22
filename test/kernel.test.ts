@@ -11,10 +11,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileProject } from '@tess/compiler';
-import { Vm, buildKernel, fingerprint, moonPath, planKernel } from '@tess/vm';
+import { Vm, buildKernel, fingerprint, planKernel } from '@tess/vm';
 import type { KernelPlan } from '@tess/vm';
-
-const hasMoon = moonPath() !== null;
 
 test('the JS kernel preserves untouched scalar text and falls back without partial writes', () => {
   const source = `
@@ -120,7 +118,10 @@ function planOf(source: string): KernelPlan {
   return vm.kernelPlan;
 }
 
-/** Runs a work for `ticks` frames, with the kernel or without it. */
+/**
+ * Runs a work for `ticks` frames, with the kernel or without it. Without the
+ * moonbit toolchain no wasm is built and the javascript kernel runs instead.
+ */
 function runWork(source: string, ticks: number, withKernel: boolean): Vm {
   const built = project(source);
   let plan: KernelPlan | null = null;
@@ -333,7 +334,7 @@ test('지문은 같은 소스에 같은 값을 준다', () => {
   assert.notEqual(fingerprint('abc'), fingerprint('abd'));
 });
 
-test('커널이 낸 값은 자바스크립트가 낸 값과 같다 (10진 산술)', { skip: !hasMoon }, () => {
+test('커널이 낸 값은 자바스크립트가 낸 값과 같다 (10진 산술)', () => {
   assertSameAsJavascript(`
 var ret = 0
 var sum = 0
@@ -371,7 +372,7 @@ scene "s":
 end`, 4);
 });
 
-test('커널이 낸 값은 자바스크립트가 낸 값과 같다 (수학 블록)', { skip: !hasMoon }, () => {
+test('커널이 낸 값은 자바스크립트가 낸 값과 같다 (수학 블록)', () => {
   assertSameAsJavascript(`
 var ret = 0
 var i = 0
@@ -408,7 +409,7 @@ scene "s":
 end`, 3);
 });
 
-test('커널이 낸 값은 자바스크립트가 낸 값과 같다 (리스트 범위 밖·조건)', { skip: !hasMoon }, () => {
+test('커널이 낸 값은 자바스크립트가 낸 값과 같다 (리스트 범위 밖·조건)', () => {
   assertSameAsJavascript(`
 var ret = 0
 var i = 0
@@ -445,7 +446,7 @@ scene "s":
 end`, 3);
 });
 
-test('커널이 쓴 변수도 엔트리처럼 글자로 담긴다', { skip: !hasMoon }, () => {
+test('커널이 쓴 변수도 엔트리처럼 글자로 담긴다', () => {
   const vm = assertSameAsJavascript(`
 var ret = 0
 var clock = 0
@@ -475,7 +476,7 @@ end`, 3);
   assert.equal(clock?.getValue(), '0.020');
 });
 
-test('리스트 길이가 달라지면 커널은 물러나고 작품은 그대로 돈다', { skip: !hasMoon }, () => {
+test('리스트 길이가 달라지면 커널은 물러나고 작품은 그대로 돈다', () => {
   const source = `
 var ret = 0
 var i = 0
@@ -563,7 +564,7 @@ test('판단을 담는 리스트도 커널이 가져간다', () => {
   assert.ok(plan.roots.size > 0);
 });
 
-test('판단 리스트는 엔트리처럼 TRUE·FALSE 글자로 남는다', { skip: !hasMoon }, () => {
+test('판단 리스트는 엔트리처럼 TRUE·FALSE 글자로 남는다', () => {
   const vm = assertSameAsJavascript(JUDGED, 6);
   const inside = vm.variables.find((variable) => variable.name === 'inside')!;
   assert.deepEqual(inside.array.map((item) => item.data), ['TRUE', 'TRUE', 'FALSE', 'FALSE']);
@@ -575,7 +576,7 @@ test('판단 리스트는 엔트리처럼 TRUE·FALSE 글자로 남는다', { sk
  * 표를 대신 답해 버려, 그 표가 영영 건너오지 않고 0 으로 읽힙니다 — `3D portal.ent`
  * 의 화면이 검게만 나오던 까닭입니다.
  */
-test('빈 리스트 뒤에 오는 표도 제대로 건너온다', { skip: !hasMoon }, () => {
+test('빈 리스트 뒤에 오는 표도 제대로 건너온다', () => {
   const source = `
 var ret = 0
 var i = 0
