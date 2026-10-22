@@ -13,7 +13,7 @@ export interface EnvChoices {
   boost: string;
   device: string;
   touch: string;
-  /** `아이디`·`닉네임`. Both empty means the signed-out `guest` pair. */
+  /** `아이디`·`닉네임`. Both empty means signed out. */
   userId: string;
   nickname: string;
 }

@@ -82,20 +82,12 @@ const RESERVED_PARAM = /^(string|boolean)Param_/;
 const SPIN_LIMIT = 10_000_000;
 
 /**
- * How deep function calls may nest before one stops running.
+ * How deep function calls may nest before the work stops.
  *
- * Entry nests its function calls on the javascript stack, so a work that
- * recurses without end ends in a stack overflow there as well. Entry catches
- * that inside the function call: the chain unwinds, every call counts as done,
- * and the caller carries straight on with the next block. Works built by the
- * merge tool rely on it — `__entryMergy_throwCallStackError` calls itself for
- * no other reason.
- *
- * A thrown stack overflow cannot be answered the same way here: the generators
- * it passes through are finished by the throw, so the thread has nothing left
- * to carry on with. The wall is drawn at a fixed depth instead. Calls run on the
- * thread's own frame stack (`Thread.frames`), so the depth is not bounded by
- * the engine's stack size.
+ * Entry nests its calls on the javascript stack; a work that recurses without
+ * end overflows it, and `stopProjectWithToast` stops the work. Calls here run on
+ * the thread's own frame stack (`Thread.frames`), so the wall is a fixed depth
+ * and passing it throws the same way.
  */
 const CALL_DEPTH_LIMIT = 1000000;
 
@@ -375,7 +367,7 @@ export class Codegen {
     // into the frame skips the rest of the body to the return expression.
     let source =
       `function* (e, th, P) {\n` +
-      `  if (th.depth >= ${CALL_DEPTH_LIMIT}) return;\n` +
+      `  if (th.depth >= ${CALL_DEPTH_LIMIT}) throw new RangeError('함수 호출이 너무 깊습니다 (끝나지 않는 재귀)');\n` +
       `  th.depth += 1;\n` +
       `  try {\n` +
       `  const L = {${locals}};\n`;

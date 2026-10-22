@@ -130,7 +130,7 @@ export interface EntryUser {
 }
 
 /** What `아이디` and `닉네임` answer when nobody is signed in. */
-export const GUEST = 'guest';
+export const GUEST = ' ';
 
 /** How often a running work writes its shared and real-time variables out. */
 const STORE_FLUSH_MS = 1000;
@@ -158,7 +158,7 @@ export interface VmOptions {
   /**
    * Who `아이디`(`get_user_name`) and `닉네임`(`get_nickname`) answer with.
    * Entry reads `window.user`, which only the site itself fills in, so a runner
-   * outside it leaves this unset and both blocks answer `guest`.
+   * outside it leaves this unset and both blocks answer a space, as entry does.
    */
   user?: EntryUser | null;
   /** Ticks per frame ceiling when catching up on lost time. */
@@ -1013,9 +1013,18 @@ export class Vm implements Project {
       `장면 '${scene?.name ?? target.sceneId}'`,
       `오브젝트 '${target.name}'${thread.entity.isClone ? ' (복제본)' : ''}`,
     ];
-    const calls = (thread.failedFrames ?? [])
-      .map((frame) => this.functionOf.get(Object.getPrototypeOf(frame) as object))
-      .filter((name): name is string => name !== undefined);
+    // A call repeated back to back is one step with its count, and a long
+    // chain keeps its two ends.
+    const steps: Array<{ name: string; count: number }> = [];
+    for (const frame of thread.failedFrames ?? []) {
+      const name = this.functionOf.get(Object.getPrototypeOf(frame) as object);
+      if (name === undefined) continue;
+      const last = steps[steps.length - 1];
+      if (last?.name === name) last.count += 1;
+      else steps.push({ name, count: 1 });
+    }
+    const shown = steps.map((step) => (step.count > 1 ? `${step.name} ×${step.count}` : step.name));
+    const calls = shown.length > 8 ? [...shown.slice(0, 3), '…', ...shown.slice(-3)] : shown;
     if (calls.length) parts.push(`함수 ${calls.join(' → ')}`);
     return parts.join(' · ');
   }
