@@ -32,7 +32,7 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
   const source = stripTypeScriptTypes(fs.readFileSync(path.join(POPUP, 'popup.ts'), 'utf-8'), {
     mode: 'strip',
   });
-  const settings = { enabled: true, svg: true, mask: false, notice: true, ...stored };
+  const settings = { enabled: true, svg: true, notice: true, ...stored };
   const sandbox: Record<string, unknown> = {
     document: dom.window.document,
     readSettings: () => Promise.resolve(settings),
@@ -42,7 +42,6 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
     },
     ENABLED_KEY: 'enabled',
     SVG_KEY: 'svg',
-    MASK_KEY: 'mask',
     NOTICE_KEY: 'notice',
     Intl: globalThis.Intl,
     // 저장된 데이터는 확장 자신의 IndexedDB 에 있다 (`src/store-db.ts`).
@@ -147,17 +146,15 @@ test('꺼진 채로 열면 꺼진 모습으로 시작한다', async (t) => {
 });
 
 test('나머지 스위치는 저장된 값을 보여 주고, 바꾸면 그대로 쓴다', async (t) => {
-  const popup = await mountPopup(t, { svg: true, mask: false, notice: false });
+  const popup = await mountPopup(t, { svg: true, notice: false });
   assert.equal((popup.find('svg') as HTMLInputElement).checked, true);
-  assert.equal((popup.find('mask') as HTMLInputElement).checked, false);
+  assert.equal(popup.find('mask'), null, '아이디 가리기 스위치는 없습니다');
   assert.equal((popup.find('notice') as HTMLInputElement).checked, false);
 
   popup.toggle('svg');
-  popup.toggle('mask');
   popup.toggle('notice');
   assert.deepEqual(popup.written, [
     ['svg', false],
-    ['mask', true],
     ['notice', true],
   ]);
 });

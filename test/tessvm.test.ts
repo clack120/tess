@@ -1493,11 +1493,8 @@ end`;
   assert.equal(target.getPrevPicture('1')?.name, '세번째');
 });
 
-test('user ID remains unchanged unless masking is explicitly enabled', () => {
-  /**
-   * Keep the signed-in ID unless masking is explicitly requested.
-   * The standalone runner uses guest when no user is supplied.
-   */
+test('아이디 블록은 로그인한 사람의 아이디를 그대로 돌려준다', () => {
+  // A runner with no user answers guest.
   const source = `
 var 아이디_값 as "아이디 값" = 0
 var 닉_값 as "닉 값" = 0
@@ -1527,15 +1524,7 @@ end`;
   assert.deepEqual(
     read({ user: { id: 'ddtt786', nickname: '치로' } }),
     { id: 'ddtt786', nickname: '치로' },
-    '기본값은 원본 아이디를 유지합니다',
   );
-  assert.deepEqual(
-    read({ user: { id: 'ddtt786', nickname: '치로' }, maskUserId: true }),
-    { id: 'dd*****', nickname: '치로' },
-    '명시적으로 켜면 가려집니다',
-  );
-  // 두 글자 이하는 가릴 것이 없습니다.
-  assert.deepEqual(read({ user: { id: 'ab', nickname: 'ab' } }).id, 'ab');
 });
 
 // ---------------------------------------------------------------------------

@@ -16,7 +16,6 @@ export interface EnvChoices {
   /** `아이디`·`닉네임`. Both empty means the signed-out `guest` pair. */
   userId: string;
   nickname: string;
-  mask: string;
 }
 
 /** The object shape the panel expects — entry's object, as far as the panel reads it. */
@@ -181,7 +180,6 @@ export function makeVmRuntime(handle: TessVmHandle) {
       vm.user = id || nickname
         ? { id: id || handle.defaultUser?.id || '', nickname: nickname || handle.defaultUser?.nickname || '' }
         : handle.defaultUser;
-      vm.maskUserId = env.mask === '' ? handle.defaultMaskUserId : env.mask === 'true';
     },
 
     stageSize: () => ({ width: stage.width, height: stage.height }),

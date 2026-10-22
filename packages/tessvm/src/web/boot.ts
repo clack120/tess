@@ -47,8 +47,6 @@ export interface BootOptions {
   svg?: boolean;
   /** Who `아이디` and `닉네임` answer with. Left unset, both answer `guest`. */
   user?: EntryUser | null;
-  /** Hides all but the first two letters of the id. On unless turned off. */
-  maskUserId?: boolean;
   /**
    * Where a built wasm kernel is served, for a page that has one behind it.
    * Left unset, the kernel runs in javascript instead — which is what a page
@@ -93,7 +91,6 @@ export interface TessVmHandle {
   defaultTouch: boolean;
   defaultDeviceType: 'desktop' | 'tablet' | 'mobile';
   defaultUser: EntryUser | null;
-  defaultMaskUserId: boolean;
   start(): void;
   stop(): void;
   pause(): void;
@@ -303,7 +300,6 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     touch,
     deviceType,
     user: options.user,
-    maskUserId: options.maskUserId,
     store: options.store === null ? null : (options.store ?? localVariableStore(storeKey(project))),
     // A supply that answers null still gets the javascript kernel, which is
     // what a page outside the run server — the extension on playentry — has.
@@ -482,7 +478,6 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     defaultTouch: touch,
     defaultDeviceType: deviceType,
     defaultUser: vm.user,
-    defaultMaskUserId: vm.maskUserId,
     start: () => {
       // Keys are read from the player, so it has to hold focus before the work
       // can be played at all.

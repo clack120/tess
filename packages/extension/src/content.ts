@@ -11,7 +11,7 @@
  * element instead would both collapse that box and take a node out from under
  * the page's own view code.
  */
-import { api, readSettings, ENABLED_KEY, SVG_KEY, MASK_KEY, NOTICE_KEY } from './browser.ts';
+import { api, readSettings, ENABLED_KEY, SVG_KEY, NOTICE_KEY } from './browser.ts';
 
 const IFRAME_MARK = '/iframe/';
 /** `data-tessvm-held` — set on a frame this has already taken over. */
@@ -28,7 +28,6 @@ interface Held {
 
 let enabled: boolean | null = null;
 let svg = true;
-let mask = false;
 let notice = true;
 let injected = false;
 const held: Held[] = [];
@@ -93,7 +92,6 @@ function mount(item: Held): void {
     host.dataset.tessvmGroup = group;
   }
   host.dataset.tessvmSvg = svg ? '1' : '0';
-  host.dataset.tessvmMask = mask ? '1' : '0';
   host.dataset.tessvmNotice = notice ? '1' : '0';
   item.frame.after(host);
   inject();
@@ -195,10 +193,6 @@ api.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') {
     return;
   }
-  if (MASK_KEY in changes) {
-    mask = changes[MASK_KEY]?.newValue === true;
-    window.postMessage({ __tessvm: 'mask', mask }, location.origin);
-  }
   if (NOTICE_KEY in changes) {
     notice = changes[NOTICE_KEY]?.newValue !== false;
     window.postMessage({ __tessvm: 'notice', notice }, location.origin);
@@ -223,7 +217,6 @@ api.storage.onChanged.addListener((changes, area) => {
 void readSettings().then((settings) => {
   enabled = settings.enabled;
   svg = settings.svg;
-  mask = settings.mask;
   notice = settings.notice;
   applyAll();
 });

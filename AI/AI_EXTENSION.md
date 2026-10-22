@@ -281,12 +281,9 @@ JSON.parse(document.getElementById('__NEXT_DATA__').textContent)
 **로그인하지 않은 것**으로 봅니다. 그때 두 블록은 `guest` 를 돌려줍니다(엔트리는 빈
 칸을 돌려주지만, 사이트 밖에서도 도는 실행기라 자기가 누구인지 밝히는 쪽을 택했습니다).
 
-**아이디는 앞 두 글자만 남깁니다** — `ddtt786` → `dd*****`. 팝업의 '아이디 가리기'
-스위치로 끌 수 있고, `chrome.storage` 에 남아 `data-tessvm-mask` 로 넘어가
-`boot({ maskUserId })` 까지 갑니다. 벡터 모양 스위치와 달리 **실행기를 다시 만들지
-않습니다** — VM 이 블록을 돌릴 때마다 이 값을 읽으므로, 내용 스크립트가 보낸
-`{ __tessvm: 'mask' }` 를 받아 돌고 있는 작품에 그대로 넣습니다. 닉네임은 가리지
-않습니다.
+아이디는 가리지 않고 그대로 넘깁니다. 원본 Entry 의 `get_user_name` 은
+`window.user.username` 을 그대로 돌려주며, 앞 몇 글자만 남기면 서로 다른 아이디가 같은
+값이 되어 아이디를 계정 키로 쓰는 작품의 데이터가 섞입니다.
 
 디버그 패널의 '실행 환경 흉내내기' 에도 같은 세 칸이 있습니다(AI_TESSVM.md).
 
@@ -301,7 +298,6 @@ JSON.parse(document.getElementById('__NEXT_DATA__').textContent)
 | `PixiRenderer.destroy()`    | WebGL 컨텍스트와 캔버스를 놓는다                             |
 | `WebAudioEngine.close()`    | 오디오 컨텍스트를 닫는다 (브라우저가 몇 개까지만 허용)       |
 | `BootOptions.user`          | `아이디`·`닉네임` 이 답할 사람. 없으면 둘 다 `guest`         |
-| `BootOptions.maskUserId`    | 아이디의 앞 두 글자만 남긴다. 끄지 않으면 켜짐               |
 | `BootOptions.store`         | 공유·실시간 변수를 둘 곳. 확장은 `null` 을 넘긴다            |
 
 playentry 는 SPA 라 작품 사이를 오갈 때 문서가 그대로입니다. `dispose()` 가 없으면
@@ -353,7 +349,7 @@ border-radius: 0; background: none }` 같은 전역 초기화가 있어서, 우�
 
 툴바 단추 뒤의 창(`src/popup`)에서 **실행기 자체는 가운데 둥근 단추 하나**입니다 — 누르면
 켜지고 다시 누르면 꺼지며(`role="switch"` · `aria-checked`), 그 상태가 머리줄의 점·칩과
-아래 문구에 함께 나타납니다. 벡터·아이디 가리기·모르는 블록 알림은 그 실행기의 설정이라
+아래 문구에 함께 나타납니다. 벡터·모르는 블록 알림은 그 실행기의 설정이라
 카드 하나에 묶여 있고, 실행기가 꺼져 있으면 흐려집니다(누를 수는 있습니다).
 
 값은 예전과 같은 키(`enabled`·`svg`·`mask`·`notice`)로 곧바로 저장소에 씁니다. 창을 여는
