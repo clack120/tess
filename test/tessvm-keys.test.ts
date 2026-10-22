@@ -30,17 +30,20 @@ const stubRenderer = () => ({
  * `bindInput` 을 jsdom 에 올리고, 확장이 만드는 것과 같은 화면을 꾸민다 —
  * 무대 · 대답 입력칸 · 아래 조작줄의 단추가 모두 한 뿌리(`root`) 안에 있다.
  */
-function mountInput(t: any) {
+function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 }) {
   const dom = new JSDOM(
-    '<!doctype html><body><div id="root" tabindex="0">'
-      + '<div id="view"></div><input id="ask" type="text"><button id="stop"></button>'
-      + '</div></body>',
+    '<!doctype html><body><div id="root" tabindex="0" draggable="true">'
+      + '<div id="view"><input id="ask" type="text"></div><button id="stop"></button>'
+      + '</div><input id="outside" type="text"></body>',
     { pretendToBeVisual: true },
   );
   t.after(() => dom.window.close());
 
   const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/web/boot.ts'), 'utf-8'));
-  const sandbox: Record<string, unknown> = { window: dom.window, document: dom.window.document };
+  const sandbox: Record<string, unknown> = {
+    window: dom.window, document: dom.window.document,
+    stage: { width: 480, height: 270, scale: 4 / 3, worldWidth: 640, worldHeight: 360 },
+  };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(
@@ -58,6 +61,7 @@ function mountInput(t: any) {
     mouseY: 0,
     mouseDown: false,
     clickedEntityId: null,
+    entityAtPoint: () => null,
     fireEvent: (event: string, filter?: string) => {
       fired.push([event, filter]);
       return [];
@@ -67,7 +71,7 @@ function mountInput(t: any) {
   const document_ = dom.window.document;
   const view = document_.getElementById('view')!;
   const player = document_.getElementById('root')!;
-  (sandbox.bind as any)(stage, stubRenderer(), view, player, []);
+  (sandbox.bind as any)(stage, { ...stubRenderer(), canvasRect: () => rect }, view, player, []);
 
   /** 키를 눌러 보고, 페이지가 그 키를 그대로 쓸 수 있었는지 돌려준다. */
   const press = (on: string, init: Record<string, unknown>, type = 'keydown') => {
@@ -79,8 +83,81 @@ function mountInput(t: any) {
     document_.removeEventListener(type, watch);
     return { prevented: event.defaultPrevented, reachedPage: sawIt };
   };
-  return { press, stage, fired };
+  const pointer = (on: 'view' | 'root' | 'ask' | 'window', type: string, clientX: number, clientY: number) => {
+    const target = on === 'window' ? dom.window : document_.getElementById(on)!;
+    const event = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY });
+    target.dispatchEvent(event);
+    return event;
+  };
+  return { press, pointer, stage, fired,
+    focus: (id: string) => (document_.getElementById(id) as HTMLElement).focus(),
+    focused: () => document_.activeElement?.id,
+  };
 }
+
+test('drag coordinates keep following outside a scaled stage until release', (t) => {
+  for (const scale of [0.5, 1, 3]) {
+    const rect = { left: 100, top: 75, width: 640 * scale, height: 360 * scale };
+    const { pointer, stage } = mountInput(t, rect);
+    pointer('view', 'pointerdown', rect.left + rect.width / 2, rect.top + rect.height / 2);
+    assert.equal(stage.mouseDown, true);
+    pointer('window', 'pointermove', rect.left + rect.width * 1.25, rect.top + rect.height);
+    assert.equal(stage.mouseX, 360, `scale ${scale}`);
+    assert.equal(stage.mouseY, -135, `scale ${scale}`);
+    pointer('window', 'pointerup', rect.left + rect.width, rect.top);
+    assert.equal(stage.mouseX, 240);
+    assert.equal(stage.mouseY, 135);
+    assert.equal(stage.mouseDown, false);
+    pointer('window', 'pointermove', 0, 0);
+    assert.equal(stage.mouseX, 240, 'page movement after release is not a work drag');
+  }
+});
+
+test('the browser cannot start a native drag while the stage handles a work press', (t) => {
+  const { pointer, stage, fired } = mountInput(t);
+  const down = pointer('view', 'pointerdown', 320, 180);
+  assert.equal(down.defaultPrevented, true, 'prevent native image/link/selection dragging');
+  assert.equal(stage.mouseDown, true);
+  const native = pointer('root', 'dragstart', 320, 180);
+  assert.equal(native.defaultPrevented, true, 'an ancestor marked draggable must not take the gesture');
+  assert.ok(fired.some(([event]) => event === 'mouse_clicked'));
+  pointer('window', 'pointerup', 330, 190);
+  assert.equal(stage.mouseDown, false);
+});
+
+test('answer controls keep native focus and selection and do not press the work', (t) => {
+  const { pointer, stage, fired } = mountInput(t);
+  assert.equal(pointer('ask', 'pointerdown', 320, 180).defaultPrevented, false);
+  assert.equal(stage.mouseDown, false);
+  assert.equal(fired.length, 0);
+  assert.equal(pointer('root', 'dragstart', 320, 180).defaultPrevented, false, 'unrelated page dragging remains native');
+});
+
+test('clicking the stage takes keyboard focus back after another page control used it', (t) => {
+  const { focus, focused, pointer } = mountInput(t);
+  focus('stop');
+  assert.equal(focused(), 'stop');
+  pointer('view', 'pointerdown', 320, 180);
+  assert.equal(focused(), 'root');
+});
+
+test('key release outside the focused player cannot leave a work key stuck down', (t) => {
+  const { focus, press, stage } = mountInput(t);
+  focus('root');
+  press('root', { code: 'Enter' });
+  assert.equal(stage.pressedKeys.has(13), true);
+  focus('outside');
+  press('outside', { code: 'Enter' }, 'keyup');
+  assert.equal(stage.pressedKeys.has(13), false);
+});
+
+test('losing focus clears a held stage press and raises its release', (t) => {
+  const { pointer, stage, fired } = mountInput(t);
+  pointer('view', 'pointerdown', 320, 180);
+  pointer('window', 'blur', 0, 0);
+  assert.equal(stage.mouseDown, false);
+  assert.ok(fired.some(([event]) => event === 'mouse_click_cancled'));
+});
 
 test('작품 안에서 누른 키는 페이지로 가지 않는다', (t) => {
   const { press } = mountInput(t);

@@ -531,9 +531,9 @@ function bindInput(
   /** Cursor `$CURSOR` asked for; it comes before the runner's own. */
   workCursor: () => string,
 ): () => void {
-  const on = <T extends EventTarget>(target: T, type: string, handler: EventListener) => {
-    target.addEventListener(type, handler);
-    cleanups.push(() => target.removeEventListener(type, handler));
+  const on = <T extends EventTarget>(target: T, type: string, handler: EventListener, capture = false) => {
+    target.addEventListener(type, handler, capture);
+    cleanups.push(() => target.removeEventListener(type, handler, capture));
   };
   const toStage = (clientX: number, clientY: number) => {
     const rect = renderer.canvasRect();
@@ -567,6 +567,10 @@ function bindInput(
     vm.pressedKeys.delete(code);
     claim(event, code);
   });
+  // Focus may move between a press and release, while keydown stays scoped to the player.
+  if (keyTarget !== window) {
+    on(window, 'keyup', (raw) => vm.pressedKeys.delete(keyCodeOf(raw as KeyboardEvent)), true);
+  }
   // A window that loses focus never sees the key come back up, whatever the keys
   // are read from.
   on(window, 'blur', () => vm.pressedKeys.clear());
@@ -600,12 +604,19 @@ function bindInput(
   /** A list box being resized by its corner handle. */
   let resizing: { variable: Dragged; fromX: number; fromY: number } | null = null;
 
+  // A draggable link/image around the embedded player otherwise steals the pointer.
+  on(window, 'dragstart', (event) => {
+    if (vm.mouseDown || vm.clickedEntityId || dragging || sliding || resizing) event.preventDefault();
+  }, true);
+
   on(view, 'pointermove', (raw) => {
     const event = raw as PointerEvent;
     move(event.clientX, event.clientY);
   });
   on(window, 'pointermove', (raw) => {
     const event = raw as PointerEvent;
+    // A held drag belongs to the stage after leaving its smaller on-page canvas too.
+    if (vm.mouseDown || vm.clickedEntityId) move(event.clientX, event.clientY);
     if (resizing) {
       const point = toStage(event.clientX, event.clientY);
       const box = resizing.variable as unknown as { width: number; height: number };
@@ -630,6 +641,9 @@ function bindInput(
   });
   on(view, 'pointerdown', (raw) => {
     const event = raw as PointerEvent;
+    if ((event.target as Element | null)?.closest?.('input, textarea, select, button, form, [contenteditable="true"]')) return;
+    event.preventDefault();
+    if (keyTarget !== window) (keyTarget as HTMLElement).focus({ preventScroll: true });
     move(event.clientX, event.clientY);
     // A press on a slide variable's run moves its knob, the same way entry lets
     // one be set while the work runs. The work is not told about that press.
@@ -684,7 +698,7 @@ function bindInput(
       vm.fireEventOn('when_object_click', hit);
     }
   });
-  const up = () => {
+  const up = (event?: Event) => {
     if (resizing) {
       resizing = null;
       return;
@@ -702,6 +716,10 @@ function bindInput(
     if (!vm.mouseDown && !vm.clickedEntityId) {
       return;
     }
+    if (event?.type === 'pointerup') {
+      const pointer = event as PointerEvent;
+      move(pointer.clientX, pointer.clientY);
+    }
     vm.mouseDown = false;
     vm.fireEvent('mouse_click_cancled');
     const clicked = vm.clickedEntityId;
@@ -717,6 +735,7 @@ function bindInput(
   };
   on(window, 'pointerup', up);
   on(window, 'pointercancel', up);
+  on(window, 'blur', () => up());
 
   /** What `$CURSOR` last put on the canvas, so giving it back is noticed. */
   let forced = '';
