@@ -96,31 +96,72 @@ function runVm(source: string): Vm {
   return vm;
 }
 
-test('out-of-range char_at and substring run on and are noted once per object', () => {
+test('out-of-range char_at and substring stop the script as entry does', () => {
+  for (const [body, message] of [
+    ['a = s[4]', '글자 위치 4 이(가) 범위를 벗어났습니다 (글자 수 3)'],
+    ['a = s[0]', '글자 위치 0 이(가) 범위를 벗어났습니다 (글자 수 3)'],
+    ['a = slice(s, 0, 2)', '글자 범위 0~2 이(가) 범위를 벗어났습니다 (글자 수 3)'],
+    ['a = slice(s, 2, 4)', '글자 범위 2~4 이(가) 범위를 벗어났습니다 (글자 수 3)'],
+  ]) {
+    const vm = runVm(`var s = "ABC"
+var a = 0
+var after = 0
+object "o":
+  when start do
+    ${body}
+    after = 1
+  end
+end`);
+    vm.tick();
+    assert.deepEqual(vm.errors.map((error) => error.message), [message], body);
+    assert.equal(valueOf(vm, 'after'), 0, `${body}: the blocks after it do not run`);
+  }
   const vm = runVm(`var s = "ABC"
 var a = 0
 var b = 0
-var c = 0
 object "o":
   when start do
-    a = s[2]
-    b = slice(s, 1, 3)
-    repeat 3:
-      a = s[4]
-    end
-    b = slice(s, 0, 2)
-    c = 1
+    a = s[3]
+    b = slice(s, 3, 1)
   end
 end`);
-  for (let i = 0; i < 5; i++) vm.tick();
-  assert.equal(valueOf(vm, 'c'), 1);
+  vm.tick();
   assert.deepEqual(vm.errors, []);
-  assert.deepEqual(vm.divergences.map((note) => note.message), [
-    '글자 위치가 범위를 벗어났습니다 (char_at)',
-    '글자 범위가 벗어났습니다 (substring)',
-  ]);
-  const target = vm.targetOf(vm.divergences[0]!.targetId!);
-  assert.equal(target?.name, 'o');
+  assert.deepEqual([vm.variables.find((v) => v.name === 'a')!.getValue(), vm.variables.find((v) => v.name === 'b')!.getValue()], ['C', 'ABC']);
+});
+
+test('a runtime error says which scene, object and function calls it happened in', () => {
+  const source = `var s = "ABC"
+var a = 0
+function pick(i):
+  return s[i]
+end
+function outer(i):
+  return pick((i + 3))
+end
+scene "메인":
+  object "쉘":
+    when start do
+      clone
+      a = s[9]
+    end
+    when cloned do
+      a = outer(2)
+    end
+  end
+end`;
+  for (const kernel of [undefined, () => null]) {
+    const result = compileProject(source, { path: 'test.tess' });
+    const vm = new Vm({ renderer: null, audio: null, kernel } as never);
+    vm.load(result.project as unknown as never);
+    vm.start();
+    vm.tick();
+    vm.tick();
+    assert.deepEqual(vm.errors.map((error) => error.where), [
+      "장면 '메인' · 오브젝트 '쉘'",
+      "장면 '메인' · 오브젝트 '쉘' (복제본) · 함수 outer i ( ) → pick i ( )",
+    ]);
+  }
 });
 
 test('function labels inherited from Object.prototype execute their own bodies', () => {

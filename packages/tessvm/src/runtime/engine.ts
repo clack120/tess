@@ -31,7 +31,7 @@ import {
 } from './model.ts';
 import { Table } from './table.ts';
 import { ThreadStop, createOps, type Ops } from './ops.ts';
-import { SaveStore } from './save.ts';
+import { SaveStore, functionName } from './save.ts';
 import { Extras } from './extras.ts';
 
 /**
@@ -196,6 +196,8 @@ export interface VmError {
   message: string;
   blockId: string | null;
   targetId: string | null;
+  /** Where it happened, for a person: scene, object, and the function calls it was inside. */
+  where?: string;
 }
 
 export class Vm implements Project {
@@ -252,10 +254,6 @@ export class Vm implements Project {
   errors: VmError[] = [];
   /** Called right after an error is recorded, for the debug panel to report it. */
   onError: ((error: VmError) => void) | null = null;
-  /** Blocks entry stops the work on, where this runner carries on instead. */
-  divergences: VmError[] = [];
-  onDivergence: ((note: VmError) => void) | null = null;
-  private runningThread: Thread | null = null;
 
   /** `Entry.engine.projectTimer` — off until a `초시계 시작하기` block runs. */
   private timerInit = false;
@@ -494,7 +492,15 @@ export class Vm implements Project {
       runtime: Vm,
     ) => { scripts: CompiledScript['body'][]; functions: CompiledFunction[] };
     const built = factory(this);
+    // A call frame is a generator, and its prototype says which function made it.
+    this.functionOf = new Map();
+    const names = input.functions.map((fn) => functionName(fn.content) || fn.id);
+    const note = () => built.functions.forEach((fn, index) => {
+      if (fn?.prototype) this.functionOf.set(fn.prototype as object, names[index]!);
+    });
+    note();
     this.installKernel(input, built.functions);
+    note();
     this.plans = program.plans;
     this.scripts = program.plans.map((plan) => ({
       event: plan.event,
@@ -939,16 +945,6 @@ export class Vm implements Project {
     this.onError?.(record);
   }
 
-  /** Records once per object and message a block entry would have stopped on. */
-  diverge(message: string): void {
-    const thread = this.runningThread;
-    const targetId = thread?.target.id ?? null;
-    if (this.divergences.some((note) => note.targetId === targetId && note.message === message)) return;
-    const note: VmError = { message, blockId: thread?.script.blockId ?? null, targetId };
-    this.divergences.push(note);
-    this.onDivergence?.(note);
-  }
-
   /** One engine frame. */
   tick(deltaMs = 1000 / this.frameRate): void {
     this.clock += deltaMs;
@@ -986,8 +982,6 @@ export class Vm implements Project {
   }
 
   private runThread(thread: Thread, finishingValues = false): void {
-    const previous = this.runningThread;
-    this.runningThread = thread;
     try {
       if (finishingValues) thread.finishValueCalls();
       else thread.step();
@@ -1001,12 +995,29 @@ export class Vm implements Project {
         message: error instanceof Error ? error.message : String(error),
         blockId: thread.script.blockId,
         targetId: thread.target.id,
+        where: this.whereOf(thread),
       };
       this.errors.push(record);
       this.onError?.(record);
-    } finally {
-      this.runningThread = previous;
     }
+  }
+
+  /** Function each call frame's generator belongs to, by its prototype. */
+  private functionOf = new Map<object, string>();
+
+  /** `장면 '1' · 오브젝트 '쉘' (복제본) · 함수 a → b` for the thread an error stopped. */
+  private whereOf(thread: Thread): string {
+    const target = thread.target;
+    const scene = this.scenes.find((item) => item.id === target.sceneId);
+    const parts = [
+      `장면 '${scene?.name ?? target.sceneId}'`,
+      `오브젝트 '${target.name}'${thread.entity.isClone ? ' (복제본)' : ''}`,
+    ];
+    const calls = (thread.failedFrames ?? [])
+      .map((frame) => this.functionOf.get(Object.getPrototypeOf(frame) as object))
+      .filter((name): name is string => name !== undefined);
+    if (calls.length) parts.push(`함수 ${calls.join(' → ')}`);
+    return parts.join(' · ');
   }
 
   // -------------------------------------------------------------------------

@@ -46,13 +46,10 @@ export const api = (globals.browser ?? globals.chrome) as ExtensionApi;
 export const ENABLED_KEY = 'enabled';
 /** Whether a costume drawn as a vector is loaded as one. */
 export const SVG_KEY = 'svg';
-/** Whether the runner notes blocks it lacks and blocks entry stops on. On by default. */
-export const NOTICE_KEY = 'notice';
 
 export interface Settings {
   enabled: boolean;
   svg: boolean;
-  notice: boolean;
 }
 
 /** Everything is on unless turned off. */
@@ -60,12 +57,10 @@ export async function readSettings(): Promise<Settings> {
   const stored = await api.storage.local.get({
     [ENABLED_KEY]: true,
     [SVG_KEY]: true,
-    [NOTICE_KEY]: true,
   });
   return {
     enabled: stored[ENABLED_KEY] !== false,
     svg: stored[SVG_KEY] !== false,
-    notice: stored[NOTICE_KEY] !== false,
   };
 }
 
