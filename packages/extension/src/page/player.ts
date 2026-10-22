@@ -342,6 +342,8 @@ export function mountPlayer(
         boost: true,
         svg,
         user: signedInUser(),
+        tableColumnName: (window as Window & { Lang?: { DataAnalytics?: { new_attribute?: string } } })
+          .Lang?.DataAnalytics?.new_attribute,
         // Wait for assets before enabling input.
         onProgress: (done, all) => {
           status.textContent = all

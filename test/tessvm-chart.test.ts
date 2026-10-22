@@ -19,7 +19,7 @@ interface ChartSpec {
 
 interface TableLike {
   name: string;
-  fields: string[];
+  fields: Array<string | number>;
   rows: Array<Array<string | number>>;
   charts: ChartSpec[];
   revision?: number;
@@ -99,6 +99,17 @@ test('차트 창은 작품이 담은 글자를 마크업이 아니라 글자로�
   assert.equal(view.find('.tessvm-chart-name')!.textContent, '<img src=x onerror="alert(1)">');
   assert.equal(view.find('.tessvm-chart-title')!.textContent, '<script>alert(1)</script>');
   assert.match(view.find('.tessvm-chart-legend')!.textContent ?? '', /<b>분기<\/b>|서울/);
+});
+
+test('숫자로 바뀐 제목 행도 차트 제목과 범례에 표시한다', (t) => {
+  const view = mountChart(t);
+  const table = sampleTable();
+  table.fields = [0, 1, 2];
+  table.charts[0]!.title = '';
+  view.chart.show(table, 0);
+  assert.equal(view.find('.tessvm-chart-title')!.textContent, '0');
+  assert.equal(view.find('.tessvm-chart-legend')!.textContent, '12');
+  assert.match(view.find('.tessvm-chart-axis')!.textContent, /가로축 0/);
 });
 
 test('막대 차트는 줄마다 계열 수만큼 막대를 세운다', (t) => {

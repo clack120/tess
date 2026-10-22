@@ -617,9 +617,9 @@ export class Codegen {
         return line('O.eraseAll(e);');
 
       case 'append_row_to_table':
-        return line(`O.tableAppend(${this.tableRef(p[0])}, ${this.str(p[1])});`);
+        return line(`yield* O.tableAppend(${this.tableRef(p[0])}, ${this.str(p[1])});`);
       case 'insert_row_to_table':
-        return line(`O.tableInsert(${this.tableRef(p[0])}, ${this.num(p[1])}, ${this.str(p[2])});`);
+        return line(`yield* O.tableInsert(${this.tableRef(p[0])}, ${this.num(p[1])}, ${this.str(p[2])});`);
       case 'delete_row_from_table':
         return line(`O.tableDelete(${this.tableRef(p[0])}, ${this.num(p[1])}, ${this.str(p[2])});`);
       case 'set_value_from_table':
@@ -817,7 +817,7 @@ export class Codegen {
     const index = this.tableIndex.get(id);
     if (index === undefined) {
       this.note(`table:${id}`);
-      return '-1';
+      return literal(id);
     }
     return `${index}`;
   }
@@ -1032,7 +1032,7 @@ export class Codegen {
       case 'get_coefficient':
         return {
           code: `O.tableCoefficient(${this.tableRef(p[0])}, ${this.raw(p[1])}, ${this.raw(p[2])})`,
-          kind: 'num',
+          kind: 'any',
         };
       case 'get_value_v_lookup':
         return {

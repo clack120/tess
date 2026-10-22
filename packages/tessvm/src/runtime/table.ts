@@ -1,5 +1,6 @@
 // Match Entry's one-based rows and columns; row one contains field names.
-import { isNumber, num } from './cast.ts';
+import { isNumber } from './cast.ts';
+import { RuntimeBlockError } from './diagnostics.ts';
 
 type RawRow = unknown[] | { value?: unknown } | null | undefined;
 
@@ -33,162 +34,239 @@ function chartOf(raw: unknown): ChartSpec {
   };
 }
 
-function cellsOf(row: RawRow): Array<string | number> {
+function cellsOf(row: RawRow): unknown[] {
   const cells = Array.isArray(row) ? row : (row as { value?: unknown } | null)?.value;
-  return Array.isArray(cells) ? (cells as Array<string | number>) : [];
+  return Array.isArray(cells) ? cells : [];
+}
+
+// Entry table cells use a parseInt gate before full numeric conversion.
+function numericCell(value: unknown): unknown {
+  if (typeof value === 'number') return value;
+  if (Array.isArray(value)) return value.map(numericCell);
+  if (!Number.isNaN(parseInt(value as string, 10))) {
+    const parsed = Number(value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return value;
+}
+
+function sizeRow(row: unknown[], columns: number): unknown[] {
+  const length = row.length;
+  row.length = columns;
+  row.fill(0, length, columns);
+  return row;
+}
+
+// Null and zero exist in Entry tables; other falsy values do not.
+function cellExists(value: unknown): boolean {
+  return value === null || value === 0 || Boolean(value);
+}
+
+// Keep at least one character before Entry's numeric name suffix.
+function nameParts(value: string): { root: string; next: number } {
+  let at = value.length;
+  while (at > 1) {
+    const char = value.charCodeAt(at - 1);
+    if (char < 48 || char > 57) break;
+    at--;
+  }
+  return { root: value.slice(0, at), next: at < value.length ? parseInt(value.slice(at), 10) + 1 : 1 };
 }
 
 export class Table {
   readonly id: string;
   readonly name: string;
-  fields: string[];
+  fields: unknown[];
   // Data excludes the field-name row, which block coordinates address separately.
-  rows: Array<Array<string | number>>;
+  rows: unknown[][];
   charts: ChartSpec[] = [];
   // Bump the revision on edits so open views can redraw.
   revision = 0;
-  private readonly initialFields: string[];
-  private readonly initialRows: Array<Array<string | number>>;
+  private readonly initialFields: unknown[];
+  private readonly initialRows: unknown[][];
+  private initialCharts: ChartSpec[] = [];
 
-  // Restore origin on each run, falling back to data only when origin is absent.
   static from(raw: RawTable): Table {
-    const origin = Array.isArray(raw.origin) ? (raw.origin as RawRow[]) : [];
     const data = Array.isArray(raw.data) ? (raw.data as RawRow[]) : [];
     const table = new Table(
       String(raw.id ?? ''),
       String(raw.name ?? ''),
-      cellsOf(raw.fields as RawRow).map((field) => String(field ?? '')),
-      (origin.length ? origin : data).map((row) => cellsOf(row)),
+      cellsOf(raw.fields as RawRow),
+      data,
     );
     table.charts = (Array.isArray(raw.chart) ? raw.chart : []).map((spec) => chartOf(spec));
+    table.initialCharts = table.charts.map(chartOf);
     return table;
   }
 
-  constructor(id: string, name: string, fields: string[], data: Array<Array<string | number>>) {
+  constructor(id: string, name: string, fields: unknown[], data: RawRow[]) {
     this.id = id;
     this.name = name;
     this.fields = fields.slice();
-    this.rows = data.map((row) => row.slice());
+    this.rows = data.map((row) => {
+      const cells = cellsOf(row).map(numericCell);
+      return Array.isArray(row) ? sizeRow(cells, fields.length) : cells;
+    });
     this.initialFields = fields.slice();
-    this.initialRows = data.map((row) => row.slice());
+    this.initialRows = structuredClone(data.map(cellsOf));
   }
 
   reset(): void {
     this.fields = this.initialFields.slice();
-    this.rows = this.initialRows.map((row) => row.slice());
+    // Entry reloads saved rows as arrays on stop, including formerly keyed rows.
+    this.rows = structuredClone(this.initialRows).map((row) => sizeRow(row.map(numericCell), this.fields.length));
+    this.charts = this.initialCharts.map(chartOf);
     this.revision += 1;
   }
 
   // Row one holds field names, so data rows need an extra index offset.
-  private rowAt(row: number): Array<string | number> | null {
+  private rowAt(row: number): unknown[] | null {
     if (row === 0) {
       return this.fields;
     }
     return this.rows[row - 1] ?? null;
   }
 
-  getValue(row: number, col: number): string | number | null {
-    const target = this.rowAt(row);
-    if (!target) {
-      return null;
-    }
-    const value = target[col - 1];
-    return value === undefined ? null : value;
+  getValue(row: number, col: number): unknown {
+    return this.rowAt(row)?.[col - 1];
   }
 
   isExist(row: number, col: number): boolean {
-    return this.getValue(row, col) !== null;
+    return cellExists(this.getValue(row, col));
   }
 
-  replaceValue(row: number, col: number, value: string | number): void {
+  readValue(row: number, col: number): unknown {
+    const value = this.getValue(row, col);
+    return cellExists(value) ? value : null;
+  }
+
+  replaceValue(row: number, col: number, value: unknown): void {
     const target = this.rowAt(row);
     if (target && col >= 1 && col <= target.length) {
-      target[col - 1] = value;
+      target[col - 1] = numericCell(value);
       this.revision += 1;
     }
   }
 
   appendRow(): void {
-    this.rows.push(new Array<string>(this.fields.length).fill(''));
+    this.rows.push(new Array<number>(this.fields.length).fill(0));
     this.revision += 1;
   }
 
-  appendCol(): void {
-    this.fields.push('');
+  private columnName(base: string): string {
+    if (!base) return 'untitled';
+    const { root } = nameParts(base);
+    let next = 0;
+    for (const field of this.fields) {
+      if (typeof field !== 'string' || !field) continue;
+      const parts = nameParts(field);
+      if (parts.root === root) next = Math.max(next, parts.next);
+    }
+    return next ? `${root}${next}` : base;
+  }
+
+  appendCol(name = '새로운 열'): void {
+    this.fields.push(this.columnName(name));
     for (const row of this.rows) {
-      row.push('');
+      row.push(0);
     }
     this.revision += 1;
   }
 
   insertRow(index: number): void {
-    const at = Math.max(0, Math.min(this.rows.length, index));
-    this.rows.splice(at, 0, new Array<string>(this.fields.length).fill(''));
+    let row: unknown[] = new Array<number>(this.fields.length).fill(0);
+    if (index === 0) {
+      const previous = this.fields;
+      this.fields = row;
+      row = previous.slice();
+      index = 1;
+    }
+    this.rows.splice(index - 1, 0, row);
     this.revision += 1;
   }
 
-  insertCol(index: number): void {
-    const at = Math.max(0, Math.min(this.fields.length, index - 1));
-    this.fields.splice(at, 0, '');
+  insertCol(index: number, name = '새로운 열'): void {
+    if (index < 1 || index > this.fields.length + 1) {
+      throw new RuntimeBlockError(`열 삽입 위치가 범위를 벗어났습니다 (위치 ${index}, 허용 범위 1–${this.fields.length + 1})`,
+        'insert_row_to_table', { table: this.id, tableName: this.name, position: index, columns: this.fields.length, property: 'COL' });
+    }
+    this.fields.splice(index - 1, 0, this.columnName(name));
     for (const row of this.rows) {
-      row.splice(at, 0, '');
+      row.splice(index - 1, 0, 0);
+    }
+    // Entry adjusts chart indices with the block's one-based column number.
+    for (const chart of this.charts) {
+      if (chart.xIndex >= index) chart.xIndex++;
+      if (chart.yIndex >= index) chart.yIndex++;
+      for (let i = 0; i < chart.categoryIndexes.length; i++) {
+        if (chart.categoryIndexes[i] >= index) chart.categoryIndexes[i]++;
+      }
     }
     this.revision += 1;
   }
 
   deleteRow(index: number): void {
-    if (index >= 0 && index < this.rows.length) {
-      this.rows.splice(index, 1);
+    if (index === 0 && this.rows[0]) {
+      this.fields = this.rows[0].slice();
+      index = 1;
+    }
+    if (Number.isInteger(index) && index >= 1 && index <= this.rows.length) {
+      this.rows.splice(index - 1, 1);
       this.revision += 1;
     }
   }
 
   deleteCol(index: number): void {
-    const at = index - 1;
-    if (at >= 0 && at < this.fields.length) {
-      this.fields.splice(at, 1);
-      for (const row of this.rows) {
-        row.splice(at, 1);
+    if (!index) return;
+    this.fields.splice(index - 1, 1);
+    for (const row of this.rows) row.splice(index - 1, 1);
+    for (const chart of this.charts) {
+      if (chart.xIndex === index) {
+        chart.xIndex = chart.yIndex = -1;
+        chart.categoryIndexes = [];
+      } else if (chart.xIndex > index) chart.xIndex--;
+      if (chart.yIndex === index) {
+        chart.yIndex = -1;
+        chart.categoryIndexes = [];
+      } else if (chart.yIndex > index) chart.yIndex--;
+      for (let i = 0; i < chart.categoryIndexes.length; i++) {
+        if (chart.categoryIndexes[i] === index) chart.categoryIndexes.splice(i--, 1);
+        else if (chart.categoryIndexes[i] > index) chart.categoryIndexes[i]--;
       }
-      this.revision += 1;
     }
+    this.revision += 1;
   }
 
-  // Count unparseable column values as zero.
+  // Statistics retain numeric NaN and count other nonnumeric cells as zero.
   column(col: number): number[] {
     return this.rows.map((row) => {
-      const value = row[col - 1];
-      return isNumber(value) ? num(value) : 0;
+      const value = numericCell(row[col - 1]);
+      return typeof value === 'number' ? value : 0;
     });
   }
 
-  coefficient(x: number, y: number): number {
-    const left = this.column(x + 1);
-    const right = this.column(y + 1);
-    const total = Math.min(left.length, right.length);
+  coefficient(x: number, y: number): string | number {
+    const total = this.rows.length;
     if (!total) {
       return 0;
     }
     let sumX = 0;
     let sumY = 0;
-    for (let i = 0; i < total; i += 1) {
-      sumX += left[i]!;
-      sumY += right[i]!;
+    let squareX = 0;
+    let squareY = 0;
+    let product = 0;
+    // Correlation uses Number on raw cells and retains Entry's cancellation and rounding.
+    for (const row of this.rows) {
+      const left = Number(row[x]);
+      const right = Number(row[y]);
+      sumX += left;
+      sumY += right;
+      squareX += left ** 2;
+      squareY += right ** 2;
+      product += left * right;
     }
-    const meanX = sumX / total;
-    const meanY = sumY / total;
-    let covariance = 0;
-    let varianceX = 0;
-    let varianceY = 0;
-    for (let i = 0; i < total; i += 1) {
-      const dx = left[i]! - meanX;
-      const dy = right[i]! - meanY;
-      covariance += dx * dy;
-      varianceX += dx * dx;
-      varianceY += dy * dy;
-    }
-    const denominator = Math.sqrt(varianceX * varianceY);
-    return denominator === 0 ? 0 : covariance / denominator;
+    const denominator = Math.sqrt((squareX - sumX ** 2 / total) * (squareY - sumY ** 2 / total));
+    return denominator === 0 ? 0 : ((product - sumX * sumY / total) / denominator).toFixed(2);
   }
 }
 
@@ -197,21 +275,24 @@ export function columnIndex(value: unknown): number {
   if (isNumber(value)) {
     return parseFloat(String(value));
   }
-  const text = String(value ?? '');
-  if (!text || /[^A-Za-z]|\s/.test(text)) {
+  if (/[^A-Za-z]|\s/.test(value as string)) {
     return 0;
   }
+  const column = value as ArrayLike<string> | null | undefined;
+  const length = column?.length ?? 0;
   let total = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    total += (text.toUpperCase().charCodeAt(i) - 64) * Math.pow(26, text.length - i - 1);
+  for (let i = 0; i < length; i += 1) {
+    total += (column![i]!.toUpperCase().charCodeAt(0) - 64) * Math.pow(26, length - i - 1);
   }
   return total;
 }
 
 export function cellToRowCol(cell: string): { row: number; col: number } {
-  const match = /^([A-Za-z]+)(\d+)$/.exec(cell.trim());
-  if (!match) {
-    return { row: 0, col: 0 };
+  let col = 0;
+  let at = 0;
+  while (at < cell.length && Number.isNaN(Number(cell[at]))) {
+    col = col * 26 + (cell.charCodeAt(at) - 64);
+    at++;
   }
-  return { col: columnIndex(match[1]!), row: Number(match[2]) };
+  return { col, row: parseInt(cell.slice(at), 10) - 1 };
 }
