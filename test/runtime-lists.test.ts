@@ -1,0 +1,184 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { compileProject } from '@tess/compiler';
+import { Vm } from '@tess/vm';
+import { RuntimeBlockError } from '../packages/tessvm/src/runtime/diagnostics.ts';
+
+const entity = { localVars: null } as never;
+function listVm(values: unknown[] = ['A', 'B', 'C']) {
+  const vm = new Vm({ renderer: null, audio: null });
+  vm.load({ scenes: [{ id: 's', name: 's' }], objects: [], functions: [], messages: [],
+    variables: [{ id: 'items', name: 'items', variableType: 'list', array: values.map((data) => ({ data })) }] } as never);
+  return vm;
+}
+
+test('list reads retain Entry numeric syntax and stop at invalid or missing items', () => {
+  const vm = listVm();
+  assert.throws(() => vm.ops.listValue(entity, -1, 1), /리스트를 찾을 수 없습니다/);
+  for (const index of [0, -1, 1.5, 4, NaN, Infinity, -Infinity, '+1', ' 1 ', '.5', true, false, null, undefined, {}, ['1']]) {
+    assert.throws(() => vm.ops.listValue(entity, 0, index), (error) => {
+      assert.ok(error instanceof RuntimeBlockError);
+      assert.equal(error.blockType, 'value_of_index_from_list');
+      assert.deepEqual(error.inputs.length, { type: 'number', value: 3 });
+      return true;
+    }, String(index));
+  }
+  for (const [index, expected] of [[1, 'A'], ['1', 'A'], ['1e0', 'A'], ['FIRST', 'A'], ['LAST', 'C']] as const) {
+    assert.equal(vm.ops.listValue(entity, 0, index), expected);
+  }
+  for (const index of [1, 'FIRST', 'LAST', 'RANDOM']) {
+    assert.throws(() => listVm([]).ops.listValue(entity, 0, index), RuntimeBlockError);
+  }
+});
+
+test('a random list index is resolved once', (t) => {
+  const random = t.mock.method(Math, 'random', () => 0.5);
+  assert.equal(listVm().ops.listValue(entity, 0, 'RANDOM'), 'B');
+  assert.equal(random.mock.callCount(), 1);
+});
+
+test('list removal and insertion preserve Entry splice rules for zero, negatives and fractions', () => {
+  const values = (vm: Vm) => vm.variables[0]!.array.map((item) => item.data);
+  for (const [index, expected] of [
+    [0, ['A', 'B']], [-1, ['A', 'C']], [-10, ['B', 'C']],
+    [1.5, ['B', 'C']], [NaN, ['B', 'C']], [-Infinity, ['B', 'C']], ['1e0', ['B', 'C']],
+  ] as const) {
+    const vm = listVm(); vm.ops.listRemove(entity, 0, index);
+    assert.deepEqual(values(vm), expected, `remove ${index}`);
+  }
+  for (const [index, expected] of [
+    [-1, ['A', 'X', 'B', 'C']], [-10, ['X', 'A', 'B', 'C']],
+    [0.5, ['X', 'A', 'B', 'C']], [1.5, ['X', 'A', 'B', 'C']],
+    [NaN, ['X', 'A', 'B', 'C']], [-Infinity, ['X', 'A', 'B', 'C']], [4, ['A', 'B', 'C', 'X']],
+  ] as const) {
+    const vm = listVm(); vm.ops.listInsert(entity, 0, index, 'X');
+    assert.deepEqual(values(vm), expected, `insert ${index}`);
+  }
+});
+
+test('invalid list mutations report their index and value without changing the list', () => {
+  const operations = [
+    ['remove_value_from_list', (vm: Vm, index: unknown) => vm.ops.listRemove(entity, 0, index), [4]],
+    ['insert_value_to_list', (vm: Vm, index: unknown) => vm.ops.listInsert(entity, 0, index, 'X'), [0, 5]],
+    ['change_value_list_index', (vm: Vm, index: unknown) => vm.ops.listReplace(entity, 0, index, 'X'), [0, -1, 1.5, 4, NaN, -Infinity]],
+  ] as const;
+  for (const [type, run, invalid] of operations) {
+    for (const index of [...invalid, '+1', ' 1 ', '.5', 'FIRST', 'LAST', 'RANDOM', true, false, null, undefined, {}, Infinity]) {
+      const vm = listVm();
+      assert.throws(() => run(vm, index), (error) => {
+        assert.ok(error instanceof RuntimeBlockError);
+        assert.equal(error.blockType, type);
+        assert.deepEqual(error.inputs.length, { type: 'number', value: 3 });
+        if (type !== 'remove_value_from_list') assert.deepEqual(error.inputs.value,
+          { type: 'string', value: 'X', length: 1, truncated: false });
+        return true;
+      }, `${type}, ${index}`);
+      assert.deepEqual(vm.variables[0]!.array.map((item) => item.data), ['A', 'B', 'C']);
+    }
+  }
+});
+
+test('only list membership treats an unknown list as absent', () => {
+  const vm = listVm();
+  assert.equal(vm.ops.listIncludes(entity, -1, 'X'), false);
+  for (const run of [
+    () => vm.ops.listLength(entity, -1), () => vm.ops.listAppend(entity, -1, 'X'),
+    () => vm.ops.listRemove(entity, -1, 1), () => vm.ops.listInsert(entity, -1, 1, 'X'),
+    () => vm.ops.listReplace(entity, -1, 1, 'X'),
+  ]) assert.throws(run, RuntimeBlockError);
+});
+
+test('invalid kernel list stores retain evaluated data and discard speculative prefix writes', () => {
+  for (const index of [0, -1, 1.5, 3]) for (const kernel of [false, true]) {
+    const compiled = compileProject(`var index = ${index}
+var calls = 0
+var after = 0
+var output = 99
+list items = [10, 20]
+function data() do
+  calls += 1
+  return 7
+end
+function write() do
+  calls += 1
+  items[1] = 15
+  items[index] = data()
+  return 0
+end
+object "actor":
+  when start do
+    output = write()
+    after = 1
+  end
+end`);
+    assert.deepEqual(compiled.errors, []);
+    const vm = new Vm({ renderer: null, audio: null, kernel });
+    vm.load(compiled.project as never); vm.onError = () => vm.stop(); vm.start(); vm.tick();
+    assert.equal(vm.errors.length, 1, `${index}, kernel=${kernel}`);
+    const error = vm.errors[0]!;
+    assert.equal(error.blockType, 'change_value_list_index');
+    assert.deepEqual(error.inputs!.index, { type: 'number', value: index });
+    assert.deepEqual(error.inputs!.value, { type: 'string', value: '7', length: 1, truncated: false });
+    assert.equal(vm.variables.find((item) => item.name === 'calls')!.value, '2');
+    assert.equal(vm.variables.find((item) => item.name === 'after')!.value, 0);
+    assert.equal(vm.variables.find((item) => item.name === 'output')!.value, 99);
+    assert.deepEqual(vm.variables.find((item) => item.name === 'items')!.array.map((item) => item.data), ['15', 20]);
+    if (kernel) assert.ok(vm.kernel!.stats.fallbacks > 0);
+  }
+});
+
+test('invalid kernel list reads fall back to a detailed error without repeating prefix calls', () => {
+  for (const index of [0, -1, 1.5, 3]) for (const kernel of [false, true]) {
+    const compiled = compileProject(`var index = ${index}
+var calls = 0
+var output = 99
+var after = 0
+list items = [10, 20]
+function position() do
+  calls += 1
+  return index
+end
+function read() do
+  calls += 1
+  return items[position()]
+end
+object "actor":
+  when start do
+    output = read()
+    after = 1
+  end
+end`);
+    assert.deepEqual(compiled.errors, []);
+    const vm = new Vm({ renderer: null, audio: null, kernel });
+    vm.load(compiled.project as never); vm.onError = () => vm.stop(); vm.start(); vm.tick();
+    assert.equal(vm.errors.length, 1, `${index}, kernel=${kernel}`);
+    const error = vm.errors[0]!;
+    assert.equal(error.blockType, 'value_of_index_from_list');
+    assert.deepEqual(error.inputs!.index, { type: 'number', value: index });
+    assert.deepEqual(error.inputs!.length, { type: 'number', value: 2 });
+    assert.ok(error.blockId); assert.ok(error.stack); assert.ok(error.snapshot);
+    const value = (name: string) => vm.variables.find((item) => item.name === name)!.value;
+    assert.equal(value('calls'), '2'); assert.equal(value('output'), 99); assert.equal(value('after'), 0);
+    if (kernel) assert.ok(vm.kernel!.stats.fallbacks > 0);
+  }
+});
+
+test('kernels cannot convert nonnumeric literal or judgement list indices into valid positions', () => {
+  for (const index of ['true', '"+1"', '" 1 "']) {
+    const compiled = compileProject(`var output = 99
+list items = [10, 20]
+function read() do
+  return items[${index}]
+end
+object "actor":
+  when start do
+    output = read()
+  end
+end`);
+    assert.deepEqual(compiled.errors, []);
+    const vm = new Vm({ renderer: null, audio: null, kernel: true });
+    vm.load(compiled.project as never); vm.start(); vm.tick();
+    assert.equal(vm.errors.length, 1, index);
+    assert.equal(vm.errors[0]!.blockType, 'value_of_index_from_list');
+  }
+});

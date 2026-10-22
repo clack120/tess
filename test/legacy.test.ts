@@ -35,6 +35,7 @@ function legacyProject(): RawEntity {
     scenes: [{ id: 'scene1', name: '장면 1' }],
     variables: [
       { id: 'v1', name: '값', variableType: 'variable', value: 0, visible: false, object: null, x: 0, y: 0 },
+      { id: 'v2', name: '처음', variableType: 'variable', value: '', visible: false, object: null, x: 0, y: 0 },
       { id: 'l1', name: '기록', variableType: 'list', array: [{ data: 'a' }, { data: 'b' }], visible: false, object: null, x: 0, y: 0 },
     ],
     messages: [], functions: [], aiUtilizeBlocks: [],
@@ -48,7 +49,10 @@ function legacyProject(): RawEntity {
         { type: 'set_effect', params: ['opacity', number('70'), null], statements: [] },
         { type: 'set_effect_amount', params: ['transparency', number('-2'), null], statements: [] },
         { type: 'reset_project_timer', params: [null], statements: [] },
-        { type: 'remove_value_from_list', params: [{ type: 'options_for_list', params: ['FIRST'] }, 'l1', null], statements: [] },
+        { type: 'set_variable', params: ['v2', {
+          type: 'value_of_index_from_list', params: [null, 'l1', null, { type: 'options_for_list', params: ['FIRST'] }, null],
+        }, null], statements: [] },
+        { type: 'remove_value_from_list', params: [number('1'), 'l1', null], statements: [] },
         {
           type: 'set_variable',
           params: ['v1', {
@@ -73,6 +77,7 @@ test('옛 블록도 tessvm 이 그대로 돈다', () => {
   vm.load(project as never);
   vm.start();
   vm.tick();
+  assert.deepEqual(vm.errors, []);
 
   const entity = vm.targets[0]!.entity;
   // 50% 로 정한 뒤 -20% 만큼 바꾼다 → 원래의 0.4 배
@@ -81,6 +86,7 @@ test('옛 블록도 tessvm 이 그대로 돈다', () => {
   // 투명도 30 → 알파 0.7, 불투명도 70 → 알파 0.7, 그리고 -2 만큼 더 → 0.72
   assert.ok(Math.abs(entity.effect.alpha - 0.72) < 1e-9, String(entity.effect.alpha));
   const list = vm.variables.find((variable) => variable.name === '기록')!;
+  assert.equal(vm.variables.find((variable) => variable.name === '처음')!.getValue(), 'a');
   assert.deepEqual(list.getArray(), [{ data: 'b' }], '첫 항목이 지워집니다');
   // (17 // 5) % 2 = 3 % 2 = 1
   assert.equal(Number(vm.variables.find((variable) => variable.name === '값')!.getValue()), 1);
@@ -118,7 +124,8 @@ test('옛 블록은 되돌릴 때 지금 문법으로 옮겨지고 다시 컴파
     /effect_alpha = 100 - 70/,
     /effect_alpha \+= -2/,
     /reset timer/,
-    /remove 기록\["FIRST"\]/,
+    /처음 = 기록\["FIRST"\]/,
+    /remove 기록\[1\]/,
     /값 = \(\(17 \/\/ 5\) % 2\)/,
   ]) {
     assert.match(back.source, line, String(line));

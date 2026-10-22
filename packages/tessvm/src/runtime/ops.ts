@@ -170,12 +170,26 @@ export function createOps(vm: Vm) {
     return vm.variableAt(index, entity);
   }
 
+  function listVariable(entity: Entity, index: number, blockType: string): Variable {
+    const list = variable(entity, index);
+    if (!list?.isList) {
+      throw new RuntimeBlockError('리스트를 찾을 수 없습니다', blockType, { list: list?.name ?? index });
+    }
+    return list;
+  }
+
+  function listError(blockType: string, list: Variable, inputs: Record<string, unknown>): never {
+    throw new RuntimeBlockError(`리스트 항목 위치가 올바르지 않습니다 (항목 수 ${list.array.length})`,
+      blockType, { list: list.name, length: list.array.length, ...inputs });
+  }
+
   /**
    * `Entry.getListRealIndex`. The three keywords are the only indices that are
    * not a number and none of them parses as one, so naming them is the same
    * test as asking whether the index is numeric first.
    */
   function listIndex(raw: unknown, list: Variable): number {
+    if (typeof raw === 'number') return raw;
     if (typeof raw === 'string') {
       if (raw === 'FIRST') {
         return 1;
@@ -187,7 +201,7 @@ export function createOps(vm: Vm) {
         return Math.floor(Math.random() * list.array.length) + 1;
       }
     }
-    return Number(raw);
+    return cast.isNumber(raw) ? Number(raw) : NaN;
   }
 
   function startStroke(entity: Entity, which: 'brush' | 'paint'): void {
@@ -733,16 +747,16 @@ export function createOps(vm: Vm) {
     },
 
     listValue(entity: Entity, index: number, raw: unknown): string | number | boolean {
-      const list = variable(entity, index);
-      if (!list) {
-        return 0;
-      }
+      const list = listVariable(entity, index, 'value_of_index_from_list');
       const at = listIndex(raw, list);
-      return list.array[at - 1]?.data ?? 0;
+      if (!Number.isInteger(at) || at < 1 || at > list.array.length || !list.array[at - 1]) {
+        listError('value_of_index_from_list', list, { index: raw, resolvedIndex: at });
+      }
+      return list.array[at - 1]!.data;
     },
 
     listLength(entity: Entity, index: number): number {
-      return variable(entity, index)?.array.length ?? 0;
+      return listVariable(entity, index, 'length_of_list').array.length;
     },
 
     listIncludes(entity: Entity, index: number, data: string): boolean {
@@ -759,45 +773,38 @@ export function createOps(vm: Vm) {
     },
 
     listAppend(entity: Entity, index: number, value: unknown): void {
-      const list = variable(entity, index);
-      list?.array.push({ data: value as string | number });
-      list?.touch();
+      const list = listVariable(entity, index, 'add_value_to_list');
+      list.array.push({ data: value as string | number });
+      list.touch();
     },
 
     listRemove(entity: Entity, index: number, raw: unknown): void {
-      const list = variable(entity, index);
-      if (!list) {
-        return;
+      const list = listVariable(entity, index, 'remove_value_from_list');
+      if (!cast.isNumber(raw) || Number(raw) > list.array.length) {
+        listError('remove_value_from_list', list, { index: raw });
       }
-      const at = listIndex(raw, list);
-      if (at >= 1 && at <= list.array.length) {
-        list.array.splice(at - 1, 1);
-        list.touch();
-      }
+      // Entry passes zero, negatives and fractions through to Array.splice.
+      list.array.splice(Number(raw) - 1, 1);
+      list.touch();
     },
 
     listInsert(entity: Entity, index: number, raw: unknown, value: unknown): void {
-      const list = variable(entity, index);
-      if (!list) {
-        return;
+      const list = listVariable(entity, index, 'insert_value_to_list');
+      if (!cast.isNumber(raw) || Number(raw) === 0 || Number(raw) > list.array.length + 1) {
+        listError('insert_value_to_list', list, { index: raw, value });
       }
-      const at = listIndex(raw, list);
-      if (at >= 1 && at <= list.array.length + 1) {
-        list.array.splice(at - 1, 0, { data: value as string | number });
-        list.touch();
-      }
+      list.array.splice(Number(raw) - 1, 0, { data: value as string | number });
+      list.touch();
     },
 
     listReplace(entity: Entity, index: number, raw: unknown, value: unknown): void {
-      const list = variable(entity, index);
-      if (!list) {
-        return;
+      const list = listVariable(entity, index, 'change_value_list_index');
+      const at = cast.isNumber(raw) ? Number(raw) : NaN;
+      if (!Number.isInteger(at) || at < 1 || at > list.array.length || !list.array[at - 1]) {
+        listError('change_value_list_index', list, { index: raw, value });
       }
-      const at = listIndex(raw, list);
-      if (at >= 1 && at <= list.array.length) {
-        list.array[at - 1] = { data: value as string | number };
-        list.touchItem(at - 1);
-      }
+      list.array[at - 1]!.data = value as string | number;
+      list.touchItem(at - 1);
     },
 
     *askAndWait(entity: Entity, message: unknown) {

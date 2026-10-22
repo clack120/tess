@@ -16,6 +16,7 @@ import { scalarPlaces } from './values.ts';
 export interface KernelOps {
   ld(slot: number): number;
   st(slot: number, value: number): void;
+  list_index(value: unknown): number;
   ld_item(base: number, length: number, index: number): number;
   st_item(base: number, length: number, index: number, value: number, string?: boolean): void;
   raw(slot: number): number | string;
@@ -105,10 +106,13 @@ function floatPoint(value: unknown): number {
 /** Builds the helper set the generated javascript reads its world through. */
 export function kernelOps(cells: Float64Array, marks: KernelMarks): KernelOps {
   const { flags, strings, span } = marks;
-  const item = (base: number, length: number, index: number): number =>
-    index !== Math.trunc(index) || index < 1 || index > length
-      ? 0
-      : cells[base + index - 1]!;
+  const item = (base: number, length: number, index: number): number => {
+    if (index !== Math.trunc(index) || index < 1 || index > length) {
+      cells[BAIL_SLOT] = 1;
+      return 0;
+    }
+    return cells[base + index - 1]!;
+  };
   const storeItem = (base: number, length: number, index: number, value: number, string = false) => {
     if (index === Math.trunc(index) && index >= 1 && index <= length) {
       const cell = base + index - 1;
@@ -119,12 +123,17 @@ export function kernelOps(cells: Float64Array, marks: KernelMarks): KernelOps {
         if (cell < span[0]!) span[0] = cell;
         if (cell > span[1]!) span[1] = cell;
       }
-    }
+    } else cells[BAIL_SLOT] = 1;
   };
   return {
     ld: (slot) => cells[slot]!,
     st: (slot, value) => {
       cells[slot] = value;
+    },
+    list_index: (value) => {
+      if (cast.isNumber(value)) return Number(value);
+      cells[BAIL_SLOT] = 1;
+      return NaN;
     },
     ld_item: item,
     st_item: storeItem,

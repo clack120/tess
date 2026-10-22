@@ -652,7 +652,7 @@ list empty = []
 list table = [2, 4, 8]
 
 function step():
-  total = ((total + table[i]) + empty[1])
+  total = ((total + table[i]) + length(empty))
   i += 1
   return 0
 end
@@ -676,6 +676,7 @@ scene "s":
   end
 end`;
   const vm = assertSameAsJavascript(source, 4);
+  assert.deepEqual(vm.errors, []);
   // 표가 건너오지 않았다면 0 + 0 + 0 이 된다.
   assert.equal(Number(vm.variables.find((v) => v.name === 'total')!.getValue()), 14);
 });

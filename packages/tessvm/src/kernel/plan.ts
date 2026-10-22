@@ -54,7 +54,7 @@ const JS = {
   module: (bodies: string[], roots: string[]) =>
     `"use strict";\nconst { ld, st, ld_item, st_item, ld_tail, add_num, sub_num, mul_num,\n` +
     `  div_num, math_op, quotient, to_num, truthy, js_bool, both, bail, float_point,\n` +
-    `  raw, st_raw, raw_item, st_item_raw, plus, compare, increment_points } = R;\n` +
+    `  raw, st_raw, raw_item, st_item_raw, plus, compare, increment_points, list_index } = R;\n` +
     `${bodies.join('\n')}\nreturn { ${roots.join(', ')} };\n`,
 };
 
@@ -353,6 +353,11 @@ export function planKernel(
       : value.kind === 'raw' ? `to_num(${value.code})` : value.code;
   }
 
+  function listIndex(param: unknown): string {
+    const index = value(param, 'index');
+    return index.kind === 'num' ? index.code : `list_index(${index.code})`;
+  }
+
   function asBool(value: KValue): string {
     return value.kind === 'bool' ? value.code : `truthy(${value.code})`;
   }
@@ -384,7 +389,7 @@ export function planKernel(
       }
       case 'cmp':
       case 'index': {
-        if (slot === 'index' && LIST_KEYWORDS.has(raw)) {
+        if (slot === 'index' && (LIST_KEYWORDS.has(raw) || !numeric(input))) {
           fail(`list index ${raw}`);
         }
         const n = Number(raw);
@@ -515,7 +520,7 @@ export function planKernel(
         }
         reads.add(index);
         const at = slotOf(index);
-        const where = asNum(value(p[3], 'index'));
+        const where = listIndex(p[3]);
         const item = `ld_item(${at?.base ?? 0}, ${at?.length ?? 0}, ${where})`;
         if (!judgements.has(index)) {
           if (slot === 'raw' || slot === 'plainBool') {
@@ -731,10 +736,10 @@ export function planKernel(
           fail(`list ${text(p[0])} holds both`);
         }
         if (typeof stored.constant === 'string' && canonical(stored.constant)) {
-          return `${indent}st_item(${at?.base ?? 0}, ${at?.length ?? 0}, ${asNum(value(p[1], 'index'))}, (${stored.code}, ${double(Number(stored.constant))}), true);\n`;
+          return `${indent}st_item(${at?.base ?? 0}, ${at?.length ?? 0}, ${listIndex(p[1])}, (${stored.code}, ${double(Number(stored.constant))}), true);\n`;
         }
         if (stored.kind === 'raw') {
-          const where = asNum(value(p[1], 'index'));
+          const where = listIndex(p[1]);
           if (isBlock(p[2]) && p[2].type === 'get_variable' && !CALLS.test(where)) {
             const source = slotOf(refer(p[2].params[0])!);
             // The index must be pure before consulting the source's stored type.
@@ -747,7 +752,7 @@ export function planKernel(
           return `${indent}st_item_raw(${at?.base ?? 0}, ${at?.length ?? 0}, ${where}, ${stored.code});\n`;
         }
         return `${indent}st_item(${at?.base ?? 0}, ${at?.length ?? 0}, ` +
-          `${asNum(value(p[1], 'index'))}, ${asNum(stored)})${JS.end}\n`;
+          `${listIndex(p[1])}, ${asNum(stored)})${JS.end}\n`;
       }
       case 'set_func_variable': {
         const name = locals.get(text(p[0]));
