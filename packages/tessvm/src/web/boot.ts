@@ -45,7 +45,7 @@ export interface BootOptions {
   keyTarget?: HTMLElement;
   /** Take the vector costume where the work has one. On unless turned off. */
   svg?: boolean;
-  /** Who `아이디` and `닉네임` answer with. Left unset, both answer `guest`. */
+  /** Who `아이디` and `닉네임` answer with. Left unset, both answer a space. */
   user?: EntryUser | null;
   /**
    * Where a built wasm kernel is served, for a page that has one behind it.

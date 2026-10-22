@@ -220,11 +220,13 @@ window.addEventListener('unhandledrejection', (event) => {
   window.tessReportError('처리되지 않은 Promise 거부', event.reason);
 });
 
-// A script that throws goes to the panel's error tab, with its block highlighted.
-// The same error from the same block is reported once.
+// A script that throws goes to the panel's error tab, with its block highlighted,
+// and the work stops as entry stops it. The same error from the same block is
+// reported once.
 function reportVmErrors(handle, sourceMap) {
   const seen = new Set();
   handle.vm.onError = (error) => {
+    if (handle.vm.state !== 'stop') handle.stop();
     const key = error.blockId + ':' + error.message;
     if (seen.has(key)) return;
     seen.add(key);

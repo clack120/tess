@@ -1535,7 +1535,7 @@ end`;
 });
 
 test('아이디 블록은 로그인한 사람의 아이디를 그대로 돌려준다', () => {
-  // A runner with no user answers guest.
+  // A runner with no user answers a space, as entry does.
   const source = `
 var 아이디_값 as "아이디 값" = 0
 var 닉_값 as "닉 값" = 0
@@ -1561,7 +1561,7 @@ end`;
     return { id: value('아이디 값'), nickname: value('닉 값') };
   };
 
-  assert.deepEqual(read({}), { id: 'guest', nickname: 'guest' }, '로그인하지 않은 자리');
+  assert.deepEqual(read({}), { id: ' ', nickname: ' ' }, '로그인하지 않은 자리');
   assert.deepEqual(
     read({ user: { id: 'ddtt786', nickname: '치로' } }),
     { id: 'ddtt786', nickname: '치로' },
@@ -2167,7 +2167,7 @@ test('차트 창은 캔버스가 아니라 HTML 로 띄운다', () => {
  * playentry.org 의 `6aa53c18aac9c815d91518dd` 를 엔트리에서 직접 돌려 확인한 결과도
  * 같습니다 — 오류가 나도 실행 상태는 `run` 이고 장면이 계속 넘어갑니다.
  */
-test('끝없는 재귀는 스레드를 죽이지 않고 다음 블록으로 이어간다', () => {
+test('끝없는 재귀는 엔트리처럼 오류로 멈춘다', () => {
   const vm = runVm(
     wrap(
       `깊이 = 0
@@ -2183,8 +2183,9 @@ end`,
     ),
   );
   vm.tick();
-  assert.equal(vm.errors.length, 0, '스택이 넘쳐도 오류로 보고하지 않습니다');
-  assert.equal(valueOf(vm, '끝났다'), 1, '부르던 자리는 다음 블록으로 이어집니다');
+  assert.deepEqual(vm.errors.map((error) => error.message), ['함수 호출이 너무 깊습니다 (끝나지 않는 재귀)']);
+  assert.match(vm.errors[0]!.where!, /함수 재귀 ×1000001$/, "the call that passed the limit counts too");
+  assert.equal(valueOf(vm, '끝났다'), 0, '부르던 자리도 이어지지 않습니다');
   assert.equal(valueOf(vm, '깊이'), 1000000, '한계(100만)까지 자바스크립트 스택과 상관없이 들어갑니다');
   const source = fs.readFileSync(
     path.join(root, 'packages/tessvm/src/compile/codegen.ts'),

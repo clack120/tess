@@ -1562,8 +1562,7 @@ export function createOps(vm: Vm) {
     },
 
     // Entry answers `window.user.username`/`.nickname`, and a space when nobody
-    // is signed in. A runner off the site has no such window, so it says who it
-    // is instead of pretending to be a signed-in reader with a blank name.
+    // is signed in.
     userId(): string {
       return vm.user ? vm.user.id : GUEST;
     },
