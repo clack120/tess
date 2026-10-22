@@ -1,16 +1,6 @@
-/**
- * @fileoverview Color literal recognition, shared by the lexer, the comment
- * scanner and the editor grammar.
- *
- * Entry stores a colour as the text it will hand the canvas, so `#RRGGBB` and
- * the `#RRGGBBAA` the canvas also reads both stand; anything written after `#`
- * is normalised to one of those. A `#` that names no colour is a comment, which
- * is what keeps `# 주석` and `#ff0000` apart.
- */
+// Share color rules across the lexer, comment scanner, and editor grammar.
 
-/** Colour names Tess accepts after `#`, Korean and CSS, as `#RRGGBB`. */
 export const NAMED_COLORS: Record<string, string> = {
-  // --- Korean ---------------------------------------------------------------
   검정: '#000000', 검정색: '#000000', 검은색: '#000000', 흑색: '#000000',
   하양: '#ffffff', 하얀색: '#ffffff', 흰색: '#ffffff', 백색: '#ffffff',
   빨강: '#ff0000', 빨간색: '#ff0000', 적색: '#ff0000',
@@ -26,7 +16,6 @@ export const NAMED_COLORS: Record<string, string> = {
   분홍: '#ffc0cb', 분홍색: '#ffc0cb', 자홍: '#ff00ff', 자홍색: '#ff00ff',
   갈색: '#a52a2a', 밤색: '#8b4513',
   회색: '#808080', 은색: '#c0c0c0', 금색: '#ffd700',
-  // --- English --------------------------------------------------------------
   black: '#000000', white: '#ffffff', red: '#ff0000', lime: '#00ff00',
   green: '#008000', blue: '#0000ff', yellow: '#ffff00', cyan: '#00ffff',
   aqua: '#00ffff', magenta: '#ff00ff', fuchsia: '#ff00ff', silver: '#c0c0c0',
@@ -40,17 +29,9 @@ export const NAMED_COLORS: Record<string, string> = {
   snow: '#fffafa', mint: '#98ff98', chocolate: '#d2691e',
 };
 
-/** Characters that may follow `#`; the same set an identifier is made of. */
 const COLOR_BODY = /^[\p{L}0-9_]+$/u;
 
-/**
- * Expands a run of hex digits to the six or eight a colour is written with.
- *
- * Three and four digits are the css shorthands and each digit is doubled, so a
- * four keeps its alpha. Anything else is padded out to six, or to eight where
- * there are more than six — the canvas reads `#RRGGBBAA`, so the alpha a work
- * carries is kept rather than thrown away.
- */
+// Expand CSS shorthand and preserve alpha in eight-digit colors.
 function hexToRgb(hex: string): string {
   const lower = hex.toLowerCase();
   if (lower.length === 3 || lower.length === 4) {
@@ -60,11 +41,6 @@ function hexToRgb(hex: string): string {
   return `#${lower.padEnd(width, '0').slice(0, width)}`;
 }
 
-/**
- * The `#RRGGBB` a colour literal means, or null when the text names no colour.
- *
- * `raw` is taken with or without its `#`.
- */
 export function normalizeColor(raw: string): string | null {
   const body = raw.startsWith('#') ? raw.slice(1) : raw;
   if (!body || !COLOR_BODY.test(body)) return null;
@@ -72,10 +48,7 @@ export function normalizeColor(raw: string): string | null {
   return NAMED_COLORS[body.toLowerCase()] ?? null;
 }
 
-/**
- * Length of the colour literal starting at `at` in `source`, or 0 when what is
- * there is a comment. `at` is the offset of the `#`.
- */
+// Return zero when # starts a comment rather than a color.
 export function colorLiteralLength(source: string, at: number): number {
   if (source[at] !== '#') return 0;
   let end = at + 1;

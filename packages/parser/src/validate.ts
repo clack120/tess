@@ -1,14 +1,3 @@
-/**
- * @fileoverview Tess 시맨틱(의미론적) 검증 모듈입니다.
- * 
- * 구문(Syntax)만으로는 잡아낼 수 없는 언어 명세(spec)의 의미적 오류를 AST를 순회하며 검사합니다.
- * 주로 다음과 같은 항목을 검증합니다:
- * 1. 글상자(text) 전용 명령이나 속성을 일반 오브젝트(object)에서 사용했는지 여부
- * 2. 함수 내에서 잘못된 오브젝트 지역 변수를 참조했는지 여부
- * 3. 함수 외부에서 `return`을 사용했는지 여부
- * 4. 반복문 외부에서 `break`, `continue`, `skip`을 사용했는지 여부
- * 5. `project` 블록이 중복으로 선언되었는지 여부
- */
 import { didYouMean } from '@tess/core';
 import {
   BUILTIN_FUNCTIONS,
@@ -23,7 +12,6 @@ import type {
   ValidationResult,
 } from './ast.ts';
 
-/** What the walk knows about the place a statement sits in. */
 interface WalkContext {
   isText: boolean;
   inFunction: boolean;
@@ -33,20 +21,11 @@ interface WalkContext {
   functions: Set<string>;
 }
 
-/** A node reached by the generic walk, which reads fields it cannot name ahead. */
 type AnyNode = Record<string, unknown>;
 
 const LOOP_TYPES = new Set(['Repeat', 'For', 'While', 'Until', 'Forever']);
 
-/**
- * 한 파일의 줄 찾기표를 만든다.
- *
- * `lineAndColumn` 은 파일 처음부터 훑기 때문에 한두 번 쓰기에는 괜찮지만 블록마다
- * 부르기에는 안 된다 — 컴파일러는 만드는 블록마다 소스 위치를 남기므로, 그때마다
- * 훑으면 비용이 (블록 수 × 파일 길이)로 늘어난다. 줄 시작 위치를 한 번만 모아 두고
- * 이분 탐색한다.
- *
- */
+// Cache line starts and binary-search them to avoid rescanning the file for every block.
 export function lineIndex(source: string): (offset: number) => { line: number; column: number } {
   const starts = [0];
   for (let i = 0; i < source.length; i += 1) {
@@ -65,7 +44,6 @@ export function lineIndex(source: string): (offset: number) => { line: number; c
   };
 }
 
-/** 오프셋을 사람이 읽는 줄/열로 변환 */
 export function lineAndColumn(source: string, offset: number): { line: number; column: number } {
   let line = 1;
   let column = 1;
@@ -80,11 +58,6 @@ export function lineAndColumn(source: string, offset: number): { line: number; c
   return { line, column };
 }
 
-/**
- * @param program  ast() 로 만든 Program 노드
- * @param source   원본 소스 (에러 위치 계산용)
- * @param sources  use 로 불러온 파일들의 소스
- */
 export function validate(
   program: ProgramNode,
   source = '',
@@ -95,7 +68,7 @@ export function validate(
   const positions = new Map<string, ReturnType<typeof lineIndex>>();
 
   const report = (bucket: Diagnostic[], node: Node | null | undefined, message: string) => {
-    // `use` 로 불러온 노드는 자기 파일 기준으로 위치를 계산해야 한다
+    // Included nodes need positions from their own source file.
     const file = node?.loc?.file;
     const text = (file && sources?.get(file)) ?? source;
     let locate = positions.get(text);
@@ -125,21 +98,17 @@ export function validate(
   }
   checkDeclarations(program.body);
 
-  // --- 사전 수집 -----------------------------------------------------------
   const globals = declaredNames(program.body);
   const knownFunctions = new Set(collectFunctionNames(program.body));
-  // name -> objects that declare it as a local. A global function may name one,
-  // and then it means that object's variable (compiler/context.ts).
+  // A global function may refer to a uniquely named object local.
   const localOwners = collectLocalOwners(program.body, globals);
-  // `use` 로 다른 파일을 불러오는 프로그램은 이 파일만 봐서는 알 수 없는 이름이
-  // 생기므로, 이름 기반 경고는 끈다.
+  // Skip name warnings when included files may supply declarations.
   const hasUse = containsUse(program);
 
   let projectCount = 0;
 
   for (const item of program.body) visitTopLevel(item);
 
-  // --- 방문자 ---------------------------------------------------------------
   function visitTopLevel(item: TopLevelItem | SceneMember) {
     switch (item.type) {
       case 'Project':
@@ -176,15 +145,13 @@ export function validate(
           }
           break;
         case 'BoxSize':
-          // A sprite takes its size from its costume image; only a text box
-          // carries a frame size of its own.
+          // Only text boxes have independent frame bounds; sprite size comes from its costume.
           if (!isText) {
             error(member, `'size 가로 세로' 는 글상자(text) 전용입니다. 모양 크기는 costume 뒤에 적으세요.`);
           }
           break;
         case 'Center':
-          // Entry leaves a text box's registration point at 0,0 — only a sprite
-          // gets one, taken from its costume.
+          // Entry text boxes use a registration point of 0,0.
           if (isText) {
             error(member, `'center 가로 세로' 는 오브젝트(object) 전용입니다. 글상자는 중심점을 옮길 수 없습니다.`);
           }
@@ -215,9 +182,8 @@ export function validate(
       params.add(name);
     }
     checkDeclarations(fn.body, fn.params);
-    // spec 14.2: 함수는 자신의 매개변수 · 지역 변수 · 전역 변수만 볼 수 있다.
     walkStatements(fn.body, {
-      isText: true, // 함수는 오브젝트 종류와 무관하므로 글상자 검사는 하지 않는다
+      isText: true, // Functions can run on any object type, so skip text-box-only checks inside them.
       inFunction: true,
       loopDepth: 0,
       scope: new Set([...globals, ...fn.params]),
@@ -310,13 +276,12 @@ export function validate(
         break;
     }
 
-    // `hide chart` 는 열려 있는 테이블·차트 창을 닫는다 — chart 는 변수 이름이 아니다
+    // Hide chart closes the current table or chart; chart is not a variable name here.
     if (statement.type === 'Hide' && (statement.target as Identifier | null)?.name === 'chart'
       && !ctx.scope.has('chart')) {
       return;
     }
 
-    // 자식 문장 블록
     const blocks = childBlocks(statement);
     let innerCtx = LOOP_TYPES.has(statement.type)
       ? { ...ctx, loopDepth: ctx.loopDepth + 1 }
@@ -386,16 +351,12 @@ export function validate(
   function checkIdentifier(identifier: Identifier, ctx: WalkContext) {
     const { name } = identifier;
     if (ctx.scope.has(name)) return;
-    // 상태 값 · 옵션 키워드 · 오브젝트 속성은 선언 없이 쓰는 이름이다.
     if (STATE_VALUES.has(name) || OPTION_KEYWORDS.has(name)) return;
     if (OBJECT_PROPERTIES.has(name) || TEXT_ONLY_PROPERTIES.has(name)) return;
 
-    // A function declared inside an object reads that object's locals directly.
     if (ctx.inFunction && ctx.objectLocals.has(name)) return;
 
-    // A global function may still name one — an entry block holds the variable
-    // id, so it means that one object's variable. Keeping the function inside
-    // that object says so in the source, and keeps the name unambiguous.
+    // Object-local references remain valid in global functions when their names are unique.
     if (ctx.inFunction && localOwners.has(name)) {
       const owners = localOwners.get(name)!;
       if (owners.length === 1) {
@@ -431,7 +392,7 @@ export function validate(
   return { errors, warnings };
 }
 
-/** Calls to user functions and indexed/string reads can run effects or stop the work. */
+// Function calls and indexed reads can have side effects or stop the work.
 function mayRunOrFail(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   if (Array.isArray(value)) return value.some(mayRunOrFail);
@@ -441,7 +402,7 @@ function mayRunOrFail(value: unknown): boolean {
   return Object.entries(node).some(([key, child]) => key !== 'loc' && mayRunOrFail(child));
 }
 
-/** Literal labels have no effects between caching a switch selector and selecting its branch. */
+// Literal labels have no effects between saving a switch selector and choosing its branch.
 export function caseValue(node: Expr): string | number | boolean | null {
   switch (node.type) {
     case 'Number': case 'String': case 'Boolean': case 'Color': return node.value;
@@ -451,11 +412,6 @@ export function caseValue(node: Expr): string | number | boolean | null {
   }
 }
 
-// ---------------------------------------------------------------------------
-//  헬퍼
-// ---------------------------------------------------------------------------
-
-/** 블록 목록에서 직접 선언된 var/list 이름 */
 function declaredNames(body: Array<ObjectMember | TopLevelItem | SceneMember>): Set<string> {
   const names = new Set<string>();
   for (const member of body) {
@@ -466,11 +422,7 @@ function declaredNames(body: Array<ObjectMember | TopLevelItem | SceneMember>): 
   return names;
 }
 
-/**
- * name -> names of the objects declaring it as a local. Mirrors what the
- * compiler registers: object-level declarations plus the first one inside an
- * event handler, minus anything the program already declares globally.
- */
+// Include event declarations in object locals, but exclude names declared globally.
 function collectLocalOwners(
   body: Array<TopLevelItem | SceneMember>,
   globals: Set<string>,
@@ -488,7 +440,6 @@ function collectLocalOwners(
   return owners;
 }
 
-/** Every name an object declares, in its body or inside its event handlers. */
 function objectLocalNames(object: ObjectNode): Set<string> {
   const names = declaredNames(object.body);
   const walk = (statements: Stmt[]) => {
@@ -517,7 +468,6 @@ function collectFunctionNames(body: Array<TopLevelItem | SceneMember | ObjectMem
   return names;
 }
 
-/** 문장이 품고 있는 하위 문장 블록의 키 이름 */
 function childBlocks(statement: Stmt): string[] {
   switch (statement.type) {
     case 'If':

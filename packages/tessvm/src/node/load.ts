@@ -18,12 +18,12 @@ export interface LoadedProject {
   assetDirs: string[];
   sourceMap?: SourceMap;
   name: string;
-  // The original input file, including for .ent archives.
+  // Keep the original input path, including for Entry archives.
   sourcePath: string;
   errors: CompileDiagnostic[];
   warnings: CompileDiagnostic[];
   notices: CompileDiagnostic[];
-  // Present only when a Tess copy was requested.
+  // Set only when a Tess copy was requested.
   decompiledTo?: string;
   decompileWarnings?: string[];
 }

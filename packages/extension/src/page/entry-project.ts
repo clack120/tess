@@ -1,16 +1,8 @@
-/**
- * @fileoverview Reads a work straight from playentry.org's graphql endpoint.
- *
- * The response is an entry project except for one thing: asset urls are not in
- * it. Entry's own runner builds them from `filename` when it loads the work, so
- * the same rules are applied here and written back as `fileurl`, which is what
- * tessvm's renderer and audio engine read.
- */
+// Entry omits asset URLs from GraphQL, so derive them from stored filenames.
 import type { EntryProjectLike } from '../../../tessvm/src/runtime/engine.ts';
 
 const GRAPHQL_URL = '/graphql/SELECT_PROJECT';
 
-/** Only the fields tessvm loads, plus the name and thumbnail the player shows. */
 const SELECT_PROJECT = `query SELECT_PROJECT($id: ID!, $groupId: ID) {
   project(id: $id, groupId: $groupId) {
     id
@@ -29,7 +21,6 @@ const SELECT_PROJECT = `query SELECT_PROJECT($id: ID!, $groupId: ID) {
 export interface EntryWork extends EntryProjectLike {
   id: string;
   name: string;
-  /** Path of the work's thumbnail, or null when it has none. */
   thumb: string | null;
 }
 
@@ -41,7 +32,7 @@ interface RawAsset {
   ext?: string;
 }
 
-/** Entry's own csrf guard: without this header graphql answers "form tampered with". */
+// Entry's CSRF guard rejects GraphQL requests without this header.
 function csrfToken(): string {
   return document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
 }
@@ -50,21 +41,13 @@ function uploadsBase(): string {
   return `${location.origin}/uploads`;
 }
 
-/**
- * Entry's stored names are plain alphanumerics and they build a path, so a name
- * carrying anything else is dropped rather than pasted into a url.
- */
+// Stored filenames become paths; reject characters outside Entry's alphanumeric format.
 function safeName(value: unknown): string {
   const name = String(value ?? '');
   return /^[A-Za-z0-9]+$/.test(name) ? name : '';
 }
 
-/**
- * Whether a url the work carries points back at playentry. `fileurl` is part of
- * the work's own data, so any author can aim it anywhere; a foreign one would
- * have the reader's browser call out to that host, and a same-origin one is
- * sent with the reader's cookies. Only entry's own asset paths are kept.
- */
+// Restrict project URLs to Entry asset paths to avoid foreign requests or cookie-bearing endpoints.
 function sameOrigin(url: unknown): boolean {
   if (typeof url !== 'string' || !url) {
     return false;
@@ -76,17 +59,11 @@ function sameOrigin(url: unknown): boolean {
   }
 }
 
-/** The url to load from: the work's own only while it stays on playentry. */
 function assetUrl(carried: unknown, built: string): string {
   return sameOrigin(carried) ? String(carried) : built;
 }
 
-/**
- * The work's thumbnail as a url to draw, or null where it has none to trust.
- * `thumb` is the work's own data like every other path in it, so one pointing
- * off playentry is dropped; what is left is returned parsed, which leaves no
- * quote or bracket in it to end the `url("...")` it is written into.
- */
+// Validate thumbnails too because their URLs come from project data and enter CSS.
 export function thumbUrl(thumb: unknown): string | null {
   if (typeof thumb !== 'string' || !thumb) {
     return null;
@@ -99,13 +76,13 @@ export function thumbUrl(thumb: unknown): string | null {
   }
 }
 
-/** `Entry.EntryObject.getImagePath` — two-level hash folders, then `image/`. */
+// Entry image paths use two hash folders before image/.
 function imageUrl(picture: RawAsset, type: string): string {
   const name = safeName(picture.filename);
   return `${uploadsBase()}/${name.slice(0, 2)}/${name.slice(2, 4)}/image/${name}.${type}`;
 }
 
-/** `Entry.getSoundPath` — same folders, but no `sound/` step and the stored extension. */
+// Sound paths use the same hash folders without an extra sound/ directory.
 function soundUrl(sound: RawAsset): string {
   const name = safeName(sound.filename);
   const ext = /^\.?[A-Za-z0-9]{1,8}$/.test(String(sound.ext ?? '')) ? String(sound.ext) : '.mp3';
@@ -113,13 +90,7 @@ function soundUrl(sound: RawAsset): string {
   return assetUrl(sound.fileurl, built);
 }
 
-/**
- * Fills in the asset urls the runner needs, in place.
- *
- * A costume drawn in entry's vector editor is kept twice, as `.svg` and `.png`,
- * and entry's own runner always takes the raster. Both are handed over here and
- * the renderer chooses — the vector while it is small enough to be worth it.
- */
+// Entry keeps SVG and raster copies; pass both so the renderer can choose.
 function withAssetUrls(work: EntryWork): EntryWork {
   for (const object of work.objects ?? []) {
     const sprite = (object as { sprite?: { pictures?: RawAsset[]; sounds?: RawAsset[] } }).sprite;

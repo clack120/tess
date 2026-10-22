@@ -25,7 +25,7 @@ test('recent activity counts actual ticks, bounds history and retains partial fa
   for (let index = 0; index < 20; index++) diagnostics.recordFocus(index % 2 ? 'focus' : 'blur');
   assert.equal(diagnostics.snapshot().focusEvents.length, 16);
   assert.equal(diagnostics.snapshot().focusEvents.at(-1)!.element, 'div#stage');
-  vm.frame = 0; // Restarting cannot create negative throughput.
+  vm.frame = 0; // Restarting must not create negative throughput.
   diagnostics.record(600, 5);
   vm.fail(new Error('failed in next interval'));
   vm.reset();

@@ -17,7 +17,7 @@ function focusedElement(): string | null {
   return active ? `${active.tagName.toLowerCase()}${active.id ? `#${active.id}` : ''}${active.classList?.length ? `.${[...active.classList].slice(0, 2).join('.')}` : ''}` : null;
 }
 
-/** Half-second buckets, with no work proportional to the number of blocks. */
+// Use half-second buckets without work proportional to block count.
 export class RuntimeDiagnostics {
   private readonly vm: Vm;
   private since: number;

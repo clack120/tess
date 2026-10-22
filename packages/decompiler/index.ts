@@ -1,4 +1,3 @@
-// Convert Entry projects into Tess source.
 import { decompileProject as decompile } from "./src/index.ts";
 import { builtinAssets } from "./src/node.ts";
 import type { DecompileOptions, DecompileResult, RawEntity, TarEntry } from "./src/types.ts";

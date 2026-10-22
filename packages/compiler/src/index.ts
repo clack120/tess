@@ -1,13 +1,3 @@
-/**
- * Tess 소스 코드를 엔트리 프로젝트(`project.json`)로 변환하는 컴파일러 모듈입니다.
- * 
- * 다음과 같은 단계를 거쳐 컴파일을 수행합니다:
- * 1. `use` 구문 해석 및 파싱
- * 2. 시맨틱 검증
- * 3. 장면, 오브젝트, 변수, 신호, 함수 등의 심볼 수집
- * 4. 스크립트 컴파일
- * 5. 엔트리 프로젝트 객체 조립
- */
 import { Context } from './context.ts';
 import { EMPTY_HOST, dirname } from './host.ts';
 import { loadProgram, createCompileCache } from './include.ts';
@@ -30,31 +20,17 @@ import type {
   EntryScene, EntryTable, EntryVariable, PhaseTiming,
 } from './types.ts';
 
-/** A node reached by the generic walk, which reads fields it cannot name ahead. */
 type AnyNode = Record<string, unknown>;
 
 export { createCompileCache };
 
 const DEFAULT_SCENE_NAME = '장면 1';
-// 엔트리 글상자의 실제 기본 글씨체는 CSS font-family 이름 'Nanum Gothic'이다(entryjs
-// src/class/entity.js). 한글 이름 '나눔고딕'을 그대로 쓰면 그 이름의 @font-face 가
-// 없어서 브라우저가 아무 특징 없는 기본 글꼴로 대체해 버린다.
+// Entry's font-family is Nanum Gothic; the Korean label has no matching font face.
 const DEFAULT_FONT = 'Nanum Gothic';
-// 붓 속성(draw_color 등)은 project.json 에 "기본값" 자리가 없다 — 엔트리는 오브젝트를
-// 만들 때마다 항상 빨간 붓(#ff0000, 두께 1)으로 시작한다(entryjs Entry.setBasicBrush).
-// 그래서 오브젝트 선언에 이 값들을 적으면, 컴파일러가 `when start` 스크립트를 만들어
-// 넣어서 그 값을 제일 먼저 정하게 한다.
+// Entry has no saved brush defaults, so apply them in an initial start script.
 const BRUSH_DEFAULT_PROPERTIES = ['draw_color', 'fill_color', 'draw_width', 'draw_alpha'];
 
-/**
- * Tess 소스를 엔트리 프로젝트 객체로 컴파일한다.
- *
- * 에러가 있어도 에러가 난 문장만 빠진 작품을 그대로 돌려준다 (`ok` 는 여전히 false).
- * `strict: true` 면 그때만 `project` 가 null 이고, 주의는 경고로 올라온다.
- *
- * With a `cache` from createCompileCache, unchanged files are not re-parsed.
- *
- */
+// Loose mode keeps valid statements; strict mode returns no project on errors.
 export function compileProject(source: string, options: CompileOptions = {}): CompileResult {
   const filePath = options.path ?? '<input>';
   const timer = createTimer(options.onPhase);
@@ -86,8 +62,6 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
 
   const semantic = validate(loaded.ast, source, loaded.sources);
   timer.mark('의미 검증');
-  // A caller that has no use for them (the extension, which runs a work rather
-  // than opening it in the editor) hands in an empty map and skips the walk.
   const comments = options.comments ?? buildCommentMap(loaded.ast, loaded.sources);
   timer.mark('주석 모으기');
   const ctx = new Context(source, {
@@ -97,17 +71,13 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
     host,
     assetDirs: options.assetDirs ?? [dirname(host.resolve('.', filePath))],
   });
-  // Include errors (a fragment that will not parse, a `use` path that is not
-  // there) only reach the caller through here — the top-level file still parsed,
-  // so `loaded.ast` is set and the early return above does not fire. Without
-  // this the object is dropped and the build reports success with nothing in it.
+  // Include failures must be reported even when the top-level file parses successfully.
   for (const list of [loaded.errors, semantic.errors]) for (const item of list) ctx.errors.push(item);
   for (const list of [loaded.warnings, semantic.warnings]) for (const item of list) ctx.warnings.push(item);
 
   const program = loaded.ast;
   collectScenes(program, ctx);
   collectGlobals(program, ctx);
-  // 모양·소리 파일을 실제로 읽어 크기와 길이를 재는 것이 여기다.
   collectObjects(program, ctx);
   collectFunctions(program, ctx);
   collectMessages(program, ctx);
@@ -121,8 +91,6 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   timer.mark('작품 조립');
 
   const ok = ctx.errors.length === 0;
-  // Notices are warnings under `strict`, so a run that must be clean sees them
-  // in the same place as everything else it stops for.
   const strict = options.strict === true;
   const warnings = strict ? [...ctx.warnings, ...ctx.notices] : ctx.warnings;
   return {
@@ -137,28 +105,15 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   };
 }
 
-/** 진단 하나가 가리키는 자리 */
 const spotOf = (item: CompileDiagnostic) => `${item.file ?? ''}:${item.offset}`;
 
-/**
- * 컴파일러가 이미 에러를 낸 자리의 검증 경고는 접는다.
- *
- * 검증기는 컴파일 전에 이름을 훑어서 "선언되지 않은 이름" 을 미리 알려 주는데,
- * 컴파일까지 갔으면 같은 자리에서 더 자세한 에러가 이미 나온다. 둘 다 내면 같은
- * 오타를 두 번 읽게 된다.
- */
+// Suppress validation warnings when compilation already reports the same source error.
 function withoutDuplicates(warnings: CompileDiagnostic[], errors: CompileDiagnostic[]): CompileDiagnostic[] {
   if (errors.length === 0) return warnings;
   const spots = new Set(errors.map(spotOf));
   return warnings.filter((warning) => !spots.has(spotOf(warning)));
 }
 
-/**
- * 단계마다 걸린 시간을 잰다.
- *
- * 끝나는 즉시 `onPhase` 로 알려 준다 — CLI 는 그걸 그때그때 한 줄씩 찍어서, 큰
- * 작품을 컴파일하는 동안에도 어디까지 갔는지 보이게 한다.
- */
 function createTimer(onPhase?: (phase: PhaseTiming) => void) {
   const timings: PhaseTiming[] = [];
   let last = performance.now();
@@ -174,9 +129,6 @@ function createTimer(onPhase?: (phase: PhaseTiming) => void) {
   };
 }
 
-// ---------------------------------------------------------------------------
-//  1. 장면
-// ---------------------------------------------------------------------------
 function collectScenes(program: ProgramNode, ctx: Context) {
   for (const item of program.body) {
     if (item.type !== 'Scene') continue;
@@ -184,14 +136,11 @@ function collectScenes(program: ProgramNode, ctx: Context) {
       ctx.error(item, `'${item.name}' 장면이 이미 있습니다.`);
       continue;
     }
-    // `scene "id":` 의 "id" 는 jump 등에서 쓰는 식별자다. 본문에 `name "..."` 이
-    // 있으면 컴파일된 작품에는 그 이름이 대신 찍힌다(오브젝트의 name 속성과 동일).
     const scene = { id: ctx.newId(), name: sceneDisplayName(item, ctx) ?? item.name };
     ctx.scenes.push(scene);
     ctx.sceneByName.set(item.name, scene);
   }
 
-  // scene 없이 object 만 있는 파일도 컴파일할 수 있게 기본 장면을 만든다
   const hasLooseObject = program.body.some((item) => item.type === 'Object');
   if (ctx.scenes.length === 0 || (hasLooseObject && ctx.scenes.length === 0)) {
     const scene = { id: ctx.newId(), name: DEFAULT_SCENE_NAME };
@@ -200,7 +149,6 @@ function collectScenes(program: ProgramNode, ctx: Context) {
   }
 }
 
-/** 장면 본문에 `name "..."` 이 있으면 그 문자열을, 없으면 null 을 돌려준다 */
 function sceneDisplayName(item: { body: SceneMember[] }, ctx: Context): string | null {
   let value: Expr | null = null;
   for (const member of item.body) {
@@ -214,9 +162,6 @@ function sceneDisplayName(item: { body: SceneMember[] }, ctx: Context): string |
   return value.value;
 }
 
-// ---------------------------------------------------------------------------
-//  2. 전역 변수 · 리스트
-// ---------------------------------------------------------------------------
 function collectGlobals(program: ProgramNode, ctx: Context) {
   for (const item of program.body) {
     if (item.type === 'VarDecl' || item.type === 'ListDecl') {
@@ -231,16 +176,9 @@ function collectGlobals(program: ProgramNode, ctx: Context) {
   }
 }
 
-/** table 선언 -> 엔트리 project.tables 항목 */
-/** 엔트리가 그릴 수 있는 차트 종류 — 막대·선·원·점. */
 const CHART_KINDS = new Set(['bar', 'line', 'pie', 'scatter']);
 
-/**
- * `chart line "제목" x 1 series 2, 3` -> 엔트리의 차트 한 벌.
- *
- * 엔트리는 열을 0부터 세고 안 쓰는 자리는 -1 로 둡니다. Tess 는 다른 번호들처럼
- * 1부터 세므로 여기서 한 칸씩 내려 적습니다.
- */
+// Entry chart columns start at zero; Tess columns start at one.
 function chartSpec(
   chart: TableChartNode,
   node: TableDeclNode,
@@ -315,18 +253,16 @@ function collectTable(node: TableDeclNode, ctx: Context): EntryTable | null {
   return entry;
 }
 
-/** var/list 선언 -> 엔트리 variables 항목 */
 function makeVariable(
   node: VarDeclNode | ListDeclNode,
   ctx: Context,
   objectId: string | null,
 ): EntryVariable | null {
-  // Entry offers cloud/real-time storage on global variables only.
+  // Entry offers cloud and real-time storage on global variables only.
   if (node.scope && objectId) {
     ctx.error(node, `'${node.scope}' 는 오브젝트 안의 변수·리스트에는 쓸 수 없습니다. 전역 선언에만 붙일 수 있습니다.`);
   }
-  // `store` is the save manager's mark: it keeps every global name that starts
-  // with `@`, and that prefix is the whole of what it looks at.
+  // The save manager recognizes stored globals by their @ prefix.
   const entryName = node.displayName ?? node.name;
   const base: EntryVariable = {
     name: node.scope === 'store' ? `${STORE_PREFIX}${entryName}` : entryName,
@@ -338,7 +274,6 @@ function makeVariable(
     isRealTime: node.scope === 'realtime',
     cloudDate: false,
     object: objectId,
-    // `at X Y` — 적어 두지 않으면 0 으로 두고, 실행기가 엔트리처럼 자리를 잡는다.
     x: node.at ? Number(constantOf(node.at.x, ctx) ?? 0) : 0,
     y: node.at ? Number(constantOf(node.at.y, ctx) ?? 0) : 0,
   };
@@ -352,7 +287,7 @@ function makeVariable(
       value: 0,
       variableType: 'list',
       array: (items as Array<string | number>).map((data) => ({ data })),
-      // `size W H` — entry keeps a list box no smaller than 100 either way.
+      // Entry list boxes are at least 100 pixels wide and tall.
       width: node.size ? Math.max(100, Number(constantOf(node.size.width, ctx) ?? 100)) : 100,
       height: node.size ? Math.max(100, Number(constantOf(node.size.height, ctx) ?? 120)) : 120,
     };
@@ -363,8 +298,7 @@ function makeVariable(
   if (!node.range) {
     return { ...base, value };
   }
-  // `var x = 2 from 0 to 4` — entry's slide variable. Both ends have to be
-  // known when the work is built, the way the value does.
+  // Slider bounds must be known when the project is built.
   const min = constantOf(node.range.min, ctx);
   const max = constantOf(node.range.max, ctx);
   if (min === null || max === null) return null;
@@ -381,12 +315,10 @@ function makeVariable(
   };
 }
 
-/** 선언 초기값으로 쓸 수 있는 상수인지 확인하고 원시값으로 바꾼다 */
 function constantOf(node: Expr, ctx: Context): string | number | boolean | null {
   switch (node.type) {
     case 'Number': return node.value;
     case 'String': return node.value;
-    // Kept as the boolean, the way entry stores a judgement written to a variable.
     case 'Boolean': return node.value;
     case 'Color': return node.value;
     case 'Transparent': return 'transparent';
@@ -398,9 +330,6 @@ function constantOf(node: Expr, ctx: Context): string | number | boolean | null 
   return ctx.error(node, '변수·리스트의 초기값은 상수여야 합니다. 계산이 필요하면 when start 안에서 대입하세요.');
 }
 
-// ---------------------------------------------------------------------------
-//  3. 오브젝트
-// ---------------------------------------------------------------------------
 function collectObjects(program: ProgramNode, ctx: Context) {
   const register = (node: ObjectNode, scene: EntryScene) => {
     if (ctx.objectByName.has(node.name)) {
@@ -440,14 +369,7 @@ function collectObjects(program: ProgramNode, ctx: Context) {
   for (const object of ctx.objects) collectObjectMembers(object, ctx);
 }
 
-/**
- * 모양/소리의 엔트리 id — `force id "..."` 를 안 적었으면 평소처럼 시드로 새로 뽑고,
- * 적었으면 그 문자열을 그대로 쓴다(addendum, SPEC-ADDENDUM.md 참고). `force id` 는
- * 예전에 함수 안에 특정 오브젝트의 모양·소리 id 를 그대로 박아 넣던 작품을 되돌릴 때,
- * 되돌리기가 그 id 를 다시 그대로 배정해 살리는 용도다 — 자동 생성 id 와 겹치면
- * project.json 안에서 서로 다른 리소스가 같은 id 를 갖게 되어 엔트리가 엉뚱한 것을
- * 가리키게 되므로, 이미 쓰인 id 와 겹치면 컴파일 에러로 막는다.
- */
+// Reserve forced resource IDs so generated IDs cannot collide with them.
 function resourceId(member: CostumeNode | SoundNode, ctx: Context): string | null {
   if (!member.forceId) return ctx.newId();
   if (ctx.newId.has(member.forceId)) {
@@ -504,9 +426,7 @@ function collectObjectMembers(object: CompiledObject, ctx: Context) {
     }
   }
 
-  // A costume/sound whose Entry name is not a Tess identifier answers to both
-  // spellings, because Entry resolves a name written into a block against the
-  // name the work carries, not the identifier the source uses.
+  // Keep both resource spellings because Entry resolves the stored name at runtime.
   for (const member of object.node.body) {
     if (member.type !== 'Costume' && member.type !== 'Sound') continue;
     if (!member.displayName || member.displayName === member.id) continue;
@@ -514,7 +434,7 @@ function collectObjectMembers(object: CompiledObject, ctx: Context) {
     if (!shelf.has(member.displayName)) shelf.set(member.displayName, shelf.get(member.id)!);
   }
 
-  // 이벤트 핸들러 안에서 처음 나오는 var/list 도 이 오브젝트의 변수로 등록한다
+  // Event-local declarations belong to the object.
   for (const member of object.node.body) {
     if (member.type === 'Event') collectHandlerVariables(member.body, object, ctx);
   }
@@ -547,9 +467,6 @@ function collectHandlerVariables(statements: Stmt[], object: CompiledObject, ctx
   }
 }
 
-// ---------------------------------------------------------------------------
-//  4. 함수
-// ---------------------------------------------------------------------------
 function collectFunctions(program: ProgramNode, ctx: Context) {
   const register = (node: FunctionDeclNode, owner: string | null) => {
     if (ctx.functionByName.has(node.name)) {
@@ -558,7 +475,6 @@ function collectFunctions(program: ProgramNode, ctx: Context) {
     }
     const returns = findReturns(node.body);
 
-    // `이름?` 으로 적은 매개변수는 엔트리에서도 판단 칸이 된다 (SPEC-ADDENDUM.md 4.6)
     const booleanParams = new Set(node.booleanParams ?? []);
     const fn = {
       id: ctx.newId(),
@@ -605,9 +521,6 @@ function findReturns(statements: Stmt[], found: ReturnNode[] = []): ReturnNode[]
   return found;
 }
 
-// ---------------------------------------------------------------------------
-//  5. 신호
-// ---------------------------------------------------------------------------
 function collectMessages(node: unknown, ctx: Context) {
   if (node === null || typeof node !== 'object') return;
   if (Array.isArray(node)) {
@@ -624,12 +537,9 @@ function collectMessages(node: unknown, ctx: Context) {
   }
 }
 
-// ---------------------------------------------------------------------------
-//  6. 함수 본문 컴파일
-// ---------------------------------------------------------------------------
 function compileFunctions(ctx: Context) {
   for (const fn of ctx.functions) {
-    if (fn.generated) continue; // 컴파일러가 이미 완성해 둔 런타임 함수
+    if (fn.generated) continue;
     ctx.object = (fn.owner ? ctx.objectByName.get(fn.owner) : null) ?? null;
     ctx.locals = ctx.object?.locals ?? new Map();
     ctx.funcScope = {
@@ -676,10 +586,7 @@ function compileFunctions(ctx: Context) {
   }
 }
 
-/**
- * 함수 머리(라벨과 매개변수 칸의 사슬)를 만든다. 자동 이름(a, b, c …)은 라벨 없이,
- * 그 밖의 이름은 라벨을 달고 나간다 — 되돌리기의 반대다 (src/function-params.ts).
- */
+// Omit labels for automatic parameter names to match Entry's function header.
 function buildFunctionFields(fn: CompiledFunction, ctx: Context): EntryBlock {
   let next: EntryParam = null;
   for (let i = fn.params.length - 1; i >= 0; i -= 1) {
@@ -692,9 +599,6 @@ function buildFunctionFields(fn: CompiledFunction, ctx: Context): EntryBlock {
   return ctx.block('function_field_label', [fn.name, next]);
 }
 
-// ---------------------------------------------------------------------------
-//  7. 오브젝트 스크립트 컴파일
-// ---------------------------------------------------------------------------
 function compileObjects(ctx: Context) {
   for (const object of ctx.objects) {
     ctx.object = object;
@@ -746,9 +650,7 @@ function compileEvent(event: EventNode, ctx: Context): EntryBlock[] | null {
     }
 
     case 'key_up': {
-      // 엔트리에는 "키를 뗐을 때" 이벤트가 없어서 감시 스크립트로 바꾼다.
-      //   시작하기 -> 계속 반복: 키가 눌릴 때까지 기다림 -> 떼질 때까지 기다림 -> 본문
-      // (SPEC-ADDENDUM 4 에 적어 둔 정해진 변환이라 따로 알리지 않는다)
+      // Entry has no key-release event, so poll for a press followed by a release.
       const code = keyCodeOf(event.key);
       if (!code) return ctx.error(event, `알 수 없는 키 이름 "${event.key}" 입니다.${didYouMean(event.key!, Object.keys(KEY_CODES))}`);
       const pressed = () => ctx.block('is_press_some_key', [code, null]);
@@ -766,10 +668,7 @@ function compileEvent(event: EventNode, ctx: Context): EntryBlock[] | null {
   }
 }
 
-/**
- * draw_color 등을 오브젝트 선언 맨 위에 썼으면, `when start` 스크립트를 만들어서
- * 그 값을 제일 먼저 정하게 한다 (BRUSH_DEFAULT_PROPERTIES 선언부 참고).
- */
+// Apply declared brush defaults before the object's other start scripts.
 function compileBrushDefaults(object: CompiledObject, ctx: Context): EntryBlock[] | null {
   const present = BRUSH_DEFAULT_PROPERTIES.filter((name) => object.properties.has(name));
   if (present.length === 0) return null;
@@ -789,15 +688,10 @@ function compileBrushDefaults(object: CompiledObject, ctx: Context): EntryBlock[
   return blocks;
 }
 
-// ---------------------------------------------------------------------------
-//  8. 프로젝트 조립
-// ---------------------------------------------------------------------------
 function assemble(program: ProgramNode, ctx: Context, options: CompileOptions): EntryProject {
   const projectDecl = program.body.find((item) => item.type === 'Project');
   const fields = new Map((projectDecl?.fields ?? []).map((field) => [field.field, field.value]));
 
-  // The grammar fixes each field's literal type: title and description take a
-  // string, fps a number.
   const textField = (name: string) => {
     const value = fields.get(name);
     return value?.type === 'String' ? value.value : undefined;
@@ -826,8 +720,7 @@ function assemble(program: ProgramNode, ctx: Context, options: CompileOptions): 
     speed: numberField('fps') ?? 60,
     interface: { menuWidth: 280, canvasWidth: 480, object: objects[0]?.id ?? null },
     expansionBlocks: [...ctx.expansionBlocks],
-    // 읽어주기·번역 같은 인공지능 블록을 쓰면 그 모듈 이름을 적어 둔다
-    // (entryjs 는 project.aiUtilizeBlocks 에 이름이 있어야 Entry.AI_UTILIZE_BLOCK[type].init() 을 부른다)
+    // Entry initializes AI modules only when project.aiUtilizeBlocks lists them.
     aiUtilizeBlocks: [...ctx.aiUtilizeBlocks],
     hardwareLiteBlocks: [],
     externalModules: [],
@@ -895,11 +788,7 @@ function buildObject(object: CompiledObject, ctx: Context): EntryObject {
   if (!isText) {
     const width = picture?.dimension?.width ?? 100;
     const height = picture?.dimension?.height ?? 100;
-    // regX/regY is the registration point: the spot the object's x/y actually
-    // put on the stage. Entry fixes it when the object is made and never moves
-    // it again, and it defaults to the middle of the costume — but the user can
-    // drag it anywhere, even outside the image, and then x/y mean something
-    // else entirely. Without `center` the object lands in the wrong place.
+    // Keep costume registration points because they determine the object's stage position.
     Object.assign(entity, {
       regX: object.center?.x ?? width / 2,
       regY: object.center?.y ?? height / 2,
@@ -916,7 +805,6 @@ function buildObject(object: CompiledObject, ctx: Context): EntryObject {
     rotateMethod: string('rotation', 'free'),
     scene: object.scene.id,
     sprite: {
-      // Both spellings of a renamed resource share one asset, so drop the repeat.
       pictures: [...new Set(object.pictures.values())],
       sounds: [...new Set(object.sounds.values())],
     },
@@ -939,17 +827,12 @@ function buildObject(object: CompiledObject, ctx: Context): EntryObject {
       text,
       textAlign: align,
       lineBreak: boolean('line_break', false),
-      // 엔트리가 글상자를 새로 만들 때의 기본 배경은 흰색이다(entryjs src/class/object.js
-      // `json.bgColor = '#ffffff'`). 'transparent' 를 기본값으로 쓰면 검은 기본 글자색과
-      // 겹쳐 배경이 없는 화면에서는 글자가 거의 안 보이는 것처럼 보인다.
+      // Entry text boxes start with a white background.
       bgColor: string('bg_color', '#ffffff'),
       underLine: boolean('text_underline', false),
       strike: boolean('text_strikethrough', false),
       fontSize,
-      // Entry measures the frame by laying the text out; with no font to draw
-      // the compiler can only estimate it from the character count. `size W H`
-      // overrides that — a wrapping text box takes its line breaks from the
-      // width and its line count from the height, so the estimate is far off.
+      // Text bounds are an estimate without font layout; explicit size overrides them.
       width: object.boxSize?.width ?? Math.max(text.length * fontSize * 0.85, fontSize),
       height: object.boxSize?.height ?? Math.round(fontSize * 1.1),
     });
@@ -962,9 +845,8 @@ function buildObject(object: CompiledObject, ctx: Context): EntryObject {
   return result;
 }
 
-/** 엔트리 프로젝트는 초시계와 대답 항목을 변수 목록에 함께 담는다 */
+// Entry stores the timer and answer alongside variables.
 function addSystemVariables(ctx: Context) {
-  // `Entry.variableContainer.generateTimer` — `240 - (이름 길이 × 12 + 70)`.
   ctx.variables.push({
     name: '초시계', id: ctx.newId(), visible: false, value: 0, variableType: 'timer',
     isCloud: false, isRealTime: false, cloudDate: false, object: null, x: 134, y: -70,

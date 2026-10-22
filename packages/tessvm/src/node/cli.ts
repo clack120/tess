@@ -129,7 +129,6 @@ async function main(): Promise<number> {
   if (loaded.decompiledTo) {
     console.log(`${path.basename(file)} → ${path.join(loaded.decompiledTo, 'main.tess')} (되돌린 Tess 소스)`);
   }
-  // Compiler diagnostics apply to Tess inputs.
   const grades = [
     ['에러', loaded.errors, console.error],
     ['경고', loaded.warnings, console.warn],
@@ -263,7 +262,7 @@ function exportWork(loaded: Loaded, options: Options): number {
   return 0;
 }
 
-// Replace --out's extension when writing both formats.
+// Replace the output extension when writing both formats.
 function fileFor(out: string | undefined, name: string, suffix: string, both: boolean): string {
   if (!out) {
     return `${name}${suffix}`;
@@ -320,7 +319,7 @@ function openBrowser(url: string): void {
   try {
     spawn(command, [url], { detached: true, stdio: 'ignore', shell: process.platform === 'win32' }).unref();
   } catch {
-    // No browser to open; the URL is already printed.
+    // The printed URL still works if opening the browser fails.
   }
 }
 

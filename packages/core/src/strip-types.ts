@@ -1,7 +1,4 @@
-/**
- * Turns TypeScript source into JavaScript for a browser or a sandbox: Bun's
- * transpiler under Bun, `stripTypeScriptTypes` under Node.
- */
+// Use Bun's transpiler or Node's type stripper, depending on the host.
 type Transpiler = { transformSync(source: string): string };
 type BunGlobal = { Transpiler: new (options: { loader: 'ts' }) => Transpiler };
 

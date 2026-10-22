@@ -1,30 +1,16 @@
-/**
- * @fileoverview 실행 중인 작품의 상태 모델입니다.
- *
- * 엔트리의 `Entry.EntityObject` · `Entry.EntryObject` · `Entry.Variable` 이 담고 있는
- * 값과 그 값을 바꾸는 규칙을 그대로 옮기되, 화면 갱신은 하지 않습니다. 좌표를 바꾸면
- * `dirty` 표시만 남기고 렌더러가 프레임 끝에 한 번만 반영합니다.
- */
 import { clamp, isNumber, mod, num, parseNumber } from './cast.ts';
 
-/** Entry's own stage: 480×270 units drawn onto a 640×360 canvas. */
+// Entry draws 480 by 270 stage units onto a 640 by 360 canvas.
 export const DEFAULT_STAGE_WIDTH = 480;
 export const DEFAULT_STAGE_HEIGHT = 270;
-/**
- * How many canvas pixels one stage unit covers. Entry puts the stage container
- * at `scale = 640/480`, and the pixel collision test rasterises in that space,
- * so keeping the ratio keeps collisions identical at any stage size.
- */
+// Keep Entry's 640/480 ratio so collision coordinates remain consistent at every stage size.
 export const WORLD_SCALE = 4 / 3;
 
-/** The stage the whole runtime measures against. One project, one stage. */
 export interface StageMetrics {
-  /** Stage units across, e.g. 480 — coordinates run -width/2 … width/2. */
   width: number;
   height: number;
   halfWidth: number;
   halfHeight: number;
-  /** Canvas pixels per stage unit. */
   scale: number;
   worldWidth: number;
   worldHeight: number;
@@ -44,28 +30,19 @@ function metrics(width: number, height: number): StageMetrics {
 
 export const stage: StageMetrics = metrics(DEFAULT_STAGE_WIDTH, DEFAULT_STAGE_HEIGHT);
 
-/**
- * Resizes the stage. Everything that measures the stage — collisions, walls,
- * dialog clamping, monitors, the renderer — reads `stage`, so this is the only
- * place the size lives.
- */
+// Keep one stage size for collision, walls, dialogs, monitors, and rendering.
 export function setStageSize(width: number, height: number): StageMetrics {
   Object.assign(stage, metrics(Math.max(1, Math.round(width)), Math.max(1, Math.round(height))));
   return stage;
 }
 
-/** `Entry.Utils.COLLISION`. */
 export const COLLISION = { NONE: 0, UP: 1, RIGHT: 2, LEFT: 3, DOWN: 4 } as const;
 
 export interface Picture {
   id: string;
   name: string;
   fileurl: string;
-  /**
-   * The same costume as a raster image, where one sits next to the vector one.
-   * Entry keeps both for a drawing made in its own editor and its runner always
-   * takes this; tessvm takes the vector unless it is too big or turned off.
-   */
+  // Prefer the vector only when it preserves the saved raster's framing and settings permit it.
   pngurl?: string;
   dimension: { width: number; height: number };
   imageType?: string;
@@ -97,15 +74,9 @@ export interface BrushState {
   thickness: number;
   opacity: number;
   stop: boolean;
-  /**
-   * When the entity first reached for this pen. Entry makes a pen's shape at
-   * that moment and slides it under the entity, so the pen started later ends
-   * up in front of the one started earlier.
-   */
+  // Order pens by first use because Entry inserts later pens in front.
   started: number;
-  /** Points laid down since the last move, in entry coordinates. */
   path: number[];
-  /** Finished strokes, each `{color, thickness, opacity, points}`. */
   strokes: Stroke[];
   fill: boolean;
 }
@@ -120,7 +91,7 @@ export interface Stroke {
 
 let penOrder = 0;
 
-/** Pens keep the order in which their shapes were created. */
+// Preserve pen creation order for layering.
 export function newBrush(): BrushState {
   return {
     color: '#ff0000', thickness: 1, opacity: 0, stop: false,
@@ -128,18 +99,9 @@ export function newBrush(): BrushState {
   };
 }
 
-/** What a canvas draws with when it refuses a font string outright. */
 const CANVAS_DEFAULT_FONT = { size: 10, family: 'sans-serif' };
 
-/**
- * `Entry.EntityObject.setFont` — `"bold italic 20px Nanum Gothic"`. The size can
- * be fractional, so it is read with `parseFloat`, not a digit pattern.
- *
- * A size that does not read as a number is kept by entry as `NaN`
- * (`setFontSize(parseFloat(...))`, whose default only covers `undefined`), and
- * the canvas then refuses the whole declaration and draws in its own face. Such
- * a font resolves to that face here rather than to entry's 20px default.
- */
+// Preserve fractional font sizes and use the canvas fallback when the saved size is invalid.
 export function parseFont(font: string): {
   size: number;
   family: string;
@@ -178,7 +140,7 @@ export interface DialogState {
   mode: 'speak' | 'think' | 'ask';
 }
 
-/** Shared id → name → 1-based index lookup for costumes and sounds. */
+// Resolve costumes and sounds by ID, name, then one-based index.
 function lookup<T extends { id: string; name: string }>(items: T[], value: unknown): T | null {
   if (value === undefined || value === null || value === '') {
     return null;
@@ -203,7 +165,6 @@ function lookup<T extends { id: string; name: string }>(items: T[], value: unkno
 
 let entitySeq = 0;
 
-/** One drawable instance — the object itself or one of its clones. */
 export class Entity {
   readonly target: Target;
   readonly id: string;
@@ -229,7 +190,6 @@ export class Entity {
   picture: Picture | null = null;
   effect: Effects = initialEffects();
 
-  /** Text box state. */
   text = '';
   colour = '#000000';
   bgColor = 'transparent';
@@ -242,22 +202,17 @@ export class Entity {
   textAlign = 0;
   lineBreak = false;
 
-  /** `set_tts_property` keeps the reading voice per entity, as entry does. */
   voice: VoiceProps = { speaker: 'kyuri', speed: 0, pitch: 0, volume: 1 };
 
   brush: BrushState | null = null;
   paint: BrushState | null = null;
   stamps: StampState[] = [];
   dialog: DialogState | null = null;
-  /**
-   * Per-clone copies of the object's local variables, indexed the same way as
-   * the project's variable list. Only clones carry these.
-   */
+  // Clone local variables use the same indices as the project's variable list.
   localVars: Array<Variable | undefined> | null = null;
 
-  /** Bumped whenever anything that moves pixels changes, to key collision caches. */
+  // Bump the pixel revision whenever collision-visible state changes.
   version = 1;
-  /** Set when the renderer still has to catch up with this entity. */
   dirty = true;
   removed = false;
 
@@ -301,7 +256,7 @@ export class Entity {
     return this.direction;
   }
 
-  /** `vertical` rotation mirrors the sprite as the heading crosses the vertical axis. */
+  // Mirror vertical-rotation sprites when heading crosses the vertical axis.
   setDirection(dir = 0, flippable = false): void {
     const direction = mod(dir, 360);
     if (this.target.rotateMethod === 'vertical' && !flippable) {
@@ -359,7 +314,7 @@ export class Entity {
     return this.scaleY;
   }
 
-  /** Entry's one-number size: the mean of the two transformed side lengths. */
+  // Entry reports size as the mean of the transformed side lengths.
   getSize(): number {
     return (this.width * Math.abs(this.scaleX) + this.height * Math.abs(this.scaleY)) / 2;
   }
@@ -421,16 +376,7 @@ export class Entity {
     this.touch();
   }
 
-  /**
-   * `Entry.EntityObject.updateTextbox` — a text box that does not wrap keeps
-   * its width in step with the text it holds, and other blocks read that
-   * (`크기`, 충돌). Entry measures inside `setText`, so this has to be immediate
-   * rather than something the renderer fixes up next frame.
-   *
-   * The height is not part of that: `updateTextbox` only calls `setWidth`, so a
-   * box keeps the height it was saved with however much text is written into it.
-   * Only a font change re-measures both (`syncFont`), and `withHeight` says so.
-   */
+  // Update width immediately after text changes; only font changes also remeasure saved height.
   measure(withHeight = true): void {
     if (this.type !== 'textBox' || this.lineBreak) {
       return;
@@ -444,7 +390,7 @@ export class Entity {
     }
   }
 
-  /** `setImage` keeps the registration point where it sat relative to the middle. */
+  // Keep the registration point's offset from the costume center when changing images.
   setImage(picture: Picture | null | undefined): void {
     if (!picture) {
       return;
@@ -472,7 +418,6 @@ export class Entity {
     this.touch();
   }
 
-  /** The 2×3 world matrix that maps texture pixels to the collision space. */
   worldMatrix(out: Float64Array): Float64Array {
     const rad = (this.rotation * Math.PI) / 180;
     const cos = Math.cos(rad);
@@ -513,7 +458,6 @@ export interface StampState {
   alpha: number;
 }
 
-/** One object in the project — its assets, its scripts, and every live entity of it. */
 export class Target {
   readonly project: Project;
   readonly id: string;
@@ -523,15 +467,11 @@ export class Target {
   rotateMethod: string;
   pictures: Picture[] = [];
   sounds: Sound[] = [];
-  /** `selectedPicture` — what `getPicture()` with no argument answers. */
   defaultPicture: Picture | null = null;
   entity!: Entity;
   clones: Entity[] = [];
-  /** Scripts compiled for this object; index matches `project.scripts`. */
   scripts: CompiledScript[] = [];
-  /** Live threads, in the order entry would tick them. */
   threads: Thread[] = [];
-  /** Draw order inside the scene; lower is further back. */
   index = 0;
 
   constructor(project: Project, id: string, name: string, objectType: 'sprite' | 'textBox', sceneId: string, rotateMethod: string) {
@@ -543,16 +483,11 @@ export class Target {
     this.rotateMethod = rotateMethod;
   }
 
-  /**
-   * `Entry.EntryObject.getPicture` — id, then name, then a **1-based index**.
-   * Nothing matching is `null`, not the first costume: `모양을 2로 바꾸기` is
-   * common, and falling back to the first one silently shows the wrong image.
-   */
+  // Return null on missing costumes; falling back to the first silently shows the wrong image.
   getPicture(value: unknown): Picture | null {
     return lookup(this.pictures, value) ?? (value ? null : this.defaultPicture ?? this.pictures[0] ?? null);
   }
 
-  /** Index of a costume the way `getPictureIndex` reports it (-1 when absent). */
   private pictureIndex(value: unknown): number {
     const picture = lookup(this.pictures, value);
     return picture ? this.pictures.indexOf(picture) : -1;
@@ -612,8 +547,7 @@ export class Target {
       };
     }
     this.clones.push(clone);
-    // The renderer slots a clone right under the entity it came from, so it
-    // needs to know which one that was.
+    // Keep the clone's source entity so the renderer can insert it directly underneath.
     this.project.renderer?.addEntity(clone, source);
     return clone;
   }
@@ -631,7 +565,7 @@ export class Target {
     return this.clones.slice();
   }
 
-  /** The object's own entity first, then its clones — the order entry scans in. */
+  // Scan the object's own entity before its clones, matching Entry.
   forEachEntity(visit: (entity: Entity) => void): void {
     visit(this.entity);
     const clones = this.clones;
@@ -643,7 +577,7 @@ export class Target {
 
 export type VariableKind = 'variable' | 'list' | 'slide' | 'timer' | 'answer';
 
-/** What a variable or list item holds: entry stores a judgement as the boolean. */
+// Preserve stored booleans as booleans, including inside lists.
 export type VariableValue = string | number | boolean;
 
 export class Variable {
@@ -653,27 +587,14 @@ export class Variable {
   readonly kind: VariableKind;
   readonly isList: boolean;
   readonly isSlide: boolean;
-  /**
-   * `isCloud`/`isRealTime` on the work's own variable — entry keeps these on
-   * its server, so their value outlives a run instead of going back to what the
-   * work was saved with.
-   */
+  // Shared and real-time values survive restarts instead of reverting to the project snapshot.
   isCloud = false;
   isRealTime = false;
   value: VariableValue = 0;
   array: Array<{ data: VariableValue }> = [];
-  /**
-   * Counts writes, not changes. The kernel keeps its own copy of the
-   * numbers it works on and only reads this one back when the count moved, so
-   * every place that writes a variable has to say so — `setValue` does it
-   * itself, and whatever reaches into `array` calls `touch`.
-   */
+  // Count every write so kernel caches notice changes, including direct list writes through touch.
   revision = 0;
-  /**
-   * The items written one at a time since the kernel last matched this list,
-   * so it can copy those instead of the whole list. Any other write — a
-   * push, a removal, a new array — counts as the whole list.
-   */
+  // Track in-place item writes separately; structural changes invalidate the whole list.
   private spanFrom = Infinity;
   private spanTo = -1;
   private spanAll = true;
@@ -685,13 +606,8 @@ export class Variable {
   height = 120;
   minValue = 0;
   maxValue = 100;
-  /**
-   * Called after every write. Only the runner's own names (`extras.ts`) set
-   * this, and they want each write, not each change: a work writing the same
-   * text to `$CLIPBOARD` twice means to copy it twice.
-   */
+  // Notify extras on every write so repeating the same clipboard text still requests another copy.
   onWrite: (() => void) | null = null;
-  /** Snapshot taken when the project starts, restored on stop. */
   private snapshotValue: VariableValue = 0;
   private snapshotArray: Array<{ data: VariableValue }> = [];
   private snapshotVisible = false;
@@ -721,20 +637,17 @@ export class Variable {
     this.onWrite?.();
   }
 
-  /** Says the list behind `array` was written to. */
   touch(): void {
     this.revision += 1;
     this.spanAll = true;
   }
 
-  /** Says one item, 0-based, was written in place. */
   touchItem(at: number): void {
     this.revision += 1;
     if (at < this.spanFrom) this.spanFrom = at;
     if (at > this.spanTo) this.spanTo = at;
   }
 
-  /** The kernel now holds what this list holds. */
   synced(): void {
     this.syncedAt = this.revision;
     this.spanAll = false;
@@ -742,15 +655,12 @@ export class Variable {
     this.spanTo = -1;
   }
 
-  /**
-   * Items written in place since `revision`, when that is the revision the
-   * kernel last matched; null when the whole list has to cross again.
-   */
+  // Return changed indices only when the kernel's revision matches; otherwise copy the whole list.
   changedSince(revision: number): [number, number] | null {
     return this.syncedAt === revision && !this.spanAll ? [this.spanFrom, this.spanTo] : null;
   }
 
-  /** `Entry.Variable.isNumber` — decides whether `change_variable` adds or joins. */
+  // Match Entry's numeric test to decide whether variable changes add or concatenate.
   isNumber(): boolean {
     return isNumber(this.value);
   }
@@ -759,7 +669,6 @@ export class Variable {
     return this.array;
   }
 
-  /** Whether the value is stored outside the run rather than reset with it. */
   get isStored(): boolean {
     return this.isCloud || this.isRealTime;
   }
@@ -771,7 +680,7 @@ export class Variable {
   }
 
   loadSnapshot(): void {
-    // A stored variable keeps what it holds; only where it sits goes back.
+    // Preserve stored values while restoring their monitor positions.
     if (!this.isStored) {
       this.value = this.snapshotValue;
       this.array = this.snapshotArray.map((item) => ({ data: item.data }));
@@ -792,44 +701,34 @@ export interface CompiledScript {
   blockId: string;
 }
 
-/**
- * A number ends the frame (1 holds a promise); a generator is a function call
- * the thread runs first and whose result it sends back.
- */
+// A number yields the frame, 1 marks a promise wait, and a generator starts a nested call.
 export type Yielded = number | CallFrame;
 
-/** One function call in progress on a thread's call stack. */
 export type CallFrame = Generator<Yielded, unknown, unknown> & { finishes?: boolean };
 
-/** Thrown into a value call to end it with its return expression. */
+// Throw into a value call to finish through its return expression.
 const FINISH = Symbol('finish');
 
 export type ScriptBody = (entity: Entity, thread: Thread) => Generator<Yielded, void, unknown>;
 
-/** One compiled `함수 정의하기`, as the generated module's `F` array holds it. */
 export type CompiledFunction = (entity: Entity, thread: Thread, args: unknown[]) => CallFrame;
 
-/** One running script — entry's `Entry.Executor`. */
 export class Thread {
   readonly target: Target;
   readonly entity: Entity;
   readonly script: CompiledScript;
   iterator: Generator<Yielded, void, unknown>;
-  /** The body and the calls nested in it, innermost last. Kept off the JS stack. */
+  // Keep nested call frames off the JavaScript stack.
   private frames: CallFrame[];
   private waitingAsync = false;
-  /** What compiled value calls catch to end early. */
   get finish(): symbol {
     return FINISH;
   }
   done = false;
-  /** The call stack, outermost first, as it stood when an error left a frame. */
+  // Preserve the call stack before unwinding an error.
   failedFrames: CallFrame[] | null = null;
-  /** True while this thread's generator is on the stack. */
   running = false;
-  /** Scratch space the compiled body keeps between frames. */
   state: Record<string, unknown> = {};
-  /** How many function calls are nested right now — the compiler's recursion guard. */
   depth = 0;
 
   constructor(target: Target, entity: Entity, script: CompiledScript) {
@@ -852,7 +751,7 @@ export class Thread {
     }
   }
 
-  /** Entry completes a frame-waiting value call on pause, but keeps promise waits. */
+  // On pause, finish frame-waiting value calls but keep promise waits pending.
   finishValueCalls(): void {
     if (this.done || this.running || this.waitingAsync || !this.frames.some((frame) => frame.finishes)) return;
     this.running = true;
@@ -863,14 +762,12 @@ export class Thread {
     }
   }
 
-  /** Runs the innermost frame until one yields a number or the body ends. */
   private resume(finishingValues = false): void {
     const frames = this.frames;
     let input: unknown;
     let thrown = false;
     let error: unknown;
-    // A call not started yet cannot catch what is thrown into it, and one
-    // already told is evaluating its return expression.
+    // Do not finish unstarted calls or interrupt a return expression already being evaluated.
     let fresh = false;
     const told = finishingValues ? new Set<CallFrame>() : null;
     for (;;) {
@@ -891,7 +788,7 @@ export class Thread {
         fresh = false;
       } catch (caught) {
         fresh = false;
-        // Only the frame the error started in has the whole stack above it.
+        // Capture the stack at the first failing frame before callers unwind.
         if (!thrown) this.failedFrames = frames.slice();
         frames.pop();
         if (!frames.length) {
@@ -923,11 +820,7 @@ export class Thread {
     }
   }
 
-  /**
-   * A thread can be told to stop from inside its own body (`stop_object`,
-   * scene changes), and a generator cannot be closed while it is running —
-   * marking it done is enough, the frame it is in returns on its own.
-   */
+  // Mark running generators done because they cannot be closed from inside their own execution.
   stop(): void {
     this.done = true;
     if (!this.running) {
@@ -950,7 +843,6 @@ export interface Scene {
   name: string;
 }
 
-/** Everything the running project holds. Declared here so `Target` can reach back. */
 export interface Project {
   scenes: Scene[];
   targets: Target[];

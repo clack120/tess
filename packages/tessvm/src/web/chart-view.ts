@@ -1,38 +1,24 @@
-/**
- * @fileoverview 차트 창 — 표에 딸린 차트를 무대 위에 띄웁니다.
- *
- * 엔트리도 차트는 캔버스가 아니라 모달(`DataTable.createChart` 가 만드는
- * `entry-table-chart`)로 띄웁니다. 여기서도 같은 자리에 HTML 로 올립니다 — 글자가
- * 또렷하고, 차트를 고르는 드롭다운처럼 손이 닿는 것을 그대로 쓸 수 있습니다.
- *
- * 작품이 담은 글자(표 이름·차트 제목·열 이름·칸 값)는 모두 `textContent` 로만 들어가고
- * 그림은 우리가 낸 수치로만 그립니다 — 마크업으로 읽히는 자리가 없습니다.
- */
+// Use HTML for charts and textContent for project text so labels cannot inject markup.
 import type { ChartLike, TableLike } from '../render/overlay.ts';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-/** 엔트리가 계열에 쓰는 열두 가지 색. */
 const COLORS = [
   '#4f80ff', '#f16670', '#6e5ae6', '#00b6b1', '#9fbaff', '#fcad93',
   '#c5b4ff', '#b3c3cd', '#2d51ac', '#a23941', '#423496', '#2a7d7f',
 ];
 const GRID = '#e4e6eb';
 const ZERO_LINE = '#c8ccd4';
-/** 세로축에 긋는 눈금 수의 어림값 — 간격은 1·2·5 배수로 맞춰 잡습니다. */
+// Choose tick intervals in multiples of 1, 2, or 5.
 const TICKS = 4;
-/** 가로축 이름 한 칸이 차지하는 폭, 글자 크기의 배수. */
 const LABEL_ROOM = 3.4;
-/** 줄이 이만큼 넘어가면 꺾은선의 점은 생략합니다. */
+// Skip line-point markers above this row count.
 const DOT_LIMIT = 40;
-/** 이름을 얹을 만큼 큰 원 차트 조각. */
 const SLICE_LABEL = 0.35;
 
-/** 창을 잴 수 없을 때(아직 자리를 잡지 않았을 때) 쓰는 크기, 글자 크기의 배수. */
 const FALLBACK_WIDTH = 30;
 const FALLBACK_HEIGHT = 13;
 
-/** `images/btn_close.svg` — 창 오른쪽 위의 닫기 단추. */
 const CLOSE_ICON =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" ' +
   'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>';
@@ -199,15 +185,13 @@ export const CHART_WINDOW_STYLE = `
 `;
 
 export interface ChartWindow {
-  /** 표 하나의 차트 한 벌을 띄웁니다. 번호는 엔트리처럼 0부터 셉니다. */
+  // Chart indices start at zero, matching Entry.
   show(table: TableLike, chart: number): void;
   hide(): void;
-  /** 열려 있는 동안 표가 바뀌었으면 다시 그립니다. */
   sync(): void;
   dispose(): void;
 }
 
-/** 창 안의 글자 크기(픽셀). 창이 없는 자리에서는 기본값으로 둡니다. */
 function unitOf(element: HTMLElement): number {
   const size = typeof getComputedStyle === 'function'
     ? parseFloat(getComputedStyle(element).fontSize)
@@ -226,7 +210,6 @@ function node<K extends keyof HTMLElementTagNameMap>(
   return element;
 }
 
-/** 그림 조각 하나. 값은 모두 우리가 낸 수치이거나 우리가 고른 색입니다. */
 function shape(tag: string, attributes: Record<string, string | number>): SVGElement {
   const element = document.createElementNS(SVG_NS, tag);
   for (const [key, value] of Object.entries(attributes)) {
@@ -235,7 +218,7 @@ function shape(tag: string, attributes: Record<string, string | number>): SVGEle
   return element;
 }
 
-/** SVG 에는 `hidden` 속성이 없으므로 속성으로 여닫습니다 — 모양은 CSS 가 냅니다. */
+// SVG has no hidden property, so toggle an attribute styled by CSS.
 function reveal(element: SVGElement, shown: boolean): void {
   if (shown) {
     element.removeAttribute('hidden');
@@ -244,15 +227,12 @@ function reveal(element: SVGElement, shown: boolean): void {
   }
 }
 
-/** 좌표는 소수점 두 자리까지 — 그림은 그대로이고 속성 글자는 짧아집니다. */
+// Keep two coordinate decimals to reduce attribute text without changing the visible chart.
 function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-/**
- * 눈금 간격 — 1·2·5 에 10의 거듭제곱을 곱한 수 중에서 고릅니다. 차트가 늘 읽히는 수에
- * 선을 긋도록 하는, 어느 차트나 쓰는 방법입니다.
- */
+// Choose readable tick intervals from 1, 2, or 5 times a power of ten.
 export function tickStep(span: number, count: number): number {
   const rough = Math.abs(span) / Math.max(count, 1);
   if (!Number.isFinite(rough) || rough <= 0) {
@@ -267,13 +247,11 @@ export function tickStep(span: number, count: number): number {
   return 10 * power;
 }
 
-/** 눈금에 적는 숫자. 소수점이 길어지지 않도록 자릅니다. */
 export function tickLabel(value: number): string {
   const rounded = Math.round(value * 1000) / 1000;
   return String(Object.is(rounded, -0) ? 0 : rounded);
 }
 
-/** 차트가 쓰는 계열들. 계열이 따로 없으면 세로축 하나를 계열로 삼습니다. */
 function seriesOf(chart: ChartLike): number[] {
   if (chart.categoryIndexes.length) {
     return chart.categoryIndexes;
@@ -281,10 +259,6 @@ function seriesOf(chart: ChartLike): number[] {
   return chart.yIndex >= 0 ? [chart.yIndex] : [];
 }
 
-/**
- * 차트 창을 `parent` 에 올립니다. 닫기 단추는 `onClose` 를 부를 뿐이므로, 창을 내리는
- * 것은 부른 쪽(엔트리에서는 실행기)이 정합니다.
- */
 export function mountChartWindow(parent: HTMLElement, onClose: () => void): ChartWindow {
   const root = document.createElement('div');
   root.className = 'tessvm-chart';
@@ -313,7 +287,6 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
 
   let table: TableLike | null = null;
   let at = 0;
-  /** 마지막으로 그린 표의 상태 — 표가 바뀌면 다시 그립니다. */
   let drawn = '';
 
   close.addEventListener('click', (event) => {
@@ -324,8 +297,7 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
     at = Number(pick.value) || 0;
     draw();
   });
-  // 창 위에서 일어난 것은 창의 것입니다 — 엔트리의 모달이 그렇듯, 뒤의 무대는 이
-  // 누름을 받지 않습니다.
+  // Chart presses belong to the modal and must not reach the stage behind it.
   const swallow = (event: Event) => event.stopPropagation();
   const SWALLOWED = ['pointerdown', 'pointerup', 'pointermove', 'click', 'wheel'];
   for (const type of SWALLOWED) {
@@ -341,7 +313,6 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
     });
   watch?.observe(body);
 
-  /** 표에 담긴 것이 바뀌었는지 보는 자국. */
   const mark = (): string =>
     `${at}/${table?.revision ?? 0}/${table?.rows.length ?? 0}/${table?.fields.length ?? 0}`;
 
@@ -358,7 +329,6 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
     }
   }
 
-  /** 창 크기. 아직 자리를 잡지 않았으면 글자 크기로 어림잡습니다. */
   function measure(): { em: number; width: number; height: number } {
     const em = unitOf(root);
     const box = plot.getBoundingClientRect();
@@ -380,7 +350,6 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
     name.textContent = table.name || '차트 보기';
     title.textContent = spec.title || field(spec.xIndex);
 
-    // 엔트리가 제목 아래에 적어 두는 축 요약 — `가로축 일자` · `계열 신규 확진자 외 1건`.
     const summary = [`가로축 ${field(spec.xIndex)}`];
     if (series.length) {
       const rest = series.length > 1 ? ` 외 ${series.length - 1}건` : '';
@@ -412,7 +381,6 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
     }
   }
 
-  /** 막대·꺾은선·점 차트 — 가로축은 줄, 세로축은 값입니다. */
   function drawAxisChart(
     source: TableLike,
     spec: ChartLike,
@@ -427,7 +395,7 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
     const numbers = (index: number) =>
       source.rows.map((row) => Number(row[index] ?? 0) || 0);
     const columns = series.map((column) => numbers(column));
-    // A loop, not `Math.max(...values)`: a long table passes the argument limit.
+    // Loop over values because spreading large tables exceeds the engine's argument limit.
     let most = 0;
     let least = 0;
     for (const column of columns) {
@@ -440,7 +408,6 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
     const low = Math.floor(least / step) * step;
     const high = Math.max(Math.ceil(most / step) * step, low + step);
 
-    // 왼쪽은 눈금 글자가 들어갈 만큼만 비웁니다.
     const marks: number[] = [];
     for (let value = low; value <= high + step / 2; value += step) {
       marks.push(value);
@@ -472,7 +439,7 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
 
     const rows = source.rows.length;
     const scatter = spec.type === 'scatter';
-    // 점 차트의 가로는 줄 번호가 아니라 값입니다.
+    // Scatter plots use numeric x values rather than row numbers.
     const xs = scatter ? numbers(spec.xIndex) : [];
     const lowX = scatter ? xs.reduce((min, value) => Math.min(min, value), 0) : 0;
     const highX = scatter ? Math.max(xs.reduce((max, value) => Math.max(max, value), -Infinity), lowX + 1) : 1;
@@ -480,7 +447,6 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
     const line = (row: number) => (rows > 1 ? pad.left + (plotWidth * row) / (rows - 1) : pad.left + plotWidth / 2);
 
     if (spec.type === 'bar') {
-      // 한 줄이 쥔 자리를 계열 수만큼 나눠 나란히 세웁니다.
       const group = slot * 0.72;
       const barWidth = Math.max(1, group / series.length);
       const base = atY(Math.max(low, 0));
@@ -540,10 +506,10 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
       plot.appendChild(label);
     };
     if (scatter) {
-      // 점 차트의 가로축은 줄 이름이 아니라 값이므로, 세로축처럼 눈금을 놓습니다.
+      // Numeric scatter axes need ticks instead of category labels.
       const across = tickStep(highX - lowX, TICKS);
       for (let value = Math.ceil(lowX / across) * across; value <= highX + across / 2; value += across) {
-        // 양 끝의 눈금은 그림 밖으로 넘지 않도록 안쪽으로 붙입니다.
+        // Keep end ticks inside the chart bounds.
         const first = value - across < lowX;
         const last = value + across > highX;
         write(
@@ -554,14 +520,13 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
       }
       return;
     }
-    // 가로축 이름 — 자리가 나는 만큼만 띄엄띄엄 적습니다.
     const every = Math.max(1, Math.ceil((rows * size.em * LABEL_ROOM) / plotWidth));
     const bar = spec.type === 'bar';
     source.rows.forEach((row, index) => {
       if (index % every !== 0) {
         return;
       }
-      // 양 끝의 이름은 그림 밖으로 넘지 않도록 안쪽으로 붙입니다.
+      // Keep end labels inside the chart bounds.
       const anchor = bar || (index > 0 && index < rows - 1)
         ? 'middle'
         : index === 0 ? 'start' : 'end';
@@ -569,7 +534,6 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
     });
   }
 
-  /** 원 차트 — 값이 차지하는 만큼 부채꼴을 돌립니다. */
   function drawPie(
     source: TableLike,
     spec: ChartLike,
@@ -610,7 +574,7 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
           fill: color, stroke: '#fff', 'stroke-width': 1.5, 'stroke-linejoin': 'round',
         }));
       }
-      // 조각이 이름을 담을 만큼 클 때만 몫을 얹습니다.
+      // Label only pie slices with enough room for text.
       if (sweep > SLICE_LABEL) {
         const middle = from + sweep / 2;
         const label = shape('text', {
@@ -632,7 +596,7 @@ export function mountChartWindow(parent: HTMLElement, onClose: () => void): Char
       const wanted = Math.max(0, Math.min(charts.length - 1, Math.floor(chart) || 0));
       table = next;
       at = wanted;
-      // 드롭다운은 차트가 둘 이상일 때만 — 하나뿐이면 고를 것이 없습니다.
+      // Show the chart selector only when there is more than one chart.
       pick.hidden = charts.length < 2;
       pick.replaceChildren();
       charts.forEach((spec, index) => {

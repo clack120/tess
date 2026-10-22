@@ -1,6 +1,6 @@
 import { isNumber } from '../runtime/cast.ts';
 
-/** -1: number; -2: canonical exponential string; >=0: fixed decimal string. */
+// -1 means number, -2 means exponential text, and nonnegative values count fixed decimal places.
 export function scalarPlaces(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? -1 : null;
   if (typeof value !== 'string' || !isNumber(value)) return null;

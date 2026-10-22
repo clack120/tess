@@ -1,12 +1,6 @@
-/**
- * @fileoverview 브라우저에서 그림의 알파값을 읽어 마스크로 만듭니다.
- *
- * 캔버스가 필요한 부분만 여기 모아 두었습니다 — `mask.ts` 는 브라우저 없이도
- * 돌아가야 하기 때문입니다(테스트·헤드리스 실행).
- */
+// Keep canvas-dependent mask loading separate so mask storage also works headlessly.
 import { maskFromPixels, type AlphaMask } from './mask.ts';
 
-/** Reads the alpha channel of an already-decoded image into a mask. */
 export function buildMask(
   source: CanvasImageSource,
   width: number,

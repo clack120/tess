@@ -1,12 +1,3 @@
-/**
- * `store` — 실행 사이에 남는 이름들을 확인합니다.
- *
- * 규약은 엔트리 확장 프로그램 Entry Save Manager 의 것입니다. 전역 변수·리스트 이름이
- * `@` 로 시작하면 그 확장이 값을 맡아 두고, 작품이 `@저장` 함수를 부르면 써 두며
- * (`@비동기저장` 은 기다리지 않습니다), 확장이 있는 동안 `@확장프로그램` 이 1 입니다.
- * Tess 는 같은 자리를 `store var` · `store list` · `save` · `save async` · `can_save`
- * 로 적고, 컴파일·되돌리기가 그 이름들을 오갑니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileProject } from '@tess/compiler';
@@ -29,7 +20,6 @@ scene "장면 1":
   end
 end`;
 
-/** 컴파일한 작품. 컴파일 오류가 있으면 그 자리에서 실패합니다. */
 function build(source = WORK) {
   const result = compileProject(source, { path: 'main.tess' });
   assert.deepEqual(result.errors.map((error) => error.message), []);
@@ -39,7 +29,6 @@ function build(source = WORK) {
 const names = (project: RawEntity) =>
   (project.variables as RawEntity[]).map((variable) => String(variable.name));
 
-/** 블록 트리에 나오는 블록 타입을 순서대로 늘어놓습니다. */
 function blockTypes(script: unknown, found: string[] = []): string[] {
   if (Array.isArray(script)) {
     script.forEach((item) => blockTypes(item, found));
@@ -54,7 +43,6 @@ function blockTypes(script: unknown, found: string[] = []): string[] {
   return found;
 }
 
-/** 함수 머리에 적힌 이름 — 세이브 매니저가 알아보는 자리입니다. */
 function functionLabels(project: RawEntity): string[] {
   return (project.functions as RawEntity[]).map((fn) => {
     const create = (JSON.parse(String(fn.content)) as RawEntity[][])[0]![0]!;
@@ -62,9 +50,6 @@ function functionLabels(project: RawEntity): string[] {
   });
 }
 
-// ---------------------------------------------------------------------------
-//  Tess -> 엔트리
-// ---------------------------------------------------------------------------
 test('store 는 이름 앞에 @ 를 붙인 전역 변수·리스트가 된다', () => {
   const project = build();
   assert.ok(names(project).includes('@골드'));
@@ -83,8 +68,7 @@ test('save 는 @저장 · save async 는 @비동기저장 함수를 부른다', 
   const project = build();
   assert.deepEqual(functionLabels(project).sort(), ['@비동기저장', '@저장']);
 
-  // 부르는 자리는 그 함수의 호출 블록이고, 함수 본문은 비어 있습니다 — 확장이
-  // 그 호출을 가로채기 때문입니다.
+  // Save functions stay empty because the extension intercepts their calls.
   const calls = blockTypes(JSON.parse(String((project.objects as RawEntity[])[0]!.script)))
     .filter((type) => type.startsWith('func_'));
   assert.equal(calls.length, 2);
@@ -119,9 +103,6 @@ test('can_save 를 쓰지 않으면 @확장프로그램 도 만들지 않는다'
   assert.equal(names(project).includes('@확장프로그램'), false);
 });
 
-// ---------------------------------------------------------------------------
-//  엔트리 -> Tess
-// ---------------------------------------------------------------------------
 test('되돌리면 store 선언과 save · can_save 가 그대로 돌아온다', () => {
   const back = decompileProject(build(), [], { inline: true });
   assert.deepEqual(back.warnings, [], back.warnings.join('\n'));
@@ -130,7 +111,7 @@ test('되돌리면 store 선언과 save · can_save 가 그대로 돌아온다',
   assert.match(back.source, /if can_save:/);
   assert.match(back.source, /\n\s+save\n/);
   assert.match(back.source, /\n\s+save async\n/);
-  // 저장 함수는 Tess 문장이 대신하므로 함수 선언으로 남지 않습니다.
+  // Save statements replace manager stubs, so no function declaration remains.
   assert.doesNotMatch(back.source, /function .*저장/);
 });
 
@@ -153,10 +134,6 @@ test('@ 가 붙은 이름이 Tess 이름으로 쓸 수 없으면 as 로 남긴�
   assert.ok(names(again.project as unknown as RawEntity).includes('@게임 머니'));
 });
 
-// ---------------------------------------------------------------------------
-//  tessvm 에서 실제로 저장하기
-// ---------------------------------------------------------------------------
-/** 값을 손에 들고 있는 가짜 저장소. 실제로는 Dexie(IndexedDB)가 그 자리입니다. */
 function fakeHost(values: Record<string, unknown> = {}) {
   const writes: Array<Record<string, unknown>> = [];
   return {
@@ -172,7 +149,6 @@ function fakeHost(values: Record<string, unknown> = {}) {
   };
 }
 
-/** 작품을 싣고 저장소를 붙인 실행기. */
 async function runWith(host: unknown, source = WORK) {
   const vm = new Vm({ renderer: null, audio: null });
   vm.load(build(source) as never);
@@ -254,6 +230,5 @@ end`,
   landed!();
   await new Promise((done) => setTimeout(done, 0));
   vm.tick();
-  // 엔트리의 '변수 정하기' 는 값을 글자로 담으므로 숫자로 맞춰서 봅니다.
   assert.equal(Number(valueOf(vm, '@횟수')), 1);
 });

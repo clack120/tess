@@ -1,16 +1,8 @@
-/**
- * @fileoverview 엔트리 블록이 값을 다루는 방식(형 변환·10진 산술)을 그대로 옮긴 모듈입니다.
- *
- * 엔트리는 값 슬롯에서 읽은 값을 `Entry.Scope.getNumberValue` 등으로 변환하고,
- * 사칙연산은 BigNumber(10진)로 계산합니다. 이 파일은 그 규칙을 재현하되
- * 대부분의 입력에서 배정밀도 연산만으로 같은 결과가 나오는 빠른 경로를 함께 둡니다.
- */
+// Match Entry's conversions and decimal arithmetic while keeping fast paths for ordinary doubles.
 
-/** `Entry.Scope.getNumberValue` — parseFloat, then 0 for anything unparseable. */
+// Match Entry number slots: parseFloat, then zero if parsing fails.
 export function num(value: unknown): number {
-  // `parseFloat` takes a string, so a number goes out to text and back for
-  // nothing. Its shortest form parses to the same double, `NaN` and `-0` fall
-  // to 0 either way, and the infinities survive both routes.
+  // Skip string conversion for numbers, but retain Entry's zero fallback for NaN and negative zero.
   if (typeof value === 'number') {
     return value || 0;
   }
@@ -18,15 +10,11 @@ export function num(value: unknown): number {
   return n || 0;
 }
 
-/** `Entry.Scope.getStringValue`. */
 export function str(value: unknown): string {
   return String(value);
 }
 
-/**
- * `Entry.Scope.getBooleanValue` — returns a number when the value parses as one,
- * so `"0"` and `"0.00"` stay falsy while any other text is true.
- */
+// Numeric text keeps its numeric truthiness; other text is true.
 export function bool(value: unknown): boolean {
   if (value === undefined) {
     return false;
@@ -35,7 +23,6 @@ export function bool(value: unknown): boolean {
   return isNaN(n) ? true : Boolean(n);
 }
 
-/** `Entry.Scope.getNumberField` — dropdown/field text read as a number. */
 export function field(value: unknown): number {
   return Number(value);
 }
@@ -45,11 +32,7 @@ const DOT = 46;
 const ZERO = 48;
 const NINE = 57;
 
-/**
- * `Entry.Utils.isNumber` — decimal literals with an optional exponent, but no
- * leading dot. Every value a block
- * reads goes through here, and a regex match costs more than the walk does.
- */
+// Match Entry's numeric syntax without a leading dot; scan directly to avoid regex overhead.
 export function isNumber(value: unknown): boolean {
   if (typeof value === 'number') {
     return true;
@@ -94,33 +77,23 @@ export function isNumber(value: unknown): boolean {
   return at > exponentStart;
 }
 
-/** Decimals beyond this cannot be recovered by rounding, so plain doubles are used. */
+// Use plain doubles once decimal rounding cannot recover additional precision.
 const MAX_DECIMALS = 20;
 
-/** `10 ** -places`, indexed by places. */
 const TENTHS: number[] = Array.from({ length: MAX_DECIMALS + 1 }, (_, at) => 10 ** -at);
 
-/** Counted decimals stop here; `snap` treats anything this long as unroundable. */
+// Stop counting decimals once snap would leave the value unchanged.
 const DECIMAL_CAP = MAX_DECIMALS + 1;
 
-/** `10 ** places`, indexed by places. */
 const TENS: number[] = Array.from({ length: DECIMAL_CAP + 1 }, (_, at) => 10 ** at);
 
-/** Above this an integer no longer fits a double, so the product below is exact. */
+// Above this limit the decimal product no longer needs residual correction.
 const EXACT_LIMIT = 2 ** 53;
 
-/** `2 ** 27 + 1` — Dekker's splitting constant for a double. */
+// Dekker's double-splitting constant: 2 ** 27 + 1.
 const SPLIT = 134217729;
 
-/**
- * Whether `|x|` written with `places` decimals reads back as the same double,
- * which is the test `Number(x.toFixed(places)) === x` without the string.
- *
- * Past `EXACT_LIMIT` the decimal grid is finer than the gap between neighbouring
- * doubles, so some grid point always reads back as `x`. Below it the rounded
- * grid point is an integer a double holds exactly, and Dekker's product supplies
- * the bits `a * ten` drops so that the rounding picks the same one `toFixed` does.
- */
+// Test decimal round trips without strings; use a product residual below the exact-integer limit.
 function readsBack(a: number, places: number): boolean {
   const ten = TENS[places]!;
   const scaled = a * ten;
@@ -135,20 +108,15 @@ function readsBack(a: number, places: number): boolean {
   const lowTen = ten - highTen;
   const error = ((highA * highTen - scaled) + highA * lowTen + lowA * highTen) + lowA * lowTen;
   let rounded = Math.floor(scaled);
-  // `frac - 0.5` is exact wherever the decision is close, so the residual joins
-  // that difference rather than `frac`, which would absorb it.
+  // Add the residual to frac - 0.5 so rounding cannot absorb it into frac.
   if (scaled - rounded - 0.5 + error >= 0) {
     rounded += 1;
   }
   return rounded / ten === a;
 }
 
-/**
- * Digits after the decimal point in `|a|`, searched only below `limit`, which
- * the caller has already found the tail to fit inside.
- */
 export function decimalsBelow(a: number, limit: number): number {
-  // A shorter tail reads back at every longer one, so the shortest is a search.
+  // Find the shortest decimal tail by search because every longer tail also round-trips.
   let low = 1;
   let high = limit;
   while (low < high) {
@@ -162,11 +130,7 @@ export function decimalsBelow(a: number, limit: number): number {
   return low;
 }
 
-/**
- * The shortest tail `snap` could still round `a` onto. At and above it the
- * decimal grid is finer than the gap between neighbouring doubles, so rounding
- * a result onto that grid gives the result back unchanged.
- */
+// Beyond this tail, decimal grid spacing is finer than the gap between doubles.
 function gridWall(a: number): number {
   let low = 0;
   let high = DECIMAL_CAP;
@@ -181,12 +145,7 @@ function gridWall(a: number): number {
   return a * TENS[low]! >= EXACT_LIMIT ? low : DECIMAL_CAP + 1;
 }
 
-/**
- * The decimals of one operand, or `DECIMAL_CAP` once its tail reaches `wall` —
- * which is all a caller needs to know, since `snap` leaves the result alone
- * from there on. Reading the tail costs more than asking whether it is long
- * enough, and in a work built on trigonometry it nearly always is.
- */
+// Stop at the rounding limit because longer tails cannot change snap's result.
 function tailOf(x: number, wall: number): number {
   if (Number.isInteger(x)) {
     return 0;
@@ -196,11 +155,7 @@ function tailOf(x: number, wall: number): number {
   return readsBack(a, below) ? decimalsBelow(a, below) : DECIMAL_CAP;
 }
 
-/**
- * Digits after the decimal point in a number's shortest form, counted up to
- * `DECIMAL_CAP`. The kernel asks for these when it takes a table over, so that
- * the kernel never has to look for them again.
- */
+// Count table decimal tails once so the kernel can reuse them on every read.
 export function decimals(x: number): number {
   if (Number.isInteger(x)) {
     return 0;
@@ -208,11 +163,7 @@ export function decimals(x: number): number {
   return decimalsBelow(x < 0 ? -x : x, DECIMAL_CAP);
 }
 
-/**
- * `max(decimals(a), decimals(b))`, told only as far as `snap` can use it.
- * `ta`·`tb` carry a tail the caller already knows — a literal's, which the
- * kernel's compiler counted once — and -1 where it does not.
- */
+// Reuse known operand tails; -1 means the caller has not counted them.
 function maxTail(result: number, a: number, b: number, ta = -1, tb = -1): number {
   const magnitude = result < 0 ? -result : result;
   const wall = gridWall(magnitude);
@@ -230,7 +181,7 @@ function maxTail(result: number, a: number, b: number, ta = -1, tb = -1): number
   return left > right ? left : right;
 }
 
-/** `decimals(a) + decimals(b)`, told only as far as `snap` can use it. */
+// Stop summing decimal tails once snap cannot use any more precision.
 function sumTail(result: number, a: number, b: number, ta = -1, tb = -1): number {
   const magnitude = result < 0 ? -result : result;
   const wall = gridWall(magnitude);
@@ -248,11 +199,7 @@ function sumTail(result: number, a: number, b: number, ta = -1, tb = -1): number
   return left + right;
 }
 
-/**
- * The same three operations the kernel emits, taking the tails its compiler
- * already counted. `-1` means it did not, which is what the blocks outside the
- * kernel always pass.
- */
+// Reuse compile-time decimal tails in the kernel; -1 requests runtime counting.
 export function addNumWith(a: number, b: number, ta: number, tb: number): number {
   const r = a + b;
   if (Number.isInteger(a) && Number.isInteger(b)) {
@@ -277,34 +224,22 @@ export function mulNumWith(a: number, b: number, ta: number, tb: number): number
   return snap(r, sumTail(r, a, b, ta, tb));
 }
 
-/**
- * A strict lower bound on the gap between a double and its neighbour is
- * `|x| * Number.EPSILON / 2`; half of that again leaves room for the error the
- * `TENTHS` literals carry, so the test below never claims a gap that is not
- * there.
- */
+// Leave room for decimal-table error when bounding the gap between neighboring doubles.
 const SPACING = Number.EPSILON / 4;
 
-/**
- * Rounds a double sum/product back onto the decimal grid its operands imply,
- * matching `new BigNumber(a).plus(b).toNumber()` without decimal arithmetic.
- */
+// Snap sums and products to the operands' decimal grid to match BigNumber results.
 function snap(result: number, places: number): number {
   if (places === 0 || places > MAX_DECIMALS || !isFinite(result)) {
     return result;
   }
-  // Where neighbouring doubles are further apart than the grid asked for, that
-  // grid holds no value the result is not already on: rounding onto it and
-  // reading the number back lands on the same double. Trigonometry feeds most
-  // of the arithmetic in a 3D work and leaves nearly every operand here, so it
-  // is worth not formatting a string to find that out.
+  // Skip formatting when the decimal grid is finer than the spacing between doubles.
   if (Math.abs(result) * SPACING >= TENTHS[places]!) {
     return result;
   }
   return Number(result.toFixed(places));
 }
 
-/** `+` on numbers. Entry adds with BigNumber, so `0.1 + 0.2` is `0.3`. */
+// Match Entry's decimal addition so 0.1 + 0.2 is 0.3.
 export function addNum(a: number, b: number): number {
   const r = a + b;
   if (Number.isInteger(a) && Number.isInteger(b)) {
@@ -329,11 +264,7 @@ export function mulNum(a: number, b: number): number {
   return snap(r, sumTail(r, a, b));
 }
 
-/**
- * BigNumber divides to 20 decimal places (ROUND_HALF_UP) before `toNumber()`,
- * so quotients smaller than that grid lose their tail. Larger ones match the
- * double quotient exactly.
- */
+// BigNumber divides to 20 decimal places with half-up rounding before converting to a number.
 export function divNum(a: number, b: number): number {
   const r = a / b;
   if (r === 0 || !isFinite(r) || Math.abs(r) >= 1e-3) {
@@ -342,10 +273,7 @@ export function divNum(a: number, b: number): number {
   return Number(r.toFixed(MAX_DECIMALS));
 }
 
-/**
- * `calc_basic` PLUS — concatenates when either side is not a plain number,
- * adds in decimal when both are.
- */
+// PLUS concatenates unless both raw operands are numbers.
 export function calcPlus(left: unknown, right: unknown): number | string {
   const leftValue: unknown = isNumber(left) ? num(left) : left;
   const rightValue: unknown = isNumber(right) ? num(right) : right;
@@ -355,7 +283,7 @@ export function calcPlus(left: unknown, right: unknown): number | string {
   return (leftValue as string) + (rightValue as string);
 }
 
-/** `boolean_basic_operator` reads both sides as numbers when the text parses. */
+// Compare as numbers when Entry recognizes numeric text.
 function comparable(value: unknown): unknown {
   if (typeof value === 'string' && value.length) {
     const n = Number(value);
@@ -370,7 +298,7 @@ export function cmpEqual(a: unknown, b: unknown): boolean {
   return comparable(a) === comparable(b);
 }
 
-/** Entry uses loose `!=` here while `EQUAL` is strict — kept as is. */
+// Entry uses loose inequality here while equality stays strict.
 export function cmpNotEqual(a: unknown, b: unknown): boolean {
   // eslint-disable-next-line eqeqeq
   return comparable(a) != comparable(b);
@@ -392,7 +320,7 @@ export function cmpLessEqual(a: unknown, b: unknown): boolean {
   return (comparable(a) as number) <= (comparable(b) as number);
 }
 
-/** `boolean_and_or` — both sides are read before they are combined. */
+// Evaluate both and/or operands before combining them.
 export function andOf(a: unknown, b: unknown): boolean {
   return Boolean(a) && Boolean(b);
 }
@@ -401,7 +329,6 @@ export function orOf(a: unknown, b: unknown): boolean {
   return Boolean(a) || Boolean(b);
 }
 
-/** `Entry.adjustValueWithMaxMin`. */
 export function clamp(value: number, min: number, max: number): number {
   if (value > max) {
     return max;
@@ -412,10 +339,7 @@ export function clamp(value: number, min: number, max: number): number {
   return value;
 }
 
-/**
- * `Number.prototype.mod` that entryjs installs — decimal modulo whose result
- * carries the divisor's sign.
- */
+// Entry's decimal modulo keeps the divisor's sign.
 export function mod(value: number, divisor: number): number {
   const r = ((value % divisor) + divisor) % divisor;
   if (Number.isInteger(value) && Number.isInteger(divisor)) {
@@ -424,10 +348,7 @@ export function mod(value: number, divisor: number): number {
   return snap(r, maxTail(r, value, divisor));
 }
 
-/**
- * `Entry.parseNumber` — a number, or a numeric string, or `false`. Strings that
- * start with `0` come back as strings so `"007"` stays a name, not seven.
- */
+// Keep leading-zero numeric text as text so names such as 007 survive.
 export function parseNumber(value: unknown): number | string | false {
   if (typeof value === 'string') {
     if ((isNumber(value) && value[0] === '0') || (value[0] === '0' && value[1]?.toLowerCase() === 'x')) {
@@ -442,19 +363,12 @@ export function parseNumber(value: unknown): number | string | false {
   return false;
 }
 
-/** `Number(value.toFixed(places))` — how entry rounds the size it reports. */
+// Match Entry's reported size rounding with Number(value.toFixed(places)).
 export function fixed(value: number, places: number): number {
   return Number(value.toFixed(places));
 }
 
-/**
- * `Entry.hex2rgb` — the colour a work's value really means.
- *
- * Entry puts a `#` on the front, expands `#abc`, and takes **anything else it
- * cannot read as black**. A colour is never a reason to stop: works carry
- * strings like `#검정` or a hex that lost a digit, and entry draws those black
- * and carries on.
- */
+// Expand short hex and treat invalid colors as black, matching Entry.
 export function hexToRgb(value: unknown): { r: number; g: number; b: number } {
   const text = String(value ?? '');
   let hex = text[0] === '#' ? text : `#${text}`;
@@ -471,12 +385,10 @@ export function hexToRgb(value: unknown): { r: number; g: number; b: number } {
   };
 }
 
-/** `Entry.rgb2hex`. */
 export function rgbToHex(r: number, g: number, b: number): string {
   return `#${(((1 << 24) + (r << 16) + (g << 8) + b) >>> 0).toString(16).slice(1)}`;
 }
 
-/** The same value as `#rrggbb`, which is the only shape entry ever stores. */
 export function hexColor(value: unknown): string {
   const { r, g, b } = hexToRgb(value);
   return rgbToHex(r, g, b);

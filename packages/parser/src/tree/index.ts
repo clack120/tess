@@ -1,19 +1,11 @@
-/**
- * @fileoverview tree-sitter front end for whole programs.
- *
- * `initTreeSitter` loads the runtime and the Tess grammar once; after that,
- * `parseSource` reads Program sources through tree-sitter and falls back to
- * the Chevrotain parser for fragments and for anything tree-sitter flags as
- * an error, so error messages always come from Chevrotain.
- */
+// Fall back to Chevrotain for fragments and errors so diagnostics stay consistent.
 import type { ProgramNode } from '../ast.ts';
 import { plainTree, programFromTree } from './convert.ts';
 
-/** Where the two wasm files come from: a path, a URL, or the bytes. */
 export interface TreeSitterFiles {
-  /** `web-tree-sitter.wasm`; by default found next to the web-tree-sitter module. */
+  // Defaults to web-tree-sitter.wasm beside the runtime module.
   runtime?: string | URL | Uint8Array;
-  /** `tree-sitter-tess.wasm`; by default `packages/parser/tree-sitter/`. */
+  // Defaults to the repository's tree-sitter-tess.wasm.
   language?: string | URL | Uint8Array;
 }
 
@@ -27,14 +19,13 @@ interface Shared {
   loading: Promise<boolean> | null;
 }
 
-// `Parser.init` replaces the wasm module under every parser made before it, so
-// all copies of this module (bundlers can load it twice) share one load.
+// Share initialization because Parser.init replaces the WASM module used by existing parsers.
 const shared: Shared = ((globalThis as { [key: symbol]: Shared })[Symbol.for('@tess/parser/tree-sitter')] ??= {
   loaded: null,
   loading: null,
 });
 
-/** Loads tree-sitter; resolves false (and parsing stays on Chevrotain) when it cannot. */
+// Keep Chevrotain available if loading tree-sitter fails.
 export function initTreeSitter(files: TreeSitterFiles = {}): Promise<boolean> {
   shared.loading ??= load(files).then(
     (result) => {
@@ -70,12 +61,10 @@ function defaultLanguageFile(): string | URL {
   return url.protocol === 'file:' ? decodeURIComponent(url.pathname) : url;
 }
 
-/** Whether `initTreeSitter` has finished. */
 export function treeSitterReady(): boolean {
   return shared.loaded !== null;
 }
 
-/** The program's AST, or null when tree-sitter is not loaded or the source has errors. */
 export function parseProgramWithTree(source: string): ProgramNode | null {
   const { loaded } = shared;
   if (!loaded) return null;
@@ -83,8 +72,7 @@ export function parseProgramWithTree(source: string): ProgramNode | null {
   if (!tree) return null;
   try {
     if (tree.rootNode.hasError) return null;
-    // Cursors are deleted by hand: their GC finalizer frees whatever cursor the
-    // shared transfer buffer holds at that moment, corrupting the heap.
+    // Delete cursors explicitly; their finalizers can free the wrong shared cursor and corrupt the heap.
     const cursor = tree.walk();
     try {
       return programFromTree(plainTree(cursor, loaded.language), source);
@@ -92,7 +80,7 @@ export function parseProgramWithTree(source: string): ProgramNode | null {
       cursor.delete();
     }
   } catch {
-    // A tree the converter does not expect is left to Chevrotain.
+    // Let Chevrotain handle trees the converter does not recognize.
     return null;
   } finally {
     tree.delete();

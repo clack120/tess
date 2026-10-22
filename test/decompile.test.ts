@@ -1,9 +1,3 @@
-/**
- * 디컴파일(.ent -> Tess) 과정에서 use, useobject, usetext 예약어의 기본 동작을 검사합니다.
- * 
- * 오브젝트당 하나의 조각 파일(objects/이름.tess)을 생성하고, main.tess에는
- * useobject/usetext 참조 구문만 남도록 구성되는지 확인합니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,7 +7,6 @@ import { decompileProject, restoreTableRows } from '@tess/decompiler';
 import { compileProject } from '@tess/compiler';
 import type { RawEntity } from '@tess/decompiler';
 
-/** 되돌린 조각 파일의 내용 — 에셋은 바이트로 담긴다. */
 const utf8 = (data: Uint8Array) => new TextDecoder('utf-8').decode(data);
 
 test('initial values preserve leading zeroes, precision and boolean spelling', () => {
@@ -38,12 +31,6 @@ test('initial values preserve leading zeroes, precision and boolean spelling', (
 });
 
 
-/**
- * 최소한의 스크립트와 스프라이트 하나를 포함하는 project.json 데이터를 생성합니다.
- * 
- * @param sceneCount 생성할 장면(Scene)의 개수
- * @returns 생성된 기본 프로젝트 엔티티 데이터
- */
 function minimalProject(sceneCount = 1): RawEntity {
   const startHat = () => ({ type: 'when_run_button_click', params: [null], statements: [] });
   const waitOneSecond = () => ({
@@ -98,8 +85,6 @@ test('되돌리기는 기본적으로 오브젝트마다 objects/이름.tess 조
   const project = minimalProject(1);
   const result = decompileProject(project, []);
 
-  // main.tess 에는 오브젝트를 인라인으로 감싸는 object/text 선언이 아니라
-  // useobject/usetext 한 줄만 있어야 한다.
   assert.match(result.source, /useobject "objects\/주인공\.tess"/);
   assert.match(result.source, /usetext "objects\/점수판\.tess"/);
   assert.doesNotMatch(result.source, /object "주인공"/);
@@ -108,11 +93,10 @@ test('되돌리기는 기본적으로 오브젝트마다 objects/이름.tess 조
   const fragmentPaths = result.assets.map((a) => a.path).sort();
   assert.deepEqual(fragmentPaths, ['objects/점수판.tess', 'objects/주인공.tess']);
 
-  // 조각 파일 자체는 object/text 로 감싸지 않은 내용만 담는다 (들여쓰기 0에서 시작)
   const heroFragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.tess')!.data);
   assert.doesNotMatch(heroFragment, /^object /m);
   assert.match(heroFragment, /^when start do$/m);
-  assert.match(heroFragment, /^ {2}wait 1$/m); // when 본문은 한 단 들여쓴다
+  assert.match(heroFragment, /^ {2}wait 1$/m);
 });
 
 test('장면이 여러 개면 objects/장면이름/이름.tess 로 장면마다 폴더를 나눈다', () => {
@@ -148,12 +132,6 @@ test('되돌린 결과(main.tess + 조각 파일)는 다시 정상적으로 컴�
   );
 });
 
-/**
- * 모양/소리 ID의 명시적 하드코딩 패턴 복원 테스트
- * 
- * 원본 프로젝트에서 모양이나 소리 참조 시 고유 ID 문자열을 직접 사용한 경우, 
- * 디컴파일 시 재컴파일 후에도 올바른 리소스를 가리킬 수 있도록 이름 기반 참조로 변환되는지 검증합니다.
- */
 function trickProject() {
   const startHat = () => ({ type: 'when_run_button_click', params: [null], statements: [] });
   const literal = (value: any) => ({ type: 'text', params: [value] });
@@ -186,22 +164,17 @@ function trickProject() {
       },
       script: JSON.stringify([[
         startHat(),
-        // 트릭: 목록에서 고른 게 아니라(get_pictures/get_sounds 블록이 아니라)
-        // 리터럴 문자열로 진짜 엔트리 id 를 직접 박아 넣었다.
+        // Use literal resource IDs rather than dropdown blocks to exercise hardcoded references.
         { type: 'sound_something_with_block', params: [literal('xk9q'), null], statements: [] },
         { type: 'change_to_some_shape', params: [literal('0cdd'), null], statements: [] },
-        // 숫자를 직접 적어 넣는 건 "n번째 모양으로 바꾸기" 이지, id 트릭이 아니다.
+        // Numeric resource values are indices, not hardcoded IDs.
         { type: 'change_to_some_shape', params: [{ type: 'number', params: ['2'] }, null], statements: [] },
       ]]),
     }],
   };
 }
 
-/**
- * 엔트리는 매개변수 블록을 도는 함수의 `paramMap` 에서 찾으므로, 다른 함수의
- * 매개변수 블록은 그 자리에서 아무 값도 찾지 못합니다. 이름으로 되돌리면 그 함수에
- * 없는 이름이 되어 그 문장이 통째로 사라집니다.
- */
+// Another function's parameter is absent from Entry's running paramMap and reads as empty.
 test('슬라이드 변수는 범위째로 되돌아오고 다시 컴파일해도 슬라이드다', () => {
   const project = minimalProject() as unknown as Record<string, unknown>;
   project.variables = [
@@ -231,7 +204,6 @@ test('다른 함수의 매개변수를 가리키는 블록은 이름이 아니�
       id: 'aaaa',
       content: JSON.stringify([[
         { type: 'function_create_value', params: [header('mine', 'stringParam_own'), null, null,
-          // The body reaches for `stringParam_other`, which belongs to `yours`.
           { type: 'stringParam_other', params: [] }], statements: [[]] },
       ]]),
     },
@@ -262,7 +234,6 @@ test('모양/소리 값에 진짜 엔트리 id 를 그대로 박아 넣은 트�
 
   assert.match(fragment, /^ {2}play sound "효과음"$/m);
   assert.match(fragment, /^ {2}costume = "점프"$/m);
-  // "n번째 모양으로 바꾸기" 는 리터럴 id 와 안 겹치니 그냥 숫자로 남는다
   assert.match(fragment, /^ {2}costume = 2$/m);
   assert.doesNotMatch(fragment, /xk9q/);
   assert.doesNotMatch(fragment, /0cdd/);
@@ -284,13 +255,6 @@ test('되돌린 트릭 코드도 다시 정상적으로 컴파일된다', () => 
   assert.deepEqual(recompiled.errors, [], recompiled.errors.map((e) => e.message).join('\n'));
 });
 
-/**
- * n번째 리소스 참조 인덱스의 타입 복원 테스트
- * 
- * 엔트리 시스템 내부에서 리소스 참조 시 혼용될 수 있는 순번(인덱스) 값들의 다양한 형태입니다.
- * 존재하더라도, 
- * 디컴파일 시 일관되게 숫자 타입으로 변환되는지 검증합니다.
- */
 const NUMBER_VALUES = [
   ['number 블록', (value: any) => ({ type: 'number', params: [value] })],
   ['text 블록', (value: any) => ({ type: 'text', params: [value] })],
@@ -368,7 +332,7 @@ for (const [label, numberValue] of NUMBER_VALUES) {
   });
 }
 
-// 다시 적으면 글자가 달라지는 숫자는 이름으로 찾을 때 어긋날 수 있어서 문자열로 둔다.
+// Keep numeric-looking text unchanged when conversion would alter its spelling.
 test('"01" 처럼 다시 적으면 달라지는 값은 숫자로 바꾸지 않는다', () => {
   const result = decompileProject(nthResourceProject(() => ({ type: 'text', params: ['01'] })), []);
   const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.tess')!.data);
@@ -376,11 +340,6 @@ test('"01" 처럼 다시 적으면 달라지는 값은 숫자로 바꾸지 않�
   assert.match(fragment, /^ {2}costume = "01"$/m);
 });
 
-/**
- * coordinate_object 내장 변수의 picture_index 및 picture_name 디컴파일 테스트
- * 
- * 해당 속성들이 자리표시자로 깨지지 않고 올바르게 복원되는지 검증합니다.
- */
 test('coordinate_object 의 모양 번호·모양 이름도 자리표시자 없이 되돌아온다', () => {
   const source = `
 scene "s":
@@ -411,21 +370,13 @@ end`;
   assert.match(fragment, /^ {2}내번호 = costume_number$/m);
 });
 
-/**
- * 함수 내 특정 오브젝트 리소스 ID 하드코딩 패턴 복원 테스트
- * 
- * 함수 내에서 단일 오브젝트의 리소스만 수정하는 경우, 해당 오브젝트 내부의 로컬 함수로 
- * 디컴파일하여 참조 안전성을 확보합니다. 반면 여러 오브젝트의 리소스를 수정할 경우 
- * 전역 함수로 유지하고 force id 문법을 사용합니다.
- */
-// 모양 자리에 id 가 들어가는 두 가지 모습 — 손으로 박아 넣은 문자열(text 블록)과,
-// 편집기 드롭다운으로 고른 get_pictures 블록. 함수 안에서는 둘 다 똑같이 다뤄야 한다.
+// Exercise both literal IDs and dropdown IDs inside functions.
 const SHAPE_VALUES = [
   ['손으로 박아 넣은 id', (value: any) => ({ type: 'text', params: [value] })],
   ['드롭다운으로 고른 모양', (value: any) => ({ type: 'get_pictures', params: [value] })],
 ];
 
-/** `shared: true` 면 함수가 두 번째 오브젝트의 모양도 건드린다 */
+// A shared function also references the second object's costume.
 function hardcodedFunctionProject(shapeValue: any, { shared = false } = {}) {
   const startHat = () => ({ type: 'when_run_button_click', params: [null], statements: [] });
   const sprite = (id: string, name: string, pictures: any) => ({
@@ -460,14 +411,12 @@ function hardcodedFunctionProject(shapeValue: any, { shared = false } = {}) {
       content: JSON.stringify([[{
         type: 'function_create',
         params: [{ type: 'function_field_label', params: ['점프하기', null] }],
-        // "점프" 모양 이름이 아니라, 그 모양의 진짜 엔트리 id 를 가리킨다.
         statements: [body],
       }]]),
     }],
   };
 }
 
-/** 되돌린 결과를 임시 폴더에 풀고 다시 컴파일한다 */
 function recompileResult(result: any, prefix: any) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const mainFile = path.join(dir, 'main.tess');
@@ -485,14 +434,13 @@ for (const [label, shapeValue] of SHAPE_VALUES) {
     const result = decompileProject(hardcodedFunctionProject(shapeValue), []);
     assert.deepEqual(result.warnings, []);
 
-    // main.tess 에는 더 이상 함수 선언이 없다
     assert.doesNotMatch(result.source, /^function /m);
 
     const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.tess')!.data);
     assert.match(fragment, /^function 점프하기\(\):$/m);
-    assert.match(fragment, /^ {2}costume = "점프"$/m); // id 가 아니라 이름으로
-    assert.doesNotMatch(fragment, /qio1/); // force id 도, 박아 넣은 id 도 사라진다
-    // 함수는 이벤트 블록 뒤, 조각 파일 맨 끝에 온다
+    assert.match(fragment, /^ {2}costume = "점프"$/m);
+    assert.doesNotMatch(fragment, /qio1/);
+
     assert.ok(fragment.indexOf('when start do') < fragment.indexOf('function 점프하기'));
   });
 
@@ -514,7 +462,7 @@ for (const [label, shapeValue] of SHAPE_VALUES) {
     assert.deepEqual(result.warnings, []);
 
     assert.match(result.source, /^function 점프하기\(\):$/m);
-    assert.match(result.source, /^ {2}costume = "qio1"$/m); // 이름으로 바꾸면 어긋난다
+    assert.match(result.source, /^ {2}costume = "qio1"$/m); // A global function must keep IDs because resource names depend on the caller.
     assert.match(result.source, /^ {2}costume = "zzz1"$/m);
 
     const hero = utf8(result.assets.find((a) => a.path === 'objects/주인공.tess')!.data);
@@ -533,11 +481,11 @@ for (const [label, shapeValue] of SHAPE_VALUES) {
     assert.equal(hero!.sprite.pictures.find((p) => p.name === '점프')!.id, 'qio1');
 
     const block = JSON.parse(recompiled.project!.functions[0].content)[0][0].statements[0][0];
-    assert.equal(block.params[0], 'qio1'); // 함수를 누가 부르든 정확히 그 모양을 가리킨다
+    assert.equal(block.params[0], 'qio1');
   });
 }
 
-// 리소스를 아예 안 건드리는 함수는 어느 오브젝트 것도 아니므로 전역에 남는다.
+// A function without resource references has no object owner and stays global.
 test('모양·소리를 안 쓰는 함수는 전역에 그대로 둔다', () => {
   const project = hardcodedFunctionProject((value: any) => ({ type: 'text', params: [value] }));
   project.functions[0].content = JSON.stringify([[{
@@ -552,12 +500,6 @@ test('모양·소리를 안 쓰는 함수는 전역에 그대로 둔다', () => 
   assert.doesNotMatch(fragment, /^function /m);
 });
 
-/**
- * 엔트리 기본 오브젝트 리소스(모양 및 소리) 디컴파일 테스트
- * 
- * 기본 리소스는 .ent 파일 내에 존재하지 않으므로, 경로를 그대로 사용하지 않고
- * 설치된 entryjs 내부에서 해당 리소스를 직접 추출하여 프로젝트 assets/ 에 포함시키는지 확인합니다.
- */
 function builtinObjectProject() {
   const media = (file: string) => `./bower_components/entry-js/images/media/${file}`;
   return {
@@ -592,13 +534,11 @@ test('엔트리 기본 오브젝트의 모양·소리는 entryjs 에서 꺼내 �
   const result = decompileProject(builtinObjectProject(), []);
   const fragment = utf8(result.assets.find((a) => a.path === 'objects/엔트리봇.tess')!.data);
 
-  // bower_components 경로가 소스에 새어 나오면 안 된다 — 그런 파일은 어디에도 없다
+  // Never emit unavailable bower_components paths into the source.
   assert.doesNotMatch(fragment, /bower_components/);
-  // 파일을 실제로 담았으니 그림 크기는 적지 않는다 — 컴파일러가 그림을 열어 재고,
-  // 사람이 그림을 바꿔 넣을 때 숫자까지 같이 고치지 않아도 된다.
+  // Let the compiler measure real image files so replacing an image does not require editing its size.
   assert.match(fragment, /^default costume 엔트리봇_걷기1 "assets\/image\/엔트리봇_엔트리봇_걷기1\.svg"$/m);
   assert.match(fragment, /^costume 엔트리봇_걷기2 "assets\/image\/엔트리봇_엔트리봇_걷기2\.svg"$/m);
-  // 소리 길이는 반대로 늘 적는다 — 아래 '소리 길이는 원본 값을 늘 적는다' 참고.
   assert.match(fragment, /^sound 강아지_짖는_소리 "assets\/sound\/엔트리봇_강아지_짖는_소리\.mp3" for 1\.3 as "강아지 짖는 소리"$/m);
 
   for (const relative of ['assets/image/엔트리봇_엔트리봇_걷기1.svg', 'assets/image/엔트리봇_엔트리봇_걷기2.svg', 'assets/sound/엔트리봇_강아지_짖는_소리.mp3']) {
@@ -624,19 +564,13 @@ test('되돌린 기본 오브젝트를 다시 컴파일하면 그림 파일에�
   assert.deepEqual(recompiled.errors, [], recompiled.errors.map((e) => e.message).join('\n'));
 
   const sprite = recompiled.project!.objects[0].sprite;
-  // 엔트리는 렌더링 크기를 dimension 값 그대로 믿는다 — 파일을 못 찾아 100x100 으로
-  // 뭉개지면 안 된다. entrybot1/2.svg 의 viewBox 가 그대로 잡혀야 한다.
   assert.deepEqual(sprite.pictures[0].dimension, { width: 144, height: 246 });
   assert.deepEqual(sprite.pictures[1].dimension, { width: 144, height: 246 });
-  // 그림 파일이 진짜로 작품에 딸려 나가야 한다(bower_components 경로일 땐 하나도 없었다)
   assert.equal(recompiled.assets.length, 3);
 });
 
 test('모양 없이 만든 "새 오브젝트"의 _1x1.png 도 꺼내 오고, 선언된 크기를 그대로 지킨다', () => {
-  // 엔트리는 그림을 실제로 재 보지 않고 project.json 의 dimension 을 그대로 믿는다 —
-  // 1×1 픽셀짜리 _1x1.png 를 960×540 으로 쓰는 이 오브젝트가 딱 그 경우다. 되돌린
-  // 소스에서 `size` 를 빼면 다시 컴파일할 때 1×1 로 뭉개져 화면에서 사라진다.
-  // (bower_components 밑 폴더 이름은 엔트리 버전에 따라 entry-js 이기도 entryjs 이기도 하다.)
+  // The blank 1x1 asset must retain saved dimensions or recompilation shrinks the object to one pixel.
   const project = builtinObjectProject();
   project.objects[0].name = '새 오브젝트';
   project.objects[0].sprite.pictures = [{
@@ -667,12 +601,6 @@ test('모양 없이 만든 "새 오브젝트"의 _1x1.png 도 꺼내 오고, 선
   assert.deepEqual(recompiled.project!.objects[0].sprite.pictures[0].dimension, { width: 960, height: 540 });
 });
 
-/**
- * 다중 라벨 및 판단(boolean) 매개변수를 포함하는 복합 함수 정의부 복원 테스트
- * 
- * 매개변수와 라벨이 섞여 있는 경우에도 매개변수를 유실 없이 파싱하여 
- * 디컴파일 시 유효한 참조명으로 유지하는지 검증합니다.
- */
 const fieldLabel = (text: string, next: any) => ({ type: 'function_field_label', params: [text, next] });
 const fieldString = (id: string, next: any) => ({
   type: 'function_field_string', params: [{ type: `stringParam_${id}`, params: [] }, next],
@@ -681,7 +609,6 @@ const fieldBoolean = (id: string, next: any) => ({
   type: 'function_field_boolean', params: [{ type: `booleanParam_${id}`, params: [null] }, next],
 });
 
-/** 머리 사슬 하나짜리 프로젝트. body 는 함수 본문 블록들 */
 function functionHeadProject(field: any, body: any[] = []): RawEntity {
   return {
     name: '함수 머리 테스트',
@@ -702,20 +629,16 @@ const declarationOf = (field: any, body?: any[]) => decompileProject(functionHea
   .source.match(/^function .*/m)![0];
 
 test('함수 머리의 라벨·판단 칸을 지나서 매개변수를 끝까지 읽는다', () => {
-  // 라벨-인수-인수: 맨 앞 라벨만 함수 이름, 인수는 자동 이름
   assert.equal(declarationOf(fieldLabel('스폰', fieldString('p1', fieldString('p2', null)))),
     'function 스폰(a, b):');
 
-  // 라벨-인수-라벨-인수: 중간 라벨은 바로 뒤 인수의 이름이 된다
   assert.equal(declarationOf(fieldLabel('스폰', fieldString('p1', fieldLabel('체력', fieldString('p2', null))))),
     'function 스폰(a, 체력):');
 
-  // 라벨-인수-라벨: 뒤에 인수가 없는 라벨은 담을 자리가 없다
   assert.equal(declarationOf(fieldLabel('스폰', fieldString('p1', fieldLabel('체력', null)))),
     'function 스폰(a):');
 
-  // 판단 칸도 매개변수다 — 여기서 멈추면 뒤가 통째로 사라졌다
-  // 판단 칸은 `이름?` 으로 적어서 다시 컴파일해도 판단 칸으로 남는다
+  // Keep boolean parameter slots and every parameter following them.
   assert.equal(
     declarationOf(fieldLabel('스폰', fieldBoolean('b1', fieldString('p2', fieldLabel('이름', fieldString('p3', null)))))),
     'function 스폰(a?, b, 이름):',
@@ -725,7 +648,7 @@ test('함수 머리의 라벨·판단 칸을 지나서 매개변수를 끝까지
 test('자동 이름은 알파벳을 다 쓰면 a1, a2 로 이어진다', () => {
   const field = fieldLabel('많이', Array.from({ length: 28 })
     .reduceRight((next, _, i) => fieldString(`p${i}`, next), null));
-  // x·y 는 좌표를 뜻하는 내장 이름이라 자동 이름에서 빠진다
+  // Skip coordinate names x and y when assigning automatic parameter names.
   assert.match(declarationOf(field), /, v, w, z, a1, a2, a3, a4\):$/);
 });
 
@@ -741,7 +664,7 @@ test('함수 본문의 매개변수 블록은 이름으로 되짚는다', () => 
     statements: [[]],
   }];
   const result = decompileProject(functionHeadProject(field, body), []);
-  assert.deepEqual(result.warnings, []); // 자리표시자가 하나도 남으면 안 된다
+  assert.deepEqual(result.warnings, []);
   assert.match(result.source, /^ {2}say a$/m);
   assert.match(result.source, /^ {2}if 체력:$/m);
 });
@@ -776,17 +699,13 @@ test('(<판단>의 값) 블록은 boolean_value 로 옮긴다', () => {
 });
 
 test('when 본문은 한 단 들여쓰고, 선언 뭉치 뒤에는 두 줄을 띄운다', () => {
-  // 조각 파일에서는 when 헤더가 0단이라, 예전 들여쓰기 계산(헤더와 같은 단)은
-  // 본문을 아예 안 들여썼다 — 되돌린 소스가 사람이 짠 것처럼 보이지 않았다.
   const result = decompileProject(minimalProject(1), []);
   const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.tess')!.data);
   assert.equal(fragment, 'x = 10\n\n\nwhen start do\n  wait 1\nend\n');
 });
 
 test('파일을 담은 모양은 크기를 적지 않고, 1×1 빈 그림만 예외다', () => {
-  // 크기를 늘 적어 두면 그림을 바꿔 넣을 때마다 사람이 숫자까지 고쳐야 한다 —
-  // 컴파일러가 파일을 열어 재 주므로 적지 않는 게 기본이다. 다만 "모양 없이 만든
-  // 새 오브젝트"의 _1x1.png 는 파일에서 잰 1×1 이 진짜 크기가 아니라 예외다.
+  // Omit measurable image sizes except for Entry's special 1x1 blank costume.
   const project = builtinObjectProject();
   project.objects[0].sprite.pictures.push({
     id: 'p1x1',
@@ -803,24 +722,15 @@ test('파일을 담은 모양은 크기를 적지 않고, 1×1 빈 그림만 예
   assert.match(fragment, /^costume 새그림 "assets\/image\/엔트리봇_새그림\.png" size 960 540$/m);
 });
 
-// 사람이 고칠 소스에는 숫자를 안 적는 게 기본이지만, 원본 dimension 을 그대로 남겨
-// 두고 싶을 때(그림 파일을 못 구했거나, 원본과 픽셀 하나까지 맞춰야 할 때)가 있다.
 test('sizes 옵션을 켜면 모든 모양에 size 가로 세로 를 적는다', () => {
   const result = decompileProject(builtinObjectProject(), [], { sizes: true });
   const fragment = utf8(result.assets.find((a) => a.path === 'objects/엔트리봇.tess')!.data);
 
   assert.match(fragment, /^default costume 엔트리봇_걷기1 "assets\/image\/엔트리봇_엔트리봇_걷기1\.svg" size 144 246$/m);
   assert.match(fragment, /^costume 엔트리봇_걷기2 "assets\/image\/엔트리봇_엔트리봇_걷기2\.svg" size 144 246$/m);
-  // 소리 길이는 이 옵션과 상관없다 — 원본 값을 늘 적기 때문이다
   assert.match(fragment, /^sound 강아지_짖는_소리 "assets\/sound\/엔트리봇_강아지_짖는_소리\.mp3" for 1\.3 as "강아지 짖는 소리"$/m);
 });
 
-/**
- * 텍스트 박스 크기 강제 명시(디컴파일) 규칙 테스트
- * 
- * 줄바꿈 글상자의 경우 렌더링에 의한 크기와 글자수 추정 크기의 오차가 크므로,
- * 디컴파일 시 항상 실제 'size 가로 세로' 속성을 소스 코드에 명시하도록 처리합니다.
- */
 function textBoxProject(entityExtra: RawEntity = {}): RawEntity {
   return {
     name: '글상자 크기 테스트',
@@ -876,14 +786,7 @@ test('되돌린 글상자를 다시 컴파일하면 원본 틀 크기가 그대�
   assert.equal(entity.lineBreak, true);
 });
 
-// ---------------------------------------------------------------------------
-//  숫자를 문자열로 옮기던 문제
-//
-//  엔트리의 number 블록과 text 블록은 둘 다 "적어 둔 글자를 그대로 돌려주는" 같은
-//  원시 블록이라(block_entry.js), 사람이 어느 칸에 입력했느냐만 다르고 실행 결과는
-//  똑같다. 그런데 되돌리기가 text 블록을 무조건 문자열로 옮겨서, 판단문 안이나
-//  계산식 안이나 함수 인수의 숫자가 `"45"` 처럼 따옴표를 뒤집어쓰고 나왔다.
-// ---------------------------------------------------------------------------
+// Entry number and text blocks both return their stored text; only canonical numbers can become literals.
 function numberShapeProject() {
   const startHat = () => ({ type: 'when_run_button_click', params: [null], statements: [] });
   const text = (value: any) => ({ type: 'text', params: [value] });
@@ -915,15 +818,10 @@ function numberShapeProject() {
       },
       script: JSON.stringify([[
         startHat(),
-        // 판단값 안의 숫자
         { type: '_if', params: [compare({ type: 'get_variable', params: ['v1'] }, 'EQUAL', text('14'))], statements: [[]] },
-        // 괄호로 감싼 계산식 안의 숫자
         { type: 'set_variable', params: ['v1', calc(text('3'), 'MULTI', calc(text('2'), 'PLUS', number('5')))], statements: [] },
-        // 함수 인수
         { type: 'func_fn1', params: [text('7'), null], statements: [] },
-        // 리스트 순번
         { type: 'remove_value_from_list', params: [text('3'), 'l1', null], statements: [] },
-        // 다시 적으면 글자가 달라지는 값은 그대로 글자로 둔다
         { type: 'dialog', params: [text('007'), 'speak', null], statements: [] },
       ]]),
     }],
@@ -945,13 +843,12 @@ test('판단값 · 계산식 · 함수 인수 · 순번 안의 숫자는 숫자�
   const result = decompileProject(numberShapeProject(), []);
   const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.tess')!.data);
 
-  assert.match(fragment, /^ {2}if \(단계 == 14\):$/m);                 // 판단값
-  assert.match(fragment, /^ {2}단계 = \(3 \* \(2 \+ 5\)\)$/m);         // 괄호 친 계산식
-  assert.match(fragment, /^ {2}더하기\(7\)$/m);                        // 함수 인수
-  assert.match(fragment, /^ {2}remove 기록\[3\]$/m);                  // 순번은 엔트리와 같은 1부터라 그대로 옮긴다
+  assert.match(fragment, /^ {2}if \(단계 == 14\):$/m);
+  assert.match(fragment, /^ {2}단계 = \(3 \* \(2 \+ 5\)\)$/m);
+  assert.match(fragment, /^ {2}더하기\(7\)$/m);
+  assert.match(fragment, /^ {2}remove 기록\[3\]$/m);
   assert.doesNotMatch(fragment, /"14"|"2"|"7"/);
 
-  // 다시 적으면 달라지는 값은 글자 그대로 둔다
   assert.match(fragment, /^ {2}say "007"$/m);
 });
 
@@ -962,20 +859,13 @@ test('숫자로 되돌린 코드는 다시 컴파일해도 값이 그대로다',
 
   const thread = JSON.parse(recompiled.project!.objects[0].script)[0];
   const condition = thread.find((b: any) => b.type === '_if').params[0];
-  // number 블록이든 text 블록이든 엔트리는 적어 둔 글자를 그대로 돌려준다 — 값이 같아야 한다
   assert.equal(condition.params[2].params[0], '14');
   const assign = thread.find((b: any) => b.type === 'set_variable').params[1];
   assert.equal(assign.params[0].params[0], '3');
   assert.equal(assign.params[2].params[0].params[0], '2');
 });
 
-// ---------------------------------------------------------------------------
-//  지수 표기 숫자
-//
-//  Tess 의 숫자 리터럴은 `digit+ ("." digit+)?` 뿐이라 `1e-10` 을 읽지 못한다.
-//  자바스크립트 Number 로는 그대로 돌아오는 값이라, 예전엔 숫자 그대로 적어 두고
-//  되돌린 소스가 컴파일되지 않았다.
-// ---------------------------------------------------------------------------
+// Exponent text must remain quoted because Tess has no exponent literal syntax.
 function exponentProject(entityX: number) {
   const startHat = () => ({ type: 'when_run_button_click', params: [null], statements: [] });
   const text = (value: any) => ({ type: 'text', params: [value] });
@@ -1018,7 +908,6 @@ test('지수 표기 값은 글자 그대로 두고 되돌린 소스는 다시 �
   const recompiled = recompileResult(result, 'tess-decompile-exponent-');
   assert.deepEqual(recompiled.errors, [], recompiled.errors.map((e: any) => e.message).join('\n'));
 
-  // 엔트리는 number 블록과 text 블록 모두 적어 둔 글자를 그대로 돌려준다 — 값이 같아야 한다
   const thread = JSON.parse(recompiled.project!.objects[0].script)[0];
   const assign = thread.find((b: any) => b.type === 'set_variable').params[1];
   assert.equal(assign.params[0].params[0], '1.6059043836821613e-10');
@@ -1035,8 +924,6 @@ test('지수 표기로 적히는 수는 소수점 표기로 펴서 적는다', (
   assert.equal(recompiled.project!.objects[0].entity.x, 1e-7);
 });
 
-// 소리 길이(get_sound_duration)와 색 고르기 칸(text_color)은 예전엔 자리표시자로
-// 남아서 되돌린 소스가 컴파일되지 않았다.
 test('소리 길이와 색 고르기 칸을 되돌리고 다시 컴파일한다', () => {
   const project = {
     name: 't',
@@ -1081,14 +968,11 @@ test('소리 길이와 색 고르기 칸을 되돌리고 다시 컴파일한다'
   const thread = JSON.parse(recompiled.project!.objects[0].script)[0];
   const duration = thread.find((b: any) => b.type === 'set_variable').params[1];
   assert.equal(duration.type, 'get_sound_duration');
-  // 소리 id 는 다시 배정되지만 그 소리를 그대로 가리켜야 한다
   assert.equal(duration.params[1], recompiled.project!.objects[0].sprite.sounds[0].id);
   assert.equal(thread.find((b: any) => b.type === 'text_change_font_color').params[0], '#16d8a3');
 });
 
-// get_sound_speed 에 대응하는 자리가 없어서 자리표시자로 남았고, 그 자리표시자가
-// 산술식에 섞이면(엔트리 재생 속도 값이 필요한 대기 조건 등) NaN 이 되어 다시는
-// 참이 되지 않는 wait 로 굳어 버렸다 — 글자 하나씩 찍는 효과가 첫 글자에서 멈추던 원인.
+// A missing sound-speed value can turn a wait condition into one that never succeeds.
 test('sound_speed 를 되돌리고 다시 컴파일한다', () => {
   const project = minimalProject(1);
   project.variables.push({ id: 'v1', name: '속도', value: 0, object: null });
@@ -1109,8 +993,7 @@ test('sound_speed 를 되돌리고 다시 컴파일한다', () => {
   assert.equal(thread.find((b: any) => b.type === 'set_variable').params[1].type, 'get_sound_speed');
 });
 
-// 이름 맨 앞의 숫자를 지워 버리면 "1.png"·"2.png"·"3.png" 가 죄다 같은 이름이 된 뒤
-// 뒤에 번호가 붙어서, 원본과 짝이 어긋난 채로 되돌아왔다.
+// Preserve leading digits when renaming resources so numbered costumes do not collapse to one name.
 test('숫자로 시작하는 모양 이름도 숫자를 잃지 않는다', () => {
   const picture = (id: string, name: string) => ({ id, name, fileurl: null, dimension: { width: 10, height: 10 } });
   const project = {
@@ -1142,19 +1025,10 @@ test('숫자로 시작하는 모양 이름도 숫자를 잃지 않는다', () =>
   assert.match(fragment, /^default costume costume_3_png /m);
   assert.match(fragment, /^costume costume_1_png /m);
   assert.match(fragment, /^costume costume_2_png /m);
-  // 어느 모양을 가리키는지가 원본 그대로여야 한다 ("2.png")
   assert.match(fragment, /^ {2}costume = "costume_2_png"$/m);
 });
 
-// ---------------------------------------------------------------------------
-//  무게중심(중심점 · 엔트리 regX/regY)
-//
-//  오브젝트의 x/y 는 그림 가운데가 아니라 "중심점" 을 무대의 그 자리에 놓는다.
-//  엔트리는 오브젝트를 만들 때 이 점을 정하고 그 뒤로는 바꾸지 않으며, 기본값은
-//  모양 한가운데다. 사람이 이 점을 옮겨 두면 x/y 의 뜻 자체가 달라지므로, 안 옮기면
-//  오브젝트가 엉뚱한 데 놓인다 — right_leaning.ent 는 `go 0 0` 하나뿐인데도
-//  중심점 덕분에 엔트리봇이 무대 맨 왼쪽에 선다.
-// ---------------------------------------------------------------------------
+// Preserve moved registration points because they determine where stage coordinates place the drawing.
 function centerProject(regX: any, regY: any) {
   return {
     name: '중심점 테스트',
@@ -1201,7 +1075,6 @@ test('되돌린 중심점을 다시 컴파일하면 regX/regY 가 그대로 나�
   const { entity } = recompiled.project!.objects[0];
   assert.equal(entity.regX, 461.84);
   assert.equal(entity.regY, 116.7);
-  // 중심점을 안 적었을 때 나오던 기본값(모양 한가운데)이 아니어야 한다
   assert.notEqual(entity.regX, 72);
 });
 
@@ -1228,7 +1101,7 @@ test('판단 매개변수는 이름? 로 되돌아오고, 다시 컴파일해도
   const body = [{ type: '_if', params: [{ type: 'booleanParam_b1', params: [null] }], statements: [[]] }];
   const result = decompileProject(functionHeadProject(field, body), []);
   assert.match(result.source, /^function 스폰\(a, 살았나\?\):$/m);
-  assert.match(result.source, /^ {2}if 살았나:$/m); // 본문에서는 ? 없이 쓴다
+  assert.match(result.source, /^ {2}if 살았나:$/m);
 
   const recompiled = compileProject(result.source, { path: 'main.tess' });
   assert.deepEqual(recompiled.errors, [], recompiled.errors.map((e) => e.message).join('\n'));
@@ -1242,13 +1115,7 @@ test('판단 매개변수는 이름? 로 되돌아오고, 다시 컴파일해도
     ['label:스폰', 'function_field_string', 'label:살았나', 'function_field_boolean']);
 });
 
-// ---------------------------------------------------------------------------
-//  리소스 파일 이름 겹침 막기
-//
-//  모양·소리 이름은 오브젝트마다 따로 붙는다. 엔트리가 자동으로 붙여 주는 "새그림"
-//  같은 이름은 여러 오브젝트에 그대로 남아 있기 마련이라, 그 이름을 그대로 파일
-//  이름으로 쓰면 나중에 저장한 파일이 앞의 파일을 덮어써서 모양 하나만 남는다.
-// ---------------------------------------------------------------------------
+// Different objects can share resource names; filenames must not overwrite one another.
 function samePictureNameProject(sceneCount = 1) {
   const scenes = sceneCount === 1
     ? [{ id: 'scene1', name: '장면 1' }]
@@ -1263,7 +1130,6 @@ function samePictureNameProject(sceneCount = 1) {
     selectedPictureId: `${id}_pic`,
     entity: { x: 0, y: 0, scaleX: 1, scaleY: 1, visible: true },
     sprite: {
-      // 두 오브젝트가 똑같이 "새그림" 이라는 이름을 쓰지만 파일은 서로 다르다
       pictures: [{ id: `${id}_pic`, name: '새그림', imageType: 'png', fileurl, dimension: { width: 4, height: 4 } }],
       sounds: [{ id: `${id}_snd`, name: '소리', ext: '.mp3', duration: 1, fileurl: `${fileurl}.mp3` }],
     },
@@ -1285,7 +1151,7 @@ function samePictureNameProject(sceneCount = 1) {
   };
 }
 
-/** project.json 이 가리키는 fileurl 마다 내용이 다른 가짜 tar 항목 */
+// Give each referenced archive path distinct bytes to detect accidental overwrites.
 const fakeEntries = (project: any) => (project.objects ?? []).flatMap((object: any) => [
   ...(object.sprite.pictures ?? []).map((p: any) => ({ name: p.fileurl, data: Buffer.from(object.name + ' 그림') })),
   ...(object.sprite.sounds ?? []).map((s: any) => ({ name: s.fileurl, data: Buffer.from(object.name + ' 소리') })),
@@ -1298,13 +1164,11 @@ test('모양 이름이 겹쳐도 오브젝트 이름을 붙여서 파일이 안 
   const images = result.assets.filter((a) => a.path.startsWith('assets/image/')).map((a) => a.path);
   assert.deepEqual(images.sort(), ['assets/image/엔트리봇_새그림.png', 'assets/image/치로_새그림.png']);
 
-  // 두 파일의 내용이 실제로 서로 달라야 한다 (하나가 다른 하나를 덮어쓰지 않았다)
   const contents = result.assets
     .filter((a) => a.path.startsWith('assets/image/'))
     .map((a) => utf8(a.data));
   assert.equal(new Set(contents).size, 2);
 
-  // 각 오브젝트 조각 파일도 자기 파일을 가리켜야 한다
   const chiro = utf8(result.assets.find((a) => a.path === 'objects/치로.tess')!.data);
   assert.match(chiro, /"assets\/image\/치로_새그림\.png"/);
 });
@@ -1324,13 +1188,11 @@ test('장면이 여러 개면 리소스도 장면별 폴더로 나눈다', () =>
 
 test('여러 모양이 같은 파일을 쓰면 한 번만 저장한다', () => {
   const project = samePictureNameProject(1);
-  // 두 오브젝트가 똑같은 파일을 가리키게 바꾼다
   project.objects[1].sprite.pictures[0].fileurl = project.objects[0].sprite.pictures[0].fileurl;
   const result = decompileProject(project, fakeEntries(project));
 
   const images = result.assets.filter((a) => a.path.startsWith('assets/image/'));
   assert.equal(images.length, 1);
-  // 두 조각 파일 모두 그 하나를 가리킨다
   for (const name of ['치로', '엔트리봇']) {
     const fragment = utf8(result.assets.find((a) => a.path === `objects/${name}.tess`)!.data);
     assert.match(fragment, new RegExp(images[0].path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -1338,9 +1200,9 @@ test('여러 모양이 같은 파일을 쓰면 한 번만 저장한다', () => {
 });
 
 test('경로가 그래도 겹치면 뒤에 번호를 붙인다', () => {
-  // 오브젝트 이름은 겹치지 않게 정리되지만, 마지막 안전장치가 실제로 도는지 확인한다.
+  // Exercise filename collision handling even after object names are made unique.
   const project = samePictureNameProject(1);
-  project.objects[1].name = '치로'; // 같은 이름 -> safeIdentifier 가 치로_2 로 바꾼다
+  project.objects[1].name = '치로';
   const result = decompileProject(project, fakeEntries(project));
 
   const images = result.assets.filter((a) => a.path.startsWith('assets/image/')).map((a) => a.path);
@@ -1357,13 +1219,6 @@ test('숫자 모양의 유니코드 글자(¼·²)는 이름에서 _ 로 바뀌�
   assert.deepEqual(compiled.errors, []);
 });
 
-// --- 벡터 모양은 엔트리가 저장할 때 남긴 PNG 로 가져온다 ---------------------------
-//
-// 엔트리 벡터 그림판은 그림판 크기를 넘는 이미지도 모양으로 받아 주고, 사용자가 그것을
-// 옮겨서 맞춰 놓으면 저장할 때 그 화면을 PNG 로 캡처해 둔다. 그런데 SVG 쪽은 저장한
-// 뒤 다시 가운데로 옮겨 버려서, 맞춰 놓은 위치가 SVG 에는 남지 않는다.
-
-/** SVG 모양 하나짜리 project. `withPng` 면 엔트리가 같이 저장한 PNG 도 있는 것으로 친다 */
 function svgPictureProject(): RawEntity {
   const project = minimalProject(1);
   project.objects[0].sprite.pictures = [{
@@ -1409,10 +1264,6 @@ test('함께 저장한 PNG 가 없으면 SVG 를 그대로 가져온다', () => 
   assert.deepEqual(images.map((a) => a.path), ['assets/image/주인공_배경.svg']);
 });
 
-// ---------------------------------------------------------------------------
-//  함수 지역 변수
-// ---------------------------------------------------------------------------
-/** 지역 변수를 가진 함수 하나짜리 project.json. globals 로 전역 변수도 함께 둔다 */
 function funcLocalProject(
   localVariables: any[],
   body: any[],
@@ -1485,7 +1336,7 @@ test('지역 변수 이름이 내장 이름과 겹치면 내장 이름을 가리
   );
   const result = decompileProject(project, []);
 
-  // 지역 변수가 `x` 로 남으면 `x = x` 가 되어 오른쪽의 좌표까지 지역 변수를 가리킨다
+  // Rename the local x so it cannot hide the coordinate read on the assignment's right side.
   assert.match(result.source, /^ {2}var x_ as "x" = 0$/m);
   assert.match(result.source, /^ {2}x_ = x$/m);
 
@@ -1493,7 +1344,6 @@ test('지역 변수 이름이 내장 이름과 겹치면 내장 이름을 가리
   assert.deepEqual(recompiled.errors, []);
   const fn = recompiled.project!.functions[0];
   assert.deepEqual(fn.localVariables.map((v: any) => v.name), ['x']);
-  // 오른쪽의 `x` 는 지역 변수가 아니라 좌표 블록으로 돌아와야 한다
   const body = JSON.parse(fn.content as unknown as string)[0][0].statements[0];
   const assignment = body[body.length - 1];
   assert.equal(assignment.params[1].type, 'coordinate_object');
@@ -1524,8 +1374,7 @@ test('되돌린 지역 변수는 다시 컴파일해도 함수의 지역 변수�
 });
 
 test('함수 정의 앞에 주석 블록이 놓여 있어도 정의를 찾아낸다', () => {
-  // The workspace keeps one thread per stack, ordered by position; a comment
-  // parked above the definition comes first.
+  // A workspace comment above the function definition can be the first stack.
   const project = funcLocalProject(
     [{ name: '누적', value: 0, id: 'fn1_a' }],
     [setLocal('fn1_a', 3)],
@@ -1540,10 +1389,7 @@ test('함수 정의 앞에 주석 블록이 놓여 있어도 정의를 찾아낸
   assert.match(result.source, /^function 계산\(a\):\n {2}var 누적 = 0\n {2}누적 = 3\nend$/m);
 });
 
-// --- 이름 · 저장 범위 -----------------------------------------------------------
-// 엔트리 이름은 Tess 식별자로 못 적는 글자를 담을 수 있는데, "모양으로 바꾸기" 같은
-// 블록은 실행할 때 그 이름으로 모양을 찾는다. 이름을 식별자로 바꿔 버리면 그런 조회가
-// 전부 빗나가므로, 원래 이름을 `as` 로 남기고 다시 컴파일할 때 되돌려 놓아야 한다.
+// Preserve display names with as because Entry resolves resource names at runtime.
 function namedResourceProject() {
   const project = minimalProject();
   project.objects[0].sprite.pictures = [
@@ -1564,7 +1410,6 @@ function namedResourceProject() {
   return project;
 }
 
-/** 오브젝트 조각 파일 하나의 내용 */
 function fragmentOf(result: any, name = '주인공') {
   return utf8(result.assets.find((a: any) => a.path === `objects/${name}.tess`).data);
 }
@@ -1583,7 +1428,7 @@ test('as 로 남긴 이름은 다시 컴파일해도 그대로 붙는다', () =>
   const object = recompiled.project!.objects.find((o) => o.name === '주인공');
   assert.deepEqual(object!.sprite.pictures.map((p) => p.name), ['상호작용1*1']);
   assert.deepEqual(object!.sprite.sounds.map((s) => s.name), ['snd_select.mp3']);
-  // 이름이 하나뿐이라 두 철자가 같은 모양 하나를 가리켜야 한다 — 목록이 늘어나면 안 된다
+  // Two name aliases must still refer to one costume rather than duplicating it.
   assert.equal(object!.sprite.pictures.length, 1);
 });
 
@@ -1633,7 +1478,6 @@ test('작품에 없는 변수 id 를 가리키는 블록은 선언을 되살려�
   assert.deepEqual(recompiled.errors, []);
 });
 
-// --- 테이블 -------------------------------------------------------------------
 test('테이블 블록은 컴파일한 뒤 되돌려도 글자 하나까지 그대로다', () => {
   const body = [
     'in 점수표 add row',
@@ -1689,10 +1533,7 @@ end`;
   );
 });
 
-/**
- * 사이트에 저장된 작품의 표는 줄마다 `{ key, value }` — 줄 번호와 칸 — 로 담겨
- * 온다(storymaker.ent). 칸 배열만 있다고 보고 읽으면 되돌리기가 그 자리에서 멈춘다.
- */
+// Site tables can store keyed row records instead of plain cell arrays.
 test('표의 줄이 {key, value} 로 담겨 와도 되돌린다', () => {
   const project = minimalProject();
   project.tables = [{
@@ -1715,10 +1556,7 @@ test('표의 줄이 {key, value} 로 담겨 와도 되돌린다', () => {
   assert.deepEqual(again.project!.tables[0].data, [['철수', '10'], ['영희', '20']]);
 });
 
-/**
- * `in <리스트> add|insert <값>` 의 값 자리에 `row`·`column` 이 그대로 오면 표의
- * 줄·칸 문법으로 읽힌다. 그 이름을 쓴 변수는 작품에 흔하다(storymaker.ent).
- */
+// Parenthesize variables named row or column to avoid table-operation parsing.
 test('리스트에 넣는 값이 row 라는 이름이어도 다시 읽힌다', () => {
   const project = minimalProject();
   project.variables = [
@@ -1752,11 +1590,7 @@ test('리스트에 넣는 값이 row 라는 이름이어도 다시 읽힌다', (
   assert.deepEqual(again.errors, [], again.errors.map((e) => e.message).join('\n'));
 });
 
-/**
- * 크기가 비어 저장된 글상자는 `"NaNpx …"` 를 들고 온다. 크기 자리를 그냥 두면
- * 글꼴 이름이 `"NaNpx Nanum Gothic"` 이 되고 크기는 기본값 20 이 되어, 엔트리가
- * 그리는 것보다 글자가 두 배로 커진다.
- */
+// Invalid saved font sizes must use the canvas fallback rather than Entry's 20px default.
 test('읽을 수 없는 글꼴 크기는 캔버스가 실제로 그리는 글꼴로 되돌린다', () => {
   const project = minimalProject();
   project.objects = [{
@@ -1780,11 +1614,7 @@ test('읽을 수 없는 글꼴 크기는 캔버스가 실제로 그리는 글꼴
   assert.doesNotMatch(fragment, /NaNpx/);
 });
 
-/**
- * 번역 블록은 엔트리가 인공지능 묶음에 두는 값 블록입니다. 되돌린 뒤 다시 컴파일하면
- * 슬롯이 그대로 서야 하고, 모듈 이름은 `expansionBlocks` 가 아니라
- * `aiUtilizeBlocks` 로 가야 엔트리가 그 블록을 불러옵니다.
- */
+// Translation modules belong in aiUtilizeBlocks so Entry initializes them.
 test('번역 블록은 되돌렸다가 다시 컴파일해도 그대로다', () => {
   const source = `var 원문 = "hello"
 var 결과 = ""
@@ -1811,7 +1641,6 @@ end`;
   assert.deepEqual(again.project!.aiUtilizeBlocks, ['translate']);
 });
 
-/** 드롭다운 자리라 목록에서 고르는 값만 들어갑니다 — 다른 확장 블록과 같습니다. */
 test('번역 블록의 언어 자리는 문자열로 적어야 한다', () => {
   const result = compileProject(
     'var 원문 = ""\nscene "s":\n  object "o":\n    when start do\n      say get_translated_string(원문, "hi", "ko")\n    end\n  end\nend',
@@ -1821,13 +1650,7 @@ test('번역 블록의 언어 자리는 문자열로 적어야 한다', () => {
   assert.match(result.errors[0].message, /목록에서 고르는 자리/);
 });
 
-/**
- * 값 자리에 놓인 흐름 블록은 그 자리에서 실행됩니다 — 엔트리는 블록을 돌리기 전에
- * 값부터 읽기 때문입니다(`executor.breakLoop` · `continueLoop`). 둘 다 스코프를 감싸는
- * 반복까지 되감아 놓고, `(이)가 아니다` 가 그 반환값을 거짓으로 뒤집어 기다리기가 제
- * 스코프를 돌려주므로, 어느 분기에도 안 걸려 그 프레임에 그대로 다음 바퀴로 갑니다 —
- * 즉 `break` 가 아니라 `skip` 입니다. 반복 밖에서는 되감을 것이 없어 영영 기다립니다.
- */
+// Input flow tricks can skip without a frame inside loops and wait forever outside them.
 test('값 자리에 놓인 반복 중단도 이어 하기와 같은 skip 으로 옮긴다', () => {
   const project = minimalProject();
   const object = (project.objects as RawEntity[])[0]!;
@@ -1857,7 +1680,6 @@ test('값 자리에 놓인 반복 중단도 이어 하기와 같은 skip 으로 
   assert.deepEqual(again.errors, [], again.errors.map((e) => e.message).join('\n'));
 });
 
-/** 반복 밖에 놓인 같은 트릭. `skip` 은 반복 안에서만 쓸 수 있으므로 그 자리가 아니다. */
 test('반복 밖에 놓인 값 자리 흐름 블록은 끝나지 않는 기다리기로 옮긴다', () => {
   const project = minimalProject();
   const object = (project.objects as RawEntity[])[0]!;
@@ -1880,10 +1702,6 @@ test('반복 밖에 놓인 값 자리 흐름 블록은 끝나지 않는 기다�
   assert.deepEqual(again.errors, [], again.errors.map((e) => e.message).join('\n'));
 });
 
-/**
- * 미로 수업의 반복 블록이 일반 작품에 섞여 들어오기도 합니다. 그림 그대로 계속
- * 반복하기와 같은 자리이고, 옮기지 못하면 그 안의 움직임이 통째로 사라집니다.
- */
 test('미로 수업의 반복 블록은 프레임을 쓰지 않는 무한 반복으로 옮긴다', () => {
   const project = minimalProject();
   const object = (project.objects as RawEntity[])[0]!;
@@ -1898,12 +1716,11 @@ test('미로 수업의 반복 블록은 프레임을 쓰지 않는 무한 반복
 
   const back = decompileProject(project, [], { inline: true });
   assert.deepEqual(back.warnings, [], back.warnings.join('\n'));
-  // 몸통 끝의 `skip` 이 "이 바퀴는 프레임을 쓰지 않는다" 를 적은 자리입니다.
   assert.match(back.source, /forever:\n\s+y \+= 10\n\s+skip\n\s+end/);
   const again = compileProject(back.source, { path: 'main.tess' });
   assert.deepEqual(again.errors, [], again.errors.map((e) => e.message).join('\n'));
 
-  // 몸통이 비면 엔트리도 그냥 지나가므로 반복을 적지 않습니다.
+  // Empty maze loops are skipped by Entry too.
   object.script = JSON.stringify([[
     { type: 'when_run_button_click', params: [null], statements: [] },
     { type: 'ai_repeat_until_reach', params: [null], statements: [[]] },
@@ -1912,10 +1729,6 @@ test('미로 수업의 반복 블록은 프레임을 쓰지 않는 무한 반복
   assert.doesNotMatch(bare.source, /forever:/);
 });
 
-/**
- * 엔트리에서 '보이기'로 켜 둔 변수·리스트는 무대에 상자를 띄운 채로 시작합니다.
- * 선언이 그 사실을 담지 않으면, 되돌린 작품은 `show 변수` 를 손으로 적어야 보입니다.
- */
 test('보이기로 켜 둔 변수와 리스트는 선언에 그대로 남는다', () => {
   const project = minimalProject();
   project.variables = [
@@ -1942,11 +1755,7 @@ test('보이기로 켜 둔 변수와 리스트는 선언에 그대로 남는다'
   assert.deepEqual(seen, [['점수', true], ['숨김', false], ['기록', true], ['배속', true]]);
 });
 
-/**
- * 표가 처음 값만 들고 있는 경우(`data` 는 비고 `origin` 에만 자료가 있는 작품)에도
- * 줄이 그대로 나와야 합니다 — 엔트리는 정지할 때마다 `origin` 으로 되돌리므로
- * 실행이 보는 값이 그쪽입니다.
- */
+// Read origin when data is empty because Entry restores the original rows before running.
 test('표는 origin 에만 자료가 있어도 줄을 그대로 옮긴다', () => {
   const project = minimalProject();
   project.tables = [{
@@ -1962,11 +1771,6 @@ test('표는 origin 에만 자료가 있어도 줄을 그대로 옮긴다', () =
   assert.deepEqual(again.project!.tables[0].data, [['0', '1'], ['2', '3']]);
 });
 
-/**
- * 사이트에서 열던 그대로 놓으려면 상자 자리도 함께 와야 합니다. 다만 사람이 읽을
- * 소스는 자리 없이 더 깔끔하므로(엔트리도 자리를 안 정한 상자는 스스로 놓습니다),
- * 명령줄 되돌리기는 기본으로 생략하고 확장만 켭니다.
- */
 test('변수 상자 자리는 positions 를 켰을 때만 적는다', () => {
   const project = minimalProject();
   project.variables = [
@@ -1990,11 +1794,7 @@ test('변수 상자 자리는 positions 를 켰을 때만 적는다', () => {
   assert.deepEqual(placedAt, [['점수', -120, 80], ['기록', 40, -30]]);
 });
 
-/** 확장은 사이트에서 보던 자리를 그대로 옮긴다. */
-/**
- * 표의 열 고르기 드롭다운(`get_table_fields`)은 이름을 보여 주지만 담고 있는 것은
- * 1부터 세는 열 번호입니다. 옮기지 못하면 어느 열인지가 통째로 사라집니다.
- */
+// Field dropdowns store one-based column numbers even when they display names.
 test('표의 열 고르기 드롭다운은 열 번호로 옮긴다', () => {
   const project = minimalProject();
   project.tables = [{ id: 'tb', name: '점수표', fields: ['이름', '점수'], data: [['철수', 90]] }];
@@ -2017,10 +1817,6 @@ test('표의 열 고르기 드롭다운은 열 번호로 옮긴다', () => {
   assert.deepEqual(again.errors, [], again.errors.map((e) => e.message).join('\n'));
 });
 
-/**
- * 표에 딸린 차트는 엔트리가 `chart` 에 담아 두고 `테이블 차트 창 열기` 가 번호로
- * 고릅니다. Tess 로 옮기지 못하면 차트가 통째로 사라져 창이 비어서 열립니다.
- */
 test('표의 차트 정의는 되돌렸다가 다시 컴파일해도 그대로다', () => {
   const project = minimalProject();
   project.tables = [{
@@ -2034,7 +1830,7 @@ test('표의 차트 정의는 되돌렸다가 다시 컴파일해도 그대로�
 
   const back = decompileProject(project, [], { inline: true });
   assert.deepEqual(back.warnings, [], back.warnings.join('\n'));
-  // 엔트리는 열을 0부터, Tess 는 1부터 센다.
+  // Convert Entry's zero-based chart columns to one-based Tess columns.
   assert.match(back.source, /^ {2}chart line "꺾은선 차트" x 1 series 2, 3$/m);
   assert.match(back.source, /^ {2}chart pie "원 차트" x 1 y 3$/m);
 
@@ -2079,14 +1875,7 @@ test('테이블 줄의 칸 수가 열 개수와 다르면 에러다', () => {
   assert.match(result.errors[0].message, /열 개수\(2\)와 같아야 합니다/);
 });
 
-/**
- * 함수 매개변수 이름과 변수 이름의 충돌 복원 테스트
- *
- * 엔트리 함수 본문은 변수를 id 로 가리키므로 매개변수 이름과 겹쳐도 그만이지만,
- * Tess 는 함수 안에서 이름을 매개변수 -> 함수 지역 -> 오브젝트 로컬 -> 전역 순으로
- * 찾습니다. 그래서 라벨에서 딴 매개변수 이름이 변수 이름과 같으면 본문의 그 변수
- * 참조가 매개변수로 바뀌어 버립니다 — 대입은 컴파일 에러가 되어 문장째로 사라집니다.
- */
+// Rename parameters that would hide ID-based variable references after decompilation.
 function paramClashProject() {
   const param = (blockType: string, next: unknown) => ({
     type: 'function_field_string',
@@ -2105,7 +1894,6 @@ function paramClashProject() {
       labelField('걷기', param('stringParam_aaaa', labelField('넉백횟수', param('stringParam_bbbb', null)))),
       null,
     ],
-    // 매개변수로 받은 값을 같은 이름의 전역 변수에 넣어 둔다.
     statements: [[
       { type: 'set_variable', params: ['var1', { type: 'stringParam_bbbb', params: [null], statements: [] }, null], statements: [] },
     ]],
@@ -2142,7 +1930,6 @@ function paramClashProject() {
 test('변수와 이름이 겹치는 라벨은 매개변수 이름으로 그대로 쓰지 않는다', () => {
   const result = decompileProject(paramClashProject(), []);
 
-  // 매개변수가 변수 이름을 가리지 않으니, 본문의 대입은 전역 변수 대입으로 남는다.
   assert.match(result.source, /^function 걷기\(a, (?!넉백횟수\))[\p{L}\p{N}_]+\):$/mu);
   assert.match(result.source, /^ {2}넉백횟수 = [\p{L}\p{N}_]+$/mu);
   assert.doesNotMatch(result.source, /^ {2}넉백횟수 = 넉백횟수$/m);
@@ -2171,9 +1958,6 @@ test('이름이 겹쳐도 되돌린 함수는 다시 컴파일되어 전역 변�
   assert.match(write.params[1].type, /^stringParam_/);
 });
 
-/**
- * 되돌린 소스를 다시 컴파일했을 때 값 블록·속성이 원본과 같은 값을 내는지 검사합니다.
- */
 function valueProject(script: any[], extra: RawEntity = {}): RawEntity {
   return {
     name: '값 테스트',
@@ -2203,7 +1987,6 @@ function valueProject(script: any[], extra: RawEntity = {}): RawEntity {
   } as unknown as RawEntity;
 }
 
-/** 되돌린 소스(조각 파일까지)를 다시 컴파일해서 첫 오브젝트의 첫 스레드를 돌려준다. */
 function recompiledThread(project: RawEntity) {
   const result = decompileProject(project, []);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-decompile-value-'));
@@ -2225,8 +2008,7 @@ function recompiledThread(project: RawEntity) {
   };
 }
 
-// 붓 계열의 색 자리에 들어가는 `color` 는 글상자의 `text_color` 와 같은 원시 블록인데,
-// 표에 빠져 있어서 자리표시자 문자열로 나갔다 — 되돌린 작품의 선 색이 깨졌다.
+// Primitive brush colors must remain colors instead of placeholder text.
 test('붓 색 고르기(color) 블록은 색상 리터럴로 되돌아온다', () => {
   const color = (hex: string) => ({ type: 'color', params: [hex], statements: [] });
   const { source, warnings, blocks } = recompiledThread(valueProject([
@@ -2241,8 +2023,7 @@ test('붓 색 고르기(color) 블록은 색상 리터럴로 되돌아온다', (
   assert.equal(blocks.find((b) => b.type === 'set_fill_color').params[0], '#616161');
 });
 
-// char_at 을 slice(문자열, i, i) 로 옮기면 자리 번호가 두 번 계산된다 — 그 안에
-// 무작위 수가 있으면 서로 다른 값이 나와 엉뚱한 글자를 집는다.
+// Keep char_at indexing single-evaluation; slice(text, i, i) would evaluate i twice.
 test('변수의 글자 하나 읽기는 이름[번호] 로 되돌려 자리 번호를 한 번만 계산한다', () => {
   const project = valueProject([
     {
@@ -2264,14 +2045,7 @@ test('변수의 글자 하나 읽기는 이름[번호] 로 되돌려 자리 번�
   assert.equal(value.params[3].type, 'calc_rand');
 });
 
-/**
- * 엔트리 소수점 부분(unnatural) 은 Tess 함수가 없어서 자리표시자 문자열로 나갔다 —
- * 숫자 자리에 글자가 들어가 계산이 깨졌다. 대신 쓸 계산은 **빼기**여야 한다:
- * 엔트리는 이 블록을 `BigNumber(x).minus(floor(x))` 로 10진 계산하므로 49.1 이
- * 정확히 0.1 이 되는데, 나머지(`%`) 블록은 2진 부동소수 그대로라
- * 0.09999999999999787 이 된다. 그 소수 자릿수를 글자로 읽어 쓰는 작품
- * (deltarune) 에서는 전혀 다른 값이 나온다.
- */
+// Fractional parts need decimal subtraction; binary modulo changes digit-sensitive results.
 test('소수점 부분(unnatural) 은 10진으로 빼는 계산으로 되돌아온다', () => {
   const { source, warnings, blocks } = recompiledThread(valueProject([
     {
@@ -2284,15 +2058,13 @@ test('소수점 부분(unnatural) 은 10진으로 빼는 계산으로 되돌아�
   assert.deepEqual(warnings, []);
   assert.match(source, /^ {2}x \+= \(abs\(-1\.3\) - floor\(abs\(-1\.3\)\)\)$/m);
   const value = blocks.find((b) => b.type === 'move_x').params[0];
-  /** 10진으로 계산하는 블록은 `calc_basic` 의 빼기다 (나머지 블록이 아니다). */
   assert.equal(value.type, 'calc_basic');
   assert.equal(value.params[1], 'MINUS');
   assert.equal(value.params[0].params[3], 'abs');
   assert.equal(value.params[2].params[3], 'floor');
 });
 
-// 엔트리 calc_operation 은 연산자 이름의 첫 `_` 뒤를 잘라내고 고르기 때문에
-// asin 과 asin_radian 이 같은 계산이다. 표에 없던 앞쪽 세 개도 같은 곳으로 보낸다.
+// Entry ignores calc_operation suffixes after the first underscore.
 test('역삼각함수의 도 단위 이름도 자리표시자 없이 되돌아온다', () => {
   for (const [entryName, tessName] of [['asin', 'asin'], ['acos', 'acos'], ['atan', 'atan']]) {
     const { source, warnings } = recompiledThread(valueProject([
@@ -2307,8 +2079,6 @@ test('역삼각함수의 도 단위 이름도 자리표시자 없이 되돌아�
   }
 });
 
-// 엔트리 키 목록(extern/util/static.js keyInputList)에 있는 키는 전부 되돌릴 수 있어야
-// 한다. 이름이 없으면 판단은 자리표시자가 되고, when 머리는 스레드째로 주석이 된다.
 test('엔트리 키 목록의 모든 키 코드가 그대로 되돌아온다', () => {
   const codes = [8, 9, 13, 16, 17, 18, 27, 32, 37, 38, 39, 40, 48, 57, 65, 90,
     186, 187, 188, 189, 190, 191, 192, 219, 220, 221, 222];
@@ -2334,8 +2104,7 @@ test('엔트리 키 목록의 모든 키 코드가 그대로 되돌아온다', (
   );
 });
 
-// 엔트리는 크기를 배율로, Tess 는 퍼센트로 적는다. 퍼센트를 정수로 깎으면
-// 51.3% 짜리 오브젝트가 51% 로 줄어든다.
+// Preserve fractional scale percentages instead of rounding to whole percentages.
 test('배율은 퍼센트 소수점을 버리지 않고 되돌아온다', () => {
   const project = valueProject([], { entity: { scaleX: 0.513, scaleY: 1.564 } } as RawEntity);
   const { source, project: recompiled } = recompiledThread(project);
@@ -2346,9 +2115,7 @@ test('배율은 퍼센트 소수점을 버리지 않고 되돌아온다', () => 
   assert.equal(recompiled.objects[0].entity.scaleY, 1.564);
 });
 
-// 그림 크기는 컴파일러가 파일에서 정확히 재지만, 소리 길이는 mp3 머리말로 어림잡는
-// 값이라 엔트리가 재 둔 값과 0.1초씩 어긋난다. 그 길이는 "재생하고 기다리기" 가
-// 기다리는 시간이고, 0 이면 엔트리가 소리를 아예 안 읽어 들인다.
+// Preserve saved sound duration because it controls waiting and whether Entry loads the sound.
 test('소리 길이는 원본 값을 늘 적는다', () => {
   const project = valueProject([], {
     sounds: [{ id: 'snd1', name: '짖는 소리', fileurl: null, ext: '.mp3', duration: 1.3 }],
@@ -2359,12 +2126,6 @@ test('소리 길이는 원본 값을 늘 적는다', () => {
   assert.equal(recompiled.objects[0].sprite.sounds[0].duration, 1.3);
 });
 
-/**
- * 작품에 없는 모양·소리 id 를 가리키는 블록의 되돌리기 결과를 검사합니다.
- *
- * 엔트리는 그 칸을 id -> 이름 -> 순번 순으로 맞춰 찾으므로 값을 그대로 남기고,
- * 경고가 아닌 주의로 알립니다.
- */
 function danglingResourceProject(): RawEntity {
   return {
     name: '없는 자원 테스트',
@@ -2416,11 +2177,7 @@ test('되돌리기의 strict 는 주의를 경고로 올린다', () => {
 });
 
 
-/**
- * 반복문 흐름 제어 두 가지를 담은 작품입니다. `continue_repeat` 은 그대로 다음
- * 차례로 넘어가고, 판단 자리에 넣은 `not(continue_repeat)` 은 프레임을 넘기지
- * 않고 다음 차례로 넘어갑니다.
- */
+// Plain continue yields a frame; the boolean-slot trick does not.
 function loopFlowProject(): RawEntity {
   return {
     name: '흐름 제어',
@@ -2497,7 +2254,6 @@ test('되돌린 continue · skip 은 원래 블록 모양 그대로 다시 컴�
   ]);
 });
 
-/** `calc_operation` 하나만 든 작품. `op` 가 연산자 이름이다. */
 function calcOperationProject(op: string): RawEntity {
   return {
     name: '계산',
@@ -2549,7 +2305,7 @@ test('calc_operation 은 어떤 연산자로도 옮길 수 있다 — 모르는 
 });
 
 test('엔트리가 모르는 연산자는 엔트리와 같이 round 로 읽는다', () => {
-  // `block_calc.js` 는 목록에 없는 연산자를 round 로 바꾸고 그대로 계산한다.
+  // Entry treats unrecognized calc_operation names as round.
   const result = decompileProject(calcOperationProject('없는연산'), []);
   const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.tess')!.data);
   assert.match(fragment, /round\(5\)/);
@@ -2574,11 +2330,6 @@ end`;
   assert.deepEqual(back.warnings, []);
 });
 
-/**
- * 하드웨어 블록의 값 자리에 `continue_repeat` 을 끼워 프레임을 넘기는 치트를 담은
- * 작품입니다. 반복문 안에서는 skip 과 똑같이 동작하고, 반복문 밖에서는 블록에
- * 닿지도 않습니다.
- */
 function skipCarrierProject(inLoop: boolean): RawEntity {
   const carrier = {
     type: 'Talebot_Move',
@@ -2636,12 +2387,7 @@ test('반복문 밖의 같은 치트는 아무것도 남기지 않는다', () =>
   assert.deepEqual(result.warnings, []);
 });
 
-/**
- * 껍데기는 하드웨어 블록만이 아닙니다 — 값 자리를 가진 블록이면 무엇이든 실을 수
- * 있어서, 소리·말하기·시간을 두고 움직이기가 다 쓰입니다. 옆 자리에 편집기가 넣어 둔
- * 숫자가 같이 들어 있어도 같은 치트이므로, 그 숫자 때문에 껍데기가 그대로 남아서는
- * 안 됩니다.
- */
+// Check recognized carrier blocks too; their inputs can prevent the block itself from running.
 test('되돌리기도 아는 블록에 실린 치트를 같이 읽는다', () => {
   const carriers: Array<[string, unknown[]]> = [
     ['sound_something_wait_with_block', []],
@@ -2675,12 +2421,7 @@ test('되돌리기도 아는 블록에 실린 치트를 같이 읽는다', () =>
   }
 });
 
-/**
- * 같은 치트의 다른 갈래 — 하드웨어 블록의 값 자리에 \`function_field_string\` 으로
- * 문장 블록을 끼워 둔 작품입니다. \`Entry.Scope.run\` 이 \`schema.func\` 를 보기 전에
- * \`getParams()\` 로 값 자리를 먼저 실행하므로, 바깥 블록이 아무것도 하지 않아도
- * 그 문장은 돕니다.
- */
+// Statements wrapped in function fields execute before the surrounding block.
 function parkedStatementProject(): RawEntity {
   return {
     name: "값 자리에 끼운 문장",
@@ -2725,7 +2466,7 @@ test("값 자리에 끼워 둔 문장은 바깥 블록을 못 옮겨도 살아�
   const fragment = utf8(result.assets.find((a) => a.path === "objects/주인공.tess")!.data);
 
   assert.match(fragment, /in 기록 add 1/);
-  // 바깥 하드웨어 블록은 그대로 옮기지 못하므로 주석과 경고로 남깁니다.
+  // Unsupported parent hardware blocks remain notes with warnings.
   assert.match(fragment, /whalesbot_eagle_1001_rise/);
   assert.ok(
     result.warnings.some((warning) => warning.includes("whalesbot_eagle_1001_rise")),
@@ -2733,7 +2474,6 @@ test("값 자리에 끼워 둔 문장은 바깥 블록을 못 옮겨도 살아�
   );
 });
 
-/** 어느 이벤트에도 붙어 있지 않아 실행되지 않는 블록 뭉치를 가진 작품입니다. */
 function unattachedProject(): RawEntity {
   return {
     name: '떼어 놓은 블록',
@@ -2778,7 +2518,7 @@ test('워크스페이스에 떨어져 있던 블록은 옮기지 못했다고 �
   const object = (project as any).objects[0];
   object.script = JSON.stringify([
     [{ type: 'when_run_button_click', params: [null], statements: [] }],
-    // 값 블록 하나만 덩그러니 놓인 스레드 — 코드가 아니라 남겨 둔 조각이다.
+    // Detached reporter stacks are workspace fragments, not executable scripts.
     [{ type: 'calc_rand', params: [null, { type: 'number', params: ['1'] }, null, { type: 'number', params: ['10'] }, null], statements: [] }],
   ]);
 
@@ -2799,7 +2539,6 @@ test('연결된 코드의 못 옮기는 블록은 그대로 알린다', () => {
   assert.match(result.warnings[0]!, /'아직_없는_블록' 은\(는\) 아직 옮길 수 없습니다/);
 });
 
-/** 어디에도 붙어 있지 않은 메모. 블록에 붙은 것은 그 블록의 `comment` 로 들어간다. */
 function loneCommentProject(): RawEntity {
   const project = unattachedProject();
   (project as any).objects[0].script = JSON.stringify([
@@ -2822,7 +2561,6 @@ test('떠 있는 메모(comment)는 블록이 아니라 주석으로 되돌린�
 
   assert.match(fragment, /^# 메모 첫 줄$/m);
   assert.match(fragment, /^# 메모 둘째 줄$/m);
-  // 빈 메모는 남길 내용이 없다.
   assert.doesNotMatch(fragment, /지원하지 않는 블록/);
   assert.doesNotMatch(fragment, /^#\s*$/m);
   assert.deepEqual(result.warnings, []);
@@ -2830,7 +2568,6 @@ test('떠 있는 메모(comment)는 블록이 아니라 주석으로 되돌린�
 });
 
 
-/** 블록에 붙은 메모(`block.comment`)를 가진 작품입니다. */
 function attachedCommentProject(): RawEntity {
   const note = (value: string) => ({
     x: 0, y: 0, width: 160, height: 100, value, readOnly: false, visible: true,
@@ -2854,10 +2591,8 @@ test('블록에 붙은 메모는 그 문장 위의 주석으로 되돌아온다'
   const result = decompileProject(attachedCommentProject(), []);
   const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.tess')!.data);
 
-  // 이벤트에 붙은 메모는 hat 블록이 들고 있으므로 when 줄 위로 나온다.
   assert.match(fragment, /^# 시작할 때\nwhen start do$/m);
   assert.match(fragment, /^ {2}# 앞으로\n {2}# 두 줄짜리 메모\n {2}forward 10$/m);
-  // 빈 메모는 남길 내용이 없다.
   assert.doesNotMatch(fragment, /^\s*#\s*$/m);
   assert.deepEqual(result.warnings, []);
 });
@@ -2924,8 +2659,7 @@ test('팔레트에서 내려간 boolean_and · boolean_or 는 and · or 로 되�
     .find((asset) => asset.path === 'objects/주인공.tess')!.data);
   assert.match(fragment, /if \(true and false\):/);
   assert.match(fragment, /if \(true or false\):/);
-  // A block that cannot be moved across becomes a truthy placeholder string, so
-  // the condition would have been taken every time.
+  // Placeholder strings are truthy and must not turn unsupported conditions into unconditional branches.
   assert.doesNotMatch(fragment, /\[decompile/);
   assert.deepEqual([...result.warnings], []);
 });
@@ -2937,12 +2671,12 @@ test('함수 정의 다음에 이어 붙은 본문도 되돌린다 (playentry �
   };
   const body = { id: 'b', type: 'move_direction', params: [{ type: 'number', params: ['10'] }, null] };
 
-  // The shape playentry hands over: the body follows the define in its stack.
+  // playentry stores the body after the definition in its stack.
   const flat = unattachedProject();
   (flat as any).functions = [{ id: 'fn1', content: JSON.stringify([[define, body]]) }];
   assert.match(decompileProject(flat, []).source, /^function 짓기\(\):\n {2}forward 10\nend$/m);
 
-  // And the shape a `.ent` save writes: the body nested in the statement slot.
+  // Saved archives nest the same body inside the definition's statement slot.
   const nested = unattachedProject();
   (nested as any).functions = [{
     id: 'fn1',
@@ -2951,14 +2685,7 @@ test('함수 정의 다음에 이어 붙은 본문도 되돌린다 (playentry �
   assert.match(decompileProject(nested, []).source, /^function 짓기\(\):\n {2}forward 10\nend$/m);
 });
 
-/**
- * 값 자리에 놓인 소리 블록은 1 로 되돌립니다.
- *
- * 엔트리는 블록보다 값 자리를 먼저 읽으므로 그 자리의 소리 블록이 실제로 돌고, 소리가
- * 다 풀렸으면 `AudioBufferSourceNode.start` 가 던져서 대입이 건너뛰어집니다 — 합작
- * 작품들이 '소리 다 받았나' 를 이 방법으로 확인합니다. tessvm 은 소리를 전부 받은 뒤에야
- * 작품을 시작하므로 답은 언제나 '다 받았다' 입니다.
- */
+// Sound probes read as loaded because tessvm preloads every sound before starting.
 test('값 자리에 놓인 소리 블록은 1 로 되돌린다', () => {
   const project = minimalProject(1);
   const probe = {
@@ -2990,11 +2717,9 @@ test('값 자리에 놓인 소리 블록은 1 로 되돌린다', () => {
     false,
     '옮기지 못한 블록으로 세지 않습니다',
   );
-  // 되돌린 소스는 다시 컴파일됩니다.
   assert.ok(compileProject(result.source, { path: 'main.tess' }).project);
 });
 
-/** `작품 정지하기` — `stop all` 과 달리 실행기를 멈춥니다. */
 test('stop_run 은 stop project 로 되돌아가고 다시 그 블록이 된다', () => {
   const project = minimalProject(1);
   (project.objects as never[])[0] = {
@@ -3014,20 +2739,13 @@ test('stop_run 은 stop project 로 되돌아가고 다시 그 블록이 된다'
   assert.match(JSON.stringify(again.project), /stop_run/);
 });
 
-/**
- * 합치기 도구가 만든 작품은 함수를 통째로 복사하면서 **매개변수 블록 타입과 지역변수
- * id 를 그대로 둡니다.** 엔트리는 그것을 돌고 있는 함수 자신의 `register.paramMap` 과
- * `executor.localVariables` 에서 찾으므로 복사본이 열두 개여도 잘 돕니다. 되돌리기가
- * 작품 전체에 하나씩만 들고 있으면 마지막 함수만 이기고 나머지는 매개변수가 빈 값이
- * 됩니다 — redred.ent 에서 함수 400개 중 186개, 참조 9126군데가 그랬습니다.
- */
+// Scope reused parameter types and local IDs to each function instead of the whole project.
 test('여러 함수가 같은 매개변수·지역변수 id 를 가져도 각자 자기 것으로 읽는다', () => {
   const project = minimalProject() as unknown as Record<string, unknown>;
   const header = (label: string) => ({
     type: 'function_field_label',
     params: [label, { type: 'function_field_string', params: [{ type: 'stringParam_same', params: [] }] }],
   });
-  // Both carry the same parameter block type and the same local id.
   const copy = (id: string, label: string) => ({
     id,
     localVariables: [{ id: 'same_local', name: 'n', value: 0 }],
@@ -3058,11 +2776,7 @@ test('여러 함수가 같은 매개변수·지역변수 id 를 가져도 각자
   );
 });
 
-/**
- * 엔트리의 키 목록에 없는 키도 작품에는 들어 있습니다(손으로 고친 작품, 다른 도구가
- * 만든 작품). 이름을 모른다고 그 자리를 비우면 **이벤트 머리를 통째로 잃어** 그 아래
- * 블록이 어디에도 붙지 않은 채로 남습니다 — 45(insert) 가 그랬습니다.
- */
+// Preserve unnamed key codes so their entire event scripts survive.
 test('엔트리 목록에 없는 키도 이름이나 번호로 되돌린다', () => {
   const project = minimalProject();
   const object = (project.objects as RawEntity[])[0]!;
@@ -3079,7 +2793,6 @@ test('엔트리 목록에 없는 키도 이름이나 번호로 되돌린다', ()
         statements: [[move('move_y')]],
       },
     ],
-    // 이름이 없는 코드는 번호 그대로 — 그래도 작품이 통째로 살아 있습니다.
     [{ type: 'when_some_key_pressed', params: [null, '145'], statements: [] }, move('move_x')],
   ]);
 
@@ -3098,12 +2811,7 @@ test('엔트리 목록에 없는 키도 이름이나 번호로 되돌린다', ()
   assert.deepEqual(codes, ['', '145', '45'], '키 코드가 그대로 돌아옵니다');
 });
 
-/**
- * 문장을 여는 낱말과 같은 이름은 그 자리에서 문장으로 읽힙니다 — `move(a, b)` 는 호출이
- * 아니라 `move X Y` 로 읽혀 쉼표에서 깨집니다. 되돌리기가 그런 이름을 그대로 쓰면
- * **작품 전체가 다시 컴파일되지 않으므로**(playentry 작품 여럿이 그랬습니다) 이름을
- * 비껴 둡니다.
- */
+// Rename command-like function names because statement parsing takes precedence over calls.
 test('문장을 여는 낱말과 같은 함수·변수 이름은 비껴 간다', () => {
   const project = minimalProject();
   const object = (project.objects as RawEntity[])[0]!;
@@ -3128,21 +2836,15 @@ test('문장을 여는 낱말과 같은 함수·변수 이름은 비껴 간다',
   const back = decompileProject(project, [], { inline: true });
   assert.match(back.source, /function move_\(\)/);
   assert.match(back.source, /^\s+move_\(\)$/m);
-  // 엔트리 이름은 `as` 로 남습니다 — 되돌린 이름만 비껴간 것입니다.
   assert.match(back.source, /var repeat_ as "repeat" = 0/);
-  // 이름을 비껴 두지 않으면 여기서 컴파일이 깨집니다.
   const again = compileProject(back.source, { path: 'main.tess' });
   assert.deepEqual(again.errors, [], again.errors.map((e) => e.message).join('\n'));
 });
 
-/**
- * 색은 엔트리가 캔버스에 그대로 넘기는 글자라, 캔버스가 함께 읽는 `#RRGGBBAA` 도
- * 작품에 들어 있습니다(`글씨색을 #00000050 로 바꾸기`). 알파를 떼어 내면 작품이
- * 의도한 반투명이 진한 색으로 바뀝니다.
- */
+// Preserve eight-digit colors because dropping alpha makes translucent text opaque.
 test('알파가 붙은 색도 알파째로 오간다', () => {
   const project = minimalProject();
-  const object = (project.objects as RawEntity[])[1]!; // 글상자
+  const object = (project.objects as RawEntity[])[1]!;
   object.script = JSON.stringify([[
     { type: 'when_run_button_click', params: [null], statements: [] },
     { type: 'text_change_font_color', params: ['#00000050', null], statements: [] },
@@ -3161,14 +2863,9 @@ test('알파가 붙은 색도 알파째로 오간다', () => {
   assert.equal(color, '#00000050', '알파가 그대로 남습니다');
 });
 
-/**
- * `<image>`·`<text>` 는 파일 어디에나 있을 수 있습니다. 앞머리만 훑으면 뒤쪽에 붙은
- * `<text>` 를 놓치고 벡터를 고르는데, 이미지로 불러온 svg 는 페이지의 웹폰트에 닿지
- * 못하므로 글자가 대체 글꼴로 나옵니다 — `gomok.ent` 의 6KB 짜리 모양이 4785 바이트에서
- * `<text>` 가 시작하는 실제 사례입니다.
- */
+// Scan beyond the SVG header because late text tags also need the saved raster's font rendering.
 test('앞머리 밖에 있는 <text> 도 찾아서 PNG 를 고른다', () => {
-  const filler = '<path d="M0 0"></path>'.repeat(300); // 4096 바이트를 넘긴다
+  const filler = '<path d="M0 0"></path>'.repeat(300); // Put the tag beyond the 4096-byte header scan.
   const late = `<svg viewBox="0 0 960 540">${filler}<text font-family="yg-jalnan">안녕</text></svg>`;
   assert.ok(late.indexOf('<text') > 4096, '<text> 가 앞머리 밖에 있어야 합니다');
 
@@ -3181,7 +2878,7 @@ test('앞머리 밖에 있는 <text> 도 찾아서 PNG 를 고른다', () => {
   assert.deepEqual(images.map((a) => a.path), ['assets/image/주인공_배경.png']);
 });
 
-/** `<textPath>` 는 글자 태그가 아니므로 벡터를 막지 않습니다. */
+// textPath is not a text tag and should not force raster selection.
 test('<textPath> 는 <text> 로 치지 않는다', () => {
   const drawing = '<svg viewBox="0 0 960 540"><textPath href="#p">x</textPath></svg>';
   const result = decompileProject(svgPictureProject(), [
@@ -3189,16 +2886,11 @@ test('<textPath> 는 <text> 로 치지 않는다', () => {
     { name: 'temp/aa/aa/image/aaaa.png', data: Buffer.from('png') },
   ] as never);
 
-  // 벡터를 고른 모양은 png 사본도 옆에 함께 남습니다(실행기가 고를 수 있게).
   const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.tess')!.data);
   assert.match(fragment, /default costume 배경 "assets\/image\/주인공_배경\.svg"/);
 });
 
-/**
- * 벡터의 제 크기와 작품이 그리는 크기가 한 픽셀 어긋나는 것은 저장할 때의 반올림입니다.
- * 편집기가 화면을 다시 잡은 그림은 수십~수백 픽셀이 어긋나므로, 한 픽셀을 막으면 멀쩡한
- * 벡터가 png 로 떨어집니다 — `play.ent` 의 단추는 svg 가 278×109, 작품이 278×110 입니다.
- */
+// Allow one-pixel size differences caused by Entry's save rounding.
 test('한 픽셀 어긋난 벡터는 같은 그림으로 보고 그대로 쓴다', () => {
   const project = svgPictureProject();
   project.objects[0].sprite.pictures[0].dimension = { width: 960, height: 540 };
@@ -3210,7 +2902,6 @@ test('한 픽셀 어긋난 벡터는 같은 그림으로 보고 그대로 쓴다
   const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.tess')!.data);
   assert.match(fragment, /default costume 배경 "assets\/image\/주인공_배경\.svg"/);
 
-  // 편집기가 다시 잡은 그림은 그대로 png 입니다.
   const reframed = [
     { name: 'temp/aa/aa/image/aaaa.svg', data: Buffer.from('<svg viewBox="0 0 1100 670"></svg>') },
     { name: 'temp/aa/aa/image/aaaa.png', data: Buffer.from('png') },
@@ -3220,9 +2911,6 @@ test('한 픽셀 어긋난 벡터는 같은 그림으로 보고 그대로 쓴다
   assert.match(other, /default costume 배경 "assets\/image\/주인공_배경\.png"/);
 });
 
-// --- 큰 작품 ---------------------------------------------------------------------
-
-/** 한 열짜리 테이블 하나를 단 project (엔트리 LLM 작품처럼 행이 아주 많을 수 있다) */
 function tableProject(rows: number): RawEntity {
   const project = minimalProject(1);
   project.tables = [{

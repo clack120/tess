@@ -1,7 +1,3 @@
-/**
- * 엔트리 작품(.ent) 파일을 Tess 소스 코드로 디컴파일합니다.
- * 블록 트리를 분석하여 해당되는 텍스트 코드를 생성합니다.
- */
 import { imageSize } from '../../compiler/src/assets.ts';
 import { append, safeIdentifier, tessString, tessNumber, tessLiteral, tessComment, displayNamePart } from './ident.ts';
 import { autoParamName } from '@tess/core';
@@ -21,43 +17,23 @@ for (const [name, code] of Object.entries(KEY_CODES)) {
   if (!(String(code) in REVERSE_KEY_NAME)) REVERSE_KEY_NAME[String(code)] = name;
 }
 
-/**
- * What the key of a block is called. A code with no name of its own is written
- * as the number itself, which `keyCodeOf` reads back — without that, a work
- * carrying such a key lost the whole script it started.
- */
+// Preserve unnamed key codes as numbers so key scripts survive decompilation.
 function keyName(code: unknown): string | null {
   const text = String(code ?? '').trim();
   return REVERSE_KEY_NAME[text] ?? (/^[0-9]{1,3}$/.test(text) ? text : null);
 }
 
-// _1x1.png 는 모양 없는 "새 오브젝트"용 1×1 투명 그림이다. 파일에서 잰 1×1 이 실제
-// 크기가 아니라 project.json 의 dimension 이 실제 크기라, 이것만 `size` 를 적어 둔다.
+// The blank 1x1 image takes its actual size from project.json dimensions.
 const BLANK_IMAGE = /(?:^|\/)images\/_1x1\.png$/;
 
-/**
- * Path of the PNG entry entry.js captured for an SVG costume, or null.
- *
- * The vector paint editor accepts images larger than its canvas and lets the
- * user move them into place. It captures that framing into a sibling PNG on
- * save but re-centres the SVG itself, so the SVG no longer matches either the
- * saved picture or the `dimension` the work renders at.
- */
+// Entry's saved PNG preserves framing that its recentered SVG may lose.
 function capturedPngFor(fileurl: string | undefined, entriesByPath: Map<string, Uint8Array>): string | null {
   if (!fileurl || !/\.svg$/i.test(fileurl)) return null;
   const png = `${fileurl.slice(0, -4)}.png`;
   return entriesByPath.has(png) ? png : null;
 }
 
-/**
- * Whether the vector is the file worth keeping for this costume.
- *
- * It has to be the size the work draws it at — entry's paint editor re-frames a
- * costume on save and only the raster it captures keeps that framing — it has to
- * fit the 960×540 canvas, and it has to be a drawing: three quarters of what
- * entry stores as `.svg` is a base64 raster in an `<image>` or has `<text>` in
- * it, and for both of those the raster beside it is the better file.
- */
+// Prefer SVG only when its size, canvas bounds, and content preserve the saved drawing.
 function vectorIsBetter(
   svg: Uint8Array | undefined,
   dimension: { width?: number; height?: number } | undefined,
@@ -65,26 +41,19 @@ function vectorIsBetter(
   const size = svgSize(svg);
   if (!size || !svg) return false;
   if (size.width > PAINT_CANVAS.width || size.height > PAINT_CANVAS.height) return false;
-  // 한 픽셀 차이는 저장할 때의 반올림입니다. 편집기가 화면을 다시 잡은 그림은 그보다
-  // 훨씬 크게 어긋나므로, 이만큼은 같은 그림으로 봅니다.
+  // Allow one pixel of difference for rounding during save.
   if (!(Math.abs(size.width - (dimension?.width ?? NaN)) <= SIZE_SLACK)) return false;
   if (!(Math.abs(size.height - (dimension?.height ?? NaN)) <= SIZE_SLACK)) return false;
-  // 파일 **전체**를 봅니다. 앞머리만 보면 뒤쪽에 붙은 껍데기를 놓칩니다 —
-  // `ovenpark.ent` 의 무대 크기 모양은 521KB 짜리 svg 인데 `<image>` 가 29955 바이트에서
-  // 시작해서, 앞머리만 보면 167KB png 사본을 두고 그 껍데기를 골라 버립니다. 글자로
-  // 디코딩하지 않고 바이트에서 찾으므로 몇 MB 짜리 svg 도 훑는 값이 싸게 끝납니다.
+  // Scan the whole SVG because embedded raster images can appear far beyond its header.
   return !hasTag(svg, "image") && !hasTag(svg, "text");
 }
 
-/**
- * `<이름` 이 이 파일 어딘가에 있는가. 바이트에서 대소문자 없이 찾고, 이름 뒤가 공백이나
- * `>` 인 것만 셉니다 — `<textPath>` 같은 다른 태그에 걸리지 않게.
- */
+// Match tag boundaries so textPath does not count as text.
 function hasTag(bytes: Uint8Array, name: string): boolean {
   const lower = name.toLowerCase();
   const upper = name.toUpperCase();
   for (let at = 0; at < bytes.length; at += 1) {
-    if (bytes[at] !== 0x3c) continue; // "<"
+    if (bytes[at] !== 0x3c) continue;
     let match = true;
     for (let i = 0; i < lower.length; i += 1) {
       const byte = bytes[at + 1 + i];
@@ -96,19 +65,18 @@ function hasTag(bytes: Uint8Array, name: string): boolean {
     if (!match) continue;
     const after = bytes[at + 1 + lower.length];
     if (after === undefined) continue;
-    if (after === 0x3e || after <= 0x20) return true; // ">" 또는 공백
+    if (after === 0x3e || after <= 0x20) return true;
   }
   return false;
 }
 
 const PAINT_CANVAS = { width: 960, height: 540 };
-/** 벡터의 제 크기가 작품이 그리는 크기와 이만큼까지 어긋나도 같은 그림으로 본다. */
+// Allow this size difference when comparing vectors with saved dimensions.
 const SIZE_SLACK = 1;
 
 const decoder = new TextDecoder('utf-8');
 const encoder = new TextEncoder();
 
-/** The first `limit` bytes of a file as text, for the tag sniffing below. */
 function headText(bytes: Uint8Array, limit: number): string {
   return decoder.decode(bytes.subarray(0, limit));
 }
@@ -117,14 +85,12 @@ function encodeText(text: string): Uint8Array {
   return encoder.encode(text);
 }
 
-/** `path.extname` for the url-shaped paths a work carries, without node. */
 function extnameOf(file: string): string {
   const name = file.split(/[\\/]/).pop() ?? '';
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(dot) : '';
 }
 
-/** The drawing's own size — `width`/`height` when it has them, else the viewBox. */
 function svgSize(svg: Uint8Array | undefined): { width: number; height: number } | null {
   if (!svg) return null;
   const head = headText(svg, 2048);
@@ -135,7 +101,6 @@ function svgSize(svg: Uint8Array | undefined): { width: number; height: number }
   return box ? { width: Number(box[1]), height: Number(box[2]) } : null;
 }
 
-/** The inner map for one function, made on first use. */
 function mapOf(
   outer: Map<string, Map<string, string>>,
   functionId: string,
@@ -148,7 +113,6 @@ function mapOf(
   return inner;
 }
 
-/** Whether any function declares this local id — a name no one does is a missing one. */
 function declaresLocal(ctx: DecompileContext, id: string): boolean {
   for (const locals of ctx.funcLocalsById.values()) {
     if (locals.has(id)) return true;
@@ -164,8 +128,6 @@ export function decompileProject(
   const ctx = buildContext(project, entries, options);
 
   const lines: string[] = [];
-  // 선언 묶음과 그 뒤의 코드 사이는 두 줄을 띄운다. 선언은 파일 머리말에 가까워서,
-  // 한 줄만 띄우면 바로 아래의 project/scene 블록과 한 덩어리처럼 보인다.
   for (const varInfo of ctx.globalVars) append(lines, declarationLine(varInfo, 0, ctx.positions));
   if (ctx.globalVars.length) lines.push('', '');
 
@@ -189,9 +151,8 @@ export function decompileProject(
   for (const fn of project.functions ?? []) {
     const entry = ctx.functionsById.get(fn.id);
     if (!entry) continue;
-    // 한 오브젝트 것만 건드리는 함수는 그 오브젝트 조각 파일에 이미 들어갔다
     if (ctx.functionOwnerById.has(fn.id)) continue;
-    // 세이브 매니저가 가로채는 빈 함수는 Tess 에서 `save` 문장이므로 선언하지 않는다.
+    // Save manager stubs become save statements and need no declarations.
     if (entry.saveKind) continue;
     try {
       const content = JSON.parse(fn.content ?? '[]');
@@ -205,7 +166,6 @@ export function decompileProject(
   }
 
 
-  // Notices are warnings under `strict`, matching compileProject.
   const strict = options.strict === true;
   return {
     source: `${lines.join('\n').trimEnd()}\n`,
@@ -217,7 +177,7 @@ export function decompileProject(
   };
 }
 
-/** Puts rows left out by `tableRows: false` back into the compiled tables, in order. */
+// Restore omitted table rows in their original order.
 export function restoreTableRows(project: { tables?: Array<{ data?: unknown }> }, rows: string[][][] | undefined): void {
   if (!rows) return;
   (project.tables ?? []).forEach((table, index) => {
@@ -225,18 +185,12 @@ export function restoreTableRows(project: { tables?: Array<{ data?: unknown }> }
   });
 }
 
-// ---------------------------------------------------------------------------
-//  컨텍스트 준비 — id -> 이름 표들을 미리 다 만들어 둔다
-// ---------------------------------------------------------------------------
-// 첫 매개변수에 모양·소리 id 가 들어 있을 수 있는 블록들 (직접 적었거나 목록에서 골랐거나)
 const ID_HOLDING_BLOCKS = new Set(['text', 'number', 'get_pictures', 'get_sounds']);
 
-/** 블록 트리를 훑으면서, 프로젝트에 실제로 있는 모양·소리 id 와 같은 값을 ctx.forcedIds 에 모은다 */
 function collectHardcodedIds(node: unknown, ctx: DecompileContext) {
   for (const id of resourceIdsIn(node, ctx)) ctx.forcedIds.add(id);
 }
 
-/** 블록 트리가 가리키는, 프로젝트에 실제로 있는 모양·소리 id 들 */
 function resourceIdsIn(node: unknown, ctx: DecompileContext, found = new Set<string>()): Set<string> {
   if (Array.isArray(node)) {
     node.forEach((child) => resourceIdsIn(child, ctx, found));
@@ -253,14 +207,12 @@ function resourceIdsIn(node: unknown, ctx: DecompileContext, found = new Set<str
   return found;
 }
 
-/** Variable and list ids found in a block tree, split by which kind wants them. */
 interface VariableIds {
   variables: Set<string>;
   lists: Set<string>;
 }
 
-// Where a block keeps the id of the variable or list it works on. Mirrors the
-// VARIABLE/LIST entries of each block's paramsKeyMap in entryjs.
+// Match Entry's VARIABLE and LIST parameter positions.
 const VARIABLE_SLOTS = new Map([
   ['get_variable', 0], ['set_variable', 0], ['change_variable', 0],
   ['show_variable', 0], ['hide_variable', 0],
@@ -271,7 +223,6 @@ const LIST_SLOTS = new Map([
   ['add_value_to_list', 1], ['remove_value_from_list', 1], ['insert_value_to_list', 1],
 ]);
 
-/** Variable and list ids a block tree reads or writes, split by which kind it wants. */
 function variableIdsIn(
   node: unknown,
   found: VariableIds = { variables: new Set(), lists: new Set() },
@@ -296,7 +247,6 @@ function variableIdsIn(
   return found;
 }
 
-/** Tess names of the variables and lists a block tree reads or writes. */
 function touchedVariableNames(content: unknown, ctx: DecompileContext): Set<string> {
   const found = variableIdsIn(content);
   const names = new Set<string>();
@@ -307,16 +257,11 @@ function touchedVariableNames(content: unknown, ctx: DecompileContext): Set<stri
   return names;
 }
 
-/**
- * Declares a variable for every id the blocks reference but the project no
- * longer defines. Entry leaves such references behind when a variable is
- * deleted while blocks still point at it; without a declaration the source
- * would not compile at all.
- */
+// Declare placeholders for deleted variables so their remaining references still compile.
 function reviveDanglingVariables(project: RawEntity, ctx: DecompileContext, usedNames: Set<string>) {
   const found: VariableIds = { variables: new Set(), lists: new Set() };
   const scan = (text: string | undefined) => {
-    try { variableIdsIn(JSON.parse(text ?? '[]'), found); } catch { /* unreadable script */ }
+    try { variableIdsIn(JSON.parse(text ?? '[]'), found); } catch { }
   };
   for (const object of project.objects ?? []) scan(object.script);
   for (const fn of project.functions ?? []) scan(fn.content);
@@ -335,10 +280,7 @@ function reviveDanglingVariables(project: RawEntity, ctx: DecompileContext, used
   }
 }
 
-/**
- * The object id when every costume/sound a function names belongs to one object,
- * else null. A function that names none is left global — nothing ties it down.
- */
+// Keep functions global unless every referenced resource belongs to one object.
 function soleResourceOwner(content: unknown, ctx: DecompileContext): string | null {
   const owners = new Set<string>();
   for (const id of resourceIdsIn(content, ctx)) {
@@ -349,19 +291,7 @@ function soleResourceOwner(content: unknown, ctx: DecompileContext): string | nu
   return owners.size === 1 ? [...owners][0]! : null;
 }
 
-/**
- * The function_create block inside a function's content, or null.
- *
- * A function's workspace holds one thread per stack, and the definition is not
- * always the first: a comment block or a stack the author left detached comes
- * before it whenever it sits higher up in the workspace.
- *
- * `함수 정의하기` is a hat, so a work carries its body as the rest of that stack
- * — that is what playentry stores and what entry's own runner executes. Saving
- * to `.ent` writes the same body nested in the block's one statement slot. The
- * block comes back here with the body in that slot either way, so the rest of
- * the decompiler reads one shape.
- */
+// Find the definition stack and normalize both inline and nested function bodies.
 function functionCreateBlock(content: unknown): RawBlock | null {
   for (const thread of (content ?? []) as unknown[]) {
     if (!Array.isArray(thread)) continue;
@@ -373,12 +303,7 @@ function functionCreateBlock(content: unknown): RawBlock | null {
   return null;
 }
 
-/**
- * 함수 정의 블록(function_create)의 머리를 마디 목록으로 펼친다.
- * 라벨과 매개변수 칸이 `params[1]` 로 이어진 사슬이고, 라벨이 중간에 끼거나
- * 매개변수가 판단 칸(function_field_boolean)일 수도 있다.
- *
- */
+// Function headers chain labels and value or boolean slots through params[1].
 function readFunctionFields(create: RawBlock | null): FunctionField[] {
   const fields: FunctionField[] = [];
   let node = create?.params?.[0] as RawBlock | undefined;
@@ -392,7 +317,7 @@ function readFunctionFields(create: RawBlock | null): FunctionField[] {
         boolean: node.type === 'function_field_boolean',
       });
     } else {
-      break; // 알 수 없는 마디가 나오면 거기까지만 읽는다
+      break;
     }
     node = node.params?.[1] as RawBlock | undefined;
   }
@@ -404,16 +329,14 @@ function buildContext(
   entries: TarEntry[],
   options: DecompileOptions = {},
 ): DecompileContext {
-  const usedNames = new Set<string>(); // 변수 · 함수 이름은 한 네임스페이스로 합쳐서 절대 안 겹치게 한다
+  const usedNames = new Set<string>(); // Share one namespace for variables and functions to prevent collisions.
   const entriesByPath = new Map(entries.map((e) => [e.name, e.data]));
 
   const ctx: DecompileContext = {
     warnings: new Set(),
     notices: new Set(),
-    // Write `size W H` on every costume, not just the ones the compiler cannot measure.
     allSizes: options.sizes === true,
     positions: options.positions === true,
-    // Keep SVG costumes as SVG instead of taking the PNG entry captured on save.
     keepSvg: options.keepSvg === true,
     varsById: new Map(),
     globalVars: [],
@@ -429,22 +352,15 @@ function buildContext(
     picturesById: new Map(),
     soundsById: new Map(),
     collectedAssets: [],
-    // 장면이 하나뿐이면 objects/이름.tess 로 평평하게, 여러 개면 대부분의 프로젝트가
-    // 실제로 장면별로 오브젝트를 나눠 관리하므로 objects/장면이름/이름.tess 로 나눈다.
+    // Use scene subfolders only when the project has several scenes.
     multiScene: (project.scenes ?? []).length > 1,
-    // 함수 안에 하드코딩된 채로 발견된, 진짜 모양·소리 id 들 (1.4절 참고).
-    // objectFragmentLines 가 이 id 를 가진 모양·소리 선언에 `force id "..."` 를 붙인다.
+    // Mark hardcoded resource IDs with force id so recompilation preserves them.
     forcedIds: new Set(),
-    // Functions whose costumes/sounds all belong to one object: the declaration
-    // moves into that object's fragment and resources are named, not id'd.
+    // Move functions into their resource-owning object so resources can be named.
     functionOwnerById: new Map(),
     functionsByOwner: new Map(),
-    // eventLines/resourceExpr 가 "지금 함수 몸통을 옮기는 중인가" 를 보는 플래그 —
-    // 함수 안에서는 리터럴 id 를 이름으로 되짚지 않고 그대로 둔다(아래 forcedIds 주석 참고).
     inFunction: false,
-    // The object that owns the function being written, when it has one.
     functionOwnerId: null,
-    // Raised by the loop cases in stmt.ts while their bodies are written.
     loopDepth: 0,
     inline: options.inline === true,
     varName(id: string) {
@@ -453,9 +369,7 @@ function buildContext(
       ctx.warnings.add(`변수/리스트 id '${id}' 를 찾지 못했습니다.`);
       return `_missing_var_${id}`;
     },
-    // Entry reads a function local out of `executor.localVariables`, a copy of
-    // the **running** function's own list — an id no line of this function
-    // declares is not in it, whatever other functions call it.
+    // Only locals declared by the running function exist in Entry's executor.
     funcLocalName(id: string) {
       const name = ctx.funcLocalsById.get(ctx.functionId ?? '')?.get(id);
       if (name !== undefined) return name;
@@ -464,22 +378,16 @@ function buildContext(
       }
       return null;
     },
-    // 함수 본문에서 매개변수를 가리키는 블록 타입(stringParam_xxxx / booleanParam_xxxx)
-    // -> 그 매개변수를 선언한 함수와 그 매개변수의 Tess 이름
     funcParamsByBlockType: new Map(),
     functionId: null,
-    // Entry looks a parameter block up in `register.paramMap`, which is the map
-    // of the function that is running — so a block belonging to another
-    // function finds nothing there. Scoping the lookup the same way keeps a
-    // stray parameter from being written as a name that is not in scope.
+    // Scope parameter lookup to the running function, matching Entry's paramMap.
     funcParamName(blockType: string) {
       return ctx.funcParamsByBlockType.get(ctx.functionId ?? '')?.get(blockType) ?? null;
     },
     pictureName(id: string) {
       const info = ctx.picturesById.get(id);
       if (info) return info.identifier;
-      // Entry matches the slot by id, then name, then position, so the value is
-      // left as it stands and settled when the block runs.
+      // Entry resolves resource IDs, names, then positions at runtime.
       ctx.notices.add(`모양 id '${id}' 가 작품에 없어 그대로 남겼습니다. 실행할 때 이름으로 찾습니다.`);
       return String(id);
     },
@@ -498,30 +406,25 @@ function buildContext(
     funcLocalsById: new Map(),
   };
 
-  // --- 신호 ------------------------------------------------------------------
   for (const message of project.messages ?? []) ctx.messagesById.set(message.id, message.name);
 
-  // --- 테이블 ------------------------------------------------------------------
   for (const table of project.tables ?? []) {
     const identifier = safeIdentifier(table.name, usedNames, 'table');
     ctx.tablesById.set(table.id, { identifier, source: table });
   }
 
-  // --- 장면 --------------------------------------------------------------------
   for (const scene of project.scenes ?? []) {
     const identifier = safeIdentifier(scene.name, usedNames, 'scene');
     ctx.scenesById.set(scene.id, { identifier, displayName: scene.name });
   }
 
-  // --- 오브젝트 ------------------------------------------------------------------
   for (const object of project.objects ?? []) {
     const identifier = safeIdentifier(object.name, usedNames, 'object');
     ctx.objectsById.set(object.id, {
       identifier, displayName: object.name, kind: object.objectType, sceneId: object.scene,
     });
 
-    // 모양·소리 이름은 오브젝트 안에서만 겹치지 않으면 된다. 다른 오브젝트에도 같은
-    // 이름이 있을 수 있으므로, 리소스 파일을 저장할 때 쓸 오브젝트 정보를 같이 담아 둔다.
+    // Resource names are local to each object, so retain the owner when naming asset files.
     const localUsed = new Set<string>();
     for (const picture of object.sprite?.pictures ?? []) {
       const picId = safeIdentifier(picture.name, localUsed, 'costume');
@@ -537,17 +440,14 @@ function buildContext(
     ctx.scaleById.set(String(object.id), savedScale(object));
   }
 
-  // --- 변수 · 리스트 (초시계·대답은 Tess 가 내장 키워드로 이미 제공한다) -----------
   for (const entry of project.variables ?? []) {
     if (entry.variableType === 'timer' || entry.variableType === 'answer') continue;
     const isList = entry.variableType === 'list';
-    // `@이름` 은 세이브 매니저가 맡는 자리다. Tess 이름은 `@` 를 뗀 쪽이고, 선언에
-    // `store` 가 붙으면 컴파일할 때 다시 `@` 가 붙는다.
+    // Store restores the @ prefix when recompiling the stripped Tess name.
     const store = !entry.object && String(entry.name ?? '').startsWith(STORE_PREFIX);
     const label = store ? String(entry.name).slice(STORE_PREFIX.length) : entry.name;
     const identifier = safeIdentifier(label, usedNames, isList ? 'list' : 'var');
-    // A local whose object is gone has nowhere to be declared. Writing it as a
-    // global keeps it in the work instead of dropping it without a trace.
+    // Preserve locals from deleted objects as globals rather than dropping them.
     const owned = entry.object && ctx.objectsById.has(entry.object);
     if (entry.object && !owned) {
       ctx.warnings.add(`'${entry.name}' 은(는) 작품에 없는 오브젝트의 지역 변수라 전역으로 옮겼습니다.`);
@@ -562,49 +462,36 @@ function buildContext(
     }
   }
 
-  // --- 함수 --------------------------------------------------------------------
   for (const fn of project.functions ?? []) {
     let fields: FunctionField[] = [];
     let content: unknown = [];
     try {
       content = JSON.parse(fn.content ?? '[]');
       fields = readFunctionFields(functionCreateBlock(content));
-    } catch { /* 머리를 못 읽어도 id 로 대체해서 계속 진행한다 */ }
+    } catch { /* Fall back to the function ID if its header cannot be read. */ }
 
-    // 맨 앞 라벨만 함수 이름이 된다 (src/function-params.ts 참고)
+    // Only the first label becomes the function name.
     const first = fields[0];
     const label = first?.kind === 'label' ? first.text : fn.id;
     const identifier = safeIdentifier(label, usedNames, 'func');
 
     const params: string[] = [];
-    // A parameter name hides every variable of the same name inside the body
-    // (compiler/context.ts lookupVariable: param -> function local -> object
-    // local -> global). Entry has no such shadowing — its body points at a
-    // variable by id — so a parameter named after one silently rebinds that
-    // variable's reads and turns its writes into a compile error. Only the
-    // variables this body actually touches can be hidden, so only those names
-    // are off limits; reserving every name in the work would rename parameters
-    // that hide nothing, and each rename shows up as a label in the Entry
-    // signature (compiler/index.ts isAutoParamName).
+    // Reserve referenced variable names so parameters cannot silently hide ID-based reads.
     const paramNames = touchedVariableNames(content, ctx);
     fields.forEach((field, index) => {
       if (field.kind !== 'param') return;
-      // 바로 앞에 함수 이름이 아닌 라벨이 있으면, 그 라벨이 이 매개변수의 이름이 된다
       const previous = index > 0 ? fields[index - 1] : null;
       const name = previous?.kind === 'label' && index > 1
         ? safeIdentifier(previous.text, paramNames, 'p')
         : safeIdentifier(autoParamName(params.length), paramNames, 'p');
-      // 판단 칸은 `이름?` 으로 적어야 다시 컴파일할 때도 판단 칸으로 남는다
+      // Keep the ? suffix so boolean parameters compile back to boolean slots.
       params.push(field.boolean ? `${name}?` : name);
-      // 함수 본문에서 이 매개변수를 가리키는 블록(stringParam_xxxx)을 이름으로 되돌릴 때 쓴다
       if (field.blockType) {
         mapOf(ctx.funcParamsByBlockType, String(fn.id)).set(field.blockType, name);
       }
     });
 
-    // Function locals are referenced by id in the body. Their names must clash
-    // with neither the parameters nor the variables the body can see: inside a
-    // function Tess resolves a name as parameter -> function local -> global.
+    // Function locals must not hide parameters or variables used by the body.
     const localUsed = new Set(paramNames);
     for (const info of ctx.globalVars) localUsed.add(info.identifier);
     const locals: FunctionLocal[] = [];
@@ -614,7 +501,7 @@ function buildContext(
       locals.push({ name, entryName: String(local.name ?? ''), value: local.value });
     }
 
-    // 세이브 매니저는 이 이름의 함수 호출을 가로챈다. 그 호출이 Tess 의 `save` 다.
+    // The save manager intercepts calls to this named function.
     const saveKind = label === STORE_SAVE_FUNCTION
       ? 'save'
       : label === STORE_SAVE_ASYNC_FUNCTION ? 'async' : undefined;
@@ -625,17 +512,10 @@ function buildContext(
 
   reviveDanglingVariables(project, ctx, usedNames);
 
-  // 함수는 전역이라 어느 오브젝트가 부를지 모르므로, 함수 안의 모양·소리 id 는 이름으로
-  // 바꾸지 않고 그대로 둔다. 대신 그 선언에 `force id` 를 붙여 다시 컴파일해도 같은
-  // id 가 나오게 한다 (SPEC-ADDENDUM.md 1.4절).
-  //
-  // 다만 함수가 건드리는 모양·소리가 전부 한 오브젝트 것이면 얘기가 다르다. 그런
-  // 함수는 사실상 그 오브젝트의 것이므로, 선언을 그 오브젝트 조각 파일로 옮기고
-  // 리소스도 이름으로 적는다 — Tess 함수는 오브젝트 안에도 선언할 수 있고, 그 안에서는
-  // 이름이 어느 오브젝트 것인지 분명하기 때문이다. 그러면 `force id` 가 아예 필요 없다.
+  // Keep global resource IDs; functions owned by one object can use resource names instead.
   for (const fn of project.functions ?? []) {
     let content = null;
-    try { content = JSON.parse(fn.content ?? '[]'); } catch { /* 못 읽으면 건너뛴다 */ }
+    try { content = JSON.parse(fn.content ?? '[]'); } catch { }
     if (!content) continue;
 
     const ownerId = soleResourceOwner(content, ctx);
@@ -650,18 +530,11 @@ function buildContext(
     collectHardcodedIds(content, ctx);
   }
 
-  // --- 리소스(모양 · 소리) 실제 파일 -----------------------------------------------
-  // 모양·소리 이름은 오브젝트마다 따로 붙어서 서로 겹칠 수 있다(특히 "새그림").
-  // 파일 이름은 `오브젝트이름_모양이름`, 장면이 여럿이면 장면별 폴더로 나누고,
-  // 그래도 겹치면 뒤에 번호를 붙인다.
-  const assetTargets = new Map<string, string | null>(); // fileurl -> 저장한 상대 경로
+  // Include object and scene names in asset paths to avoid collisions between resources.
+  const assetTargets = new Map<string, string | null>();
   const usedAssetPaths = new Set<string>();
 
-  /**
-   * A file extension out of the work. `imageType` and `ext` are the work's own
-   * text and they name a file on disk, so everything but letters and digits
-   * goes — a `png/../../..` would otherwise write outside the output folder.
-   */
+  // Asset extensions come from project data; allow only letters and digits to prevent path escapes.
   const safeExt = (value: unknown, fallback: string): string => {
     const cleaned = String(value ?? '').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toLowerCase();
     return cleaned ? `.${cleaned}` : fallback;
@@ -681,7 +554,6 @@ function buildContext(
     fileurl: string | undefined = info.source.fileurl,
   ): string | null => {
     if (!fileurl) return null;
-    // 같은 파일을 여러 모양이 함께 쓰면 한 번만 저장하고 같은 경로를 돌려준다.
     if (assetTargets.has(fileurl)) return assetTargets.get(fileurl)!;
     const data = entriesByPath.get(fileurl) ?? options.builtinAssets?.(fileurl) ?? null;
     if (!data) return null;
@@ -700,9 +572,7 @@ function buildContext(
   for (const [, info] of ctx.picturesById) {
     const pic = info.source;
     const png = capturedPngFor(pic.fileurl, entriesByPath);
-    // A vector that fits the paint canvas was never re-framed, so it still lines
-    // up with the raster and either can be used. Both go out, and the runner
-    // picks; anything bigger keeps the raster the editor captured.
+    // Keep both formats when the vector preserves framing; otherwise keep the saved raster.
     const vector =
       ctx.keepSvg ||
       (pic.imageType === 'svg' &&
@@ -712,8 +582,7 @@ function buildContext(
       ? '.png'
       : safeExt(pic.imageType || extnameOf(pic.fileurl || '').slice(1), '.png');
     info.relativePath = registerAsset(info, 'image', ext, useRaster ? png : pic.fileurl);
-    // `--keep-svg` asks for the vector and nothing else; otherwise the raster goes
-    // out beside it so the runner still has both.
+    // Keep only SVG when explicitly requested; otherwise include its raster copy too.
     if (!useRaster && !ctx.keepSvg && png && info.relativePath?.endsWith('.svg')) {
       const twin = `${info.relativePath.slice(0, -4)}.png`;
       const data = entriesByPath.get(png);
@@ -733,12 +602,7 @@ function buildContext(
   return ctx;
 }
 
-/**
- * `chart line "제목" x 1 series 2, 3` — 표에 딸린 차트 한 벌.
- *
- * 엔트리는 열을 0부터 세고 안 쓰는 자리를 -1 로 두므로, Tess 의 1부터 세는 번호로
- * 올려 적고 안 쓰는 자리는 아예 적지 않는다.
- */
+// Convert zero-based Entry chart columns to one-based Tess columns.
 function chartLine(chart: RawEntity): string {
   const column = (value: unknown) => Number(value ?? -1) + 1;
   const parts = [`chart ${String(chart.type ?? 'bar')}`];
@@ -752,7 +616,6 @@ function chartLine(chart: RawEntity): string {
   return `  ${parts.join(' ')}`;
 }
 
-/** `table 이름: columns ... row ... end` */
 function tableLines(info: TableInfo, withRows = true): string[] {
   const table = info.source;
   const cells = (row: unknown[]) => row.map((cell) => tessLiteral(cell)).join(', ');
@@ -779,33 +642,27 @@ function declarationLine(info: VarInfo, indentLevel = 0, positions = false): str
   if (info.store) scope = 'store ';
   else if (source.isCloud) scope = 'shared ';
   else if (source.isRealTime) scope = 'realtime ';
-  // `store` 가 `@` 를 붙여 주므로, 이름이 남는지는 그것을 뗀 쪽으로 따진다.
+  // Check the stripped name because store restores the @ prefix.
   const entryName = info.store ? String(source.name).slice(STORE_PREFIX.length) : source.name;
   const named = displayNamePart(info.identifier, entryName);
-  // 엔트리에서 '보이기'로 체크해 둔 변수·리스트는 무대에 상자를 띄운 채로 시작한다.
   const shown = source.visible ? ' visible' : '';
-  // 상자가 놓인 자리. 적어 두지 않으면 실행기가 엔트리처럼 알아서 자리를 잡는다.
   const at = positions
     ? ` at ${tessNumber(Number(source.x) || 0)} ${tessNumber(Number(source.y) || 0)}`
     : '';
   if (info.isList) {
     const items = (source.array ?? []).map((item: { data: unknown }) => tessLiteral(item.data));
-    // A box resized in entry keeps its size; the default 100 × 120 is left unsaid.
+    // Preserve resized boxes and omit the default 100 by 120 size.
     const width = Number(source.width ?? 100);
     const height = Number(source.height ?? 120);
     const size = width !== 100 || height !== 120 ? ` size ${tessNumber(width)} ${tessNumber(height)}` : '';
     return [`${pad}${scope}list ${info.identifier}${named} = [${items.join(', ')}]${shown}${at}${size}`];
   }
-  // A slide variable keeps the two ends its slider runs between.
   const range = source.variableType === 'slide'
     ? ` from ${tessNumber(Number(source.minValue) || 0)} to ${tessNumber(Number(source.maxValue) || 0)}`
     : '';
   return [`${pad}${scope}var ${info.identifier}${named} = ${tessLiteral(source.value)}${range}${shown}${at}`];
 }
 
-// ---------------------------------------------------------------------------
-//  장면
-// ---------------------------------------------------------------------------
 function sceneLines(scene: RawEntity, project: RawEntity, ctx: DecompileContext): string[] {
   const info = ctx.scenesById.get(scene.id)!;
   const lines = [`scene ${tessString(info.identifier)}:`];
@@ -820,22 +677,12 @@ function sceneLines(scene: RawEntity, project: RawEntity, ctx: DecompileContext)
   return lines;
 }
 
-// ---------------------------------------------------------------------------
-//  오브젝트 — 기본적으로 오브젝트 하나당 조각 파일 하나(objects/이름.tess)로 따로
-//  써 두고, main.tess 쪽에는 useobject/usetext 한 줄만 남긴다(SPEC-ADDENDUM.md 1.2절).
-//  손으로 짠 것처럼 오브젝트별로 파일이 나뉘어 있어야 나중에 사람이 고치기 편하기
-//  때문이다. 조각 파일은 `object "..." : ... end` 로 감싸지 않고 내용만 담는다 —
-//  useobject/usetext 가 불러오면서 파일 이름으로 감싸 준다.
-//  장면이 하나뿐인 작품은 objects/이름.tess 로 평평하게 두고, 장면이 여러 개면
-//  거의 모든 프로젝트가 실제로 장면별로 오브젝트를 관리하므로
-//  objects/장면이름/이름.tess 로 장면마다 폴더를 나눈다(ctx.multiScene).
-// ---------------------------------------------------------------------------
+// Write editable object fragments without wrappers; useobject supplies the wrapper.
 function useObjectLine(object: RawEntity, ctx: DecompileContext, sceneIdentifier: string): string[] {
   const info = ctx.objectsById.get(object.id)!;
   const isText = object.objectType === 'textBox';
   const fragment = objectFragmentLines(object, ctx, isText);
-  // `inline` has nowhere to put a fragment file, so the object is written into
-  // the scene where the `useobject` line would have gone.
+  // Inline output has no fragment files, so write each object inside its scene.
   if (ctx.inline) {
     const head = `  ${isText ? 'text' : 'object'} ${tessString(info.identifier)}:`;
     return [head, ...indent(indent(fragment)), '  end'];
@@ -849,14 +696,12 @@ function useObjectLine(object: RawEntity, ctx: DecompileContext, sceneIdentifier
   return [`  ${isText ? 'usetext' : 'useobject'} ${tessString(relativePath)}`];
 }
 
-/** Whether the collected file at `path` measures exactly `dimension`. */
 function sameSize(ctx: DecompileContext, path: string, dimension: { width?: number; height?: number } | undefined): boolean {
   const data = ctx.collectedAssets.find((asset) => asset.path === path)?.data;
   const size = data ? imageSize(data) : null;
   return !!size && !!dimension && size.width === dimension.width && size.height === dimension.height;
 }
 
-/** 조각 파일 하나의 내용 — `object`/`text` 로 감싸지 않은, 들여쓰기 0 부터 시작하는 줄들 */
 function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: boolean): string[] {
   const info = ctx.objectsById.get(object.id)!;
   const lines: string[] = [];
@@ -867,9 +712,7 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
     const picInfo = ctx.picturesById.get(picture.id);
     if (!picInfo) continue;
     const isDefault = object.selectedPictureId === picture.id;
-    // The compiler measures the file, so a size is written only where that
-    // would come out different from the saved one: no file, the 1×1 blank, or
-    // a file whose own size is not the dimension the work kept.
+    // Write size when the file cannot reproduce the project's saved dimensions.
     const measurable = picInfo.relativePath && !picInfo.blankImage && !ctx.allSizes &&
       sameSize(ctx, picInfo.relativePath, picture.dimension);
     const sizePart = measurable
@@ -883,11 +726,7 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
   for (const sound of object.sprite?.sounds ?? []) {
     const sndInfo = ctx.soundsById.get(sound.id);
     if (!sndInfo) continue;
-    // Always keep the length Entry measured, for the same reason the text box
-    // frame is kept: "play sound and wait" waits `duration * 1000` ms and
-    // Entry skips loading a sound whose duration is 0, while the compiler only
-    // estimates the length from the mp3 header. Costume sizes are different —
-    // the compiler reads those from the image file exactly.
+    // Preserve Entry's sound duration because it controls loading and play-and-wait timing.
     const durationPart = ` for ${tessNumber(Number.isFinite(sound.duration) ? sound.duration : 1)}`;
     const filePart = sndInfo.relativePath ?? (sound.fileurl ?? `${sndInfo.identifier}.mp3`);
     const namePart = displayNamePart(sndInfo.identifier, sound.name);
@@ -903,7 +742,6 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
   if (object.lock) lines.push('lock true');
   if (object.entity?.visible === false) lines.push('visible false');
 
-  // 속성과 변수 선언 묶음, 그리고 그 뒤의 when 블록 사이도 main.tess 와 똑같이 두 줄 띄운다
   for (const varInfo of ctx.localVarsByObject.get(object.id) ?? []) {
     append(lines, declarationLine(varInfo, 0, ctx.positions));
   }
@@ -915,14 +753,13 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
   } catch (error) {
     ctx.warnings.add(`오브젝트 '${info.displayName}' 의 스크립트를 읽지 못했습니다: ${(error as Error).message}`);
   }
-  // 옛 크기 블록은 이 오브젝트가 저장된 배율에서 재므로 그 값을 들려 보낸다.
+  // Legacy size blocks use the object's saved scale.
   ctx.objectScale = ctx.scaleById.get(String(object.id)) ?? savedScale(object);
   ctx.spriteScripts = !isText;
   for (const thread of threads) append(lines, eventLines(thread, ctx, 0));
   ctx.spriteScripts = false;
 
-  // 이 오브젝트 것만 건드리는 함수는 여기, 조각 파일 맨 끝에 선언한다. 그 안에서는
-  // 모양·소리를 이름으로 적을 수 있어서 `force id` 가 필요 없다(buildContext 참고).
+  // Keep object-owned functions with their resources so force id is unnecessary.
   for (const owned of ctx.functionsByOwner.get(object.id) ?? []) {
     lines.push('');
     append(lines, functionDeclarationLines(owned.entry, owned.createBlock, ctx, object.id));
@@ -932,7 +769,6 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
   return lines;
 }
 
-/** The scale an object was saved with, written the way a declaration does (%). */
 function savedScale(object: RawEntity): { x: number; y: number } {
   const entity = (object.entity ?? {}) as { scaleX?: unknown; scaleY?: unknown };
   const percent = (value: unknown) => {
@@ -942,13 +778,7 @@ function savedScale(object: RawEntity): { x: number; y: number } {
   return { x: percent(entity.scaleX), y: percent(entity.scaleY) };
 }
 
-/**
- * `center X Y` — the object's registration point (regX/regY), the spot its x/y
- * actually put on the stage. Entry defaults it to the middle of the costume, so
- * the line is only written when the user moved it; the compiler falls back to
- * the same default. Dropping it puts the object somewhere else entirely — in
- * right_leaning.ent the entrybot slides ~200px across the stage.
- */
+// Preserve moved registration points because they change the object's stage position.
 function centerLine(object: RawEntity, pad: string): string[] {
   const entity = object.entity ?? {};
   if (!Number.isFinite(entity.regX) || !Number.isFinite(entity.regY)) return [];
@@ -962,12 +792,7 @@ function centerLine(object: RawEntity, pad: string): string[] {
   return [`${pad}center ${tessNumber(entity.regX)} ${tessNumber(entity.regY)}`];
 }
 
-/**
- * Entry keeps scale as a ratio and Tess writes it as a percent, so this rounds
- * only as far as it can while still dividing back to the same ratio (the
- * compiler does `scale_x / 100`). Rounding to a whole percent instead would
- * turn a size of 51.3% into 51%.
- */
+// Round percentages only when dividing by 100 restores the exact saved scale.
 function scalePercent(ratio: number): number {
   const exact = ratio * 100;
   for (let digits = 0; digits <= 6; digits += 1) {
@@ -992,17 +817,14 @@ function objectPropertyLines(object: RawEntity, isText: boolean, indentLevel: nu
   if (isText) {
     if (object.text) lines.push(`${pad}text_content = ${tessString(object.text)}`);
     const font = parseFont(entity.font);
-    // `fontSize` is null on a text box whose font entry could not read; the size
-    // the canvas fell back to then comes from the font string.
+    // If Entry could not read fontSize, recover the canvas fallback from the font string.
     const fontSize = entity.fontSize || font.size;
     if (fontSize) lines.push(`${pad}font_size = ${tessNumber(fontSize)}`);
-    // Always keep the frame Entry measured. The compiler can only estimate it
-    // from the character count, which is far off for wrapping text boxes.
+    // Preserve saved text bounds because estimating from character count loses wrapping.
     if (Number.isFinite(entity.width) && Number.isFinite(entity.height)) {
       lines.push(`${pad}size ${tessNumber(entity.width)} ${tessNumber(entity.height)}`);
     }
 
-    // 컴파일러의 기본값(packages/compiler/src/index.ts buildObject)과 같을 때는 생략한다
     if (font.family && font.family !== 'Nanum Gothic') lines.push(`${pad}font = ${tessString(font.family)}`);
     if (font.bold) lines.push(`${pad}text_bold = true`);
     if (font.italic) lines.push(`${pad}text_italic = true`);
@@ -1019,16 +841,9 @@ function objectPropertyLines(object: RawEntity, isText: boolean, indentLevel: nu
   return lines;
 }
 
-/** What a canvas draws with when it refuses a font string outright. */
 const CANVAS_DEFAULT_FONT = { size: 10, family: 'sans-serif' };
 
-/**
- * entity.font(`"bold italic 24px D2 Coding"` 형태)를 굵기·기울임·글씨체 이름으로 되짚는다.
- *
- * Entry takes the size slot by position, whatever stands there, so a size it
- * could not read ("NaNpx") leaves a declaration the canvas refuses and draws in
- * its own face instead. That face is what goes out, so the work keeps its look.
- */
+// Preserve the canvas fallback when an invalid font string cannot be rendered.
 function parseFont(font: unknown) {
   const tokens = String(font ?? '').trim().split(/\s+/).filter(Boolean);
   let bold = false;
@@ -1044,10 +859,6 @@ function parseFont(font: unknown) {
   return { bold, italic, family: tokens.join(' '), size };
 }
 
-// ---------------------------------------------------------------------------
-//  이벤트(hat 블록) -> when ... do
-// ---------------------------------------------------------------------------
-/** Rolls a diagnostic set back to what it held before. */
 function keepOnly(set: Set<string>, before: Set<string>): void {
   for (const item of [...set]) {
     if (!before.has(item)) set.delete(item);
@@ -1058,12 +869,11 @@ function eventLines(thread: RawBlock[] | undefined, ctx: DecompileContext, inden
   if (!thread?.length) return [];
   const [hat, ...rest] = thread;
   const pad = '  '.repeat(indentLevel);
-  // 본문은 머리글(when ... do)보다 항상 한 단 더 들여쓴다. 조각 파일에서는 머리글이
-  // 0단이라, indentLevel 만큼만 들여쓰던 예전 코드는 본문을 전혀 들여쓰지 않았다.
+  // Indent event bodies one level below their header, including in fragments.
   const indentBody = (lines: string[]) => Array.from({ length: indentLevel + 1 })
     .reduce<string[]>((acc) => indent(acc), lines);
 
-  // 이벤트에 달린 메모는 hat 블록이 들고 있다(compiler/index.ts applyComment).
+  // Event notes belong to the hat block.
   const note = commentLines(hat).map((line) => `${pad}${line}`);
 
   const keyUp = matchKeyUpPattern(hat, rest);
@@ -1078,26 +888,17 @@ function eventLines(thread: RawBlock[] | undefined, ctx: DecompileContext, inden
     return [...note, `${pad}${header} do`, ...body, `${pad}end`, ''];
   }
 
-  // 'comment' 는 블록이 아니라 워크스페이스에 그냥 떠 있는 메모다. 블록에 붙은
-  // 메모는 그 블록의 `comment` 로 들어가고, 아무 데도 안 붙은 것만 이렇게 스레드
-  // 하나로 저장된다. 그대로 Tess 주석으로 옮긴다.
+  // Detached workspace comments are separate threads; attached notes belong to their block.
   if (hat?.type === 'comment') {
     const text = String((hat as { value?: unknown }).value ?? '').trimEnd();
     if (!text.trim()) return [];
     return [...text.split(/\r?\n/).map((line) => `${pad}# ${line}`.trimEnd()), ''];
   }
 
-  // 스레드 맨 앞이라고 다 이벤트(hat) 블록은 아니다 — 엔트리 워크스페이스에
-  // 그냥 빼놨을 뿐, 어디에도 연결 안 된 블록 뭉치도 똑같이 "스레드 하나"로
-  // 저장된다. 그런 건 실제로 실행된 적이 없으니(엔트리도 안 돌린다) 억지로
-  // when 으로 감싸 실행되게 만들지 않고, 내용만 주석으로 그대로 남겨서
-  // "연결 안 된 상태"를 그대로 지킨다.
-  // 어차피 주석으로만 남을 코드라, 그걸 옮기다 나온 알림은 알려 줄 것이 못 된다 —
-  // 워크스페이스에 떨어져 있던 값 블록 하나까지 "아직 옮길 수 없습니다" 로 새어
-  // 나오던 자리다. 이 뭉치가 새로 만든 것만 걷어 내고 원래 있던 것은 남긴다.
+  // Keep detached stacks as comments and discard their new notices because Entry never runs them.
   const hadWarnings = new Set(ctx.warnings);
   const hadNotices = new Set(ctx.notices);
-  const raw = blocksToLines(thread, ctx); // 맨 앞도 그냥 평범한 블록으로 취급해서 통째로 옮긴다
+  const raw = blocksToLines(thread, ctx);
   keepOnly(ctx.warnings, hadWarnings);
   keepOnly(ctx.notices, hadNotices);
   const commented = raw.map((line: string) => (line.trim() ? `${pad}${tessComment(line)}` : ''));
@@ -1127,7 +928,6 @@ function eventHeader(hat: RawBlock | undefined, ctx: DecompileContext): string |
   }
 }
 
-/** 컴파일러가 `when key X up` 을 펼쳐 만드는 감시 스크립트를 되짚어 알아본다 */
 function matchKeyUpPattern(hat: RawBlock | undefined, rest: RawBlock[]) {
   if (hat?.type !== 'when_run_button_click') return null;
   if (rest.length !== 1 || rest[0]?.type !== 'repeat_inf') return null;

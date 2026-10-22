@@ -1,17 +1,9 @@
-/**
- * 파스 트리가 어떤 AST로 변환되는지 확인합니다.
- * 특히 연산자 우선순위와 결합 방향을 검증합니다.
- *
- * @example
- * shape('1 + 2 * 3', '(+ 1 (* 2 3))');
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parse } from '@tess/parser';
 import { expr, stmt } from './helpers.ts';
 import type { ProgramNode } from '@tess/parser';
 
-/** AST 를 비교하기 쉬운 S-식 문자열로 */
 function sexp(node: any): string {
   switch (node.type) {
     case 'Binary': return `(${node.operator} ${sexp(node.left)} ${sexp(node.right)})`;
@@ -32,24 +24,18 @@ function sexp(node: any): string {
 const shape = (source: string, expected: string) =>
   test(`표현식: ${source}`, () => assert.equal(sexp(expr(source)), expected));
 
-/**
- * 산술 연산자 우선순위 및 결합 방향 테스트
- */
 shape('1 + 2 * 3', '(+ 1 (* 2 3))');
 shape('1 * 2 + 3', '(+ (* 1 2) 3)');
 shape('(1 + 2) * 3', '(* (+ 1 2) 3)');
-shape('10 - 2 - 3', '(- (- 10 2) 3)');        // 좌결합
-shape('100 / 5 / 2', '(/ (/ 100 5) 2)');      // 좌결합
+shape('10 - 2 - 3', '(- (- 10 2) 3)');
+shape('100 / 5 / 2', '(/ (/ 100 5) 2)');
 shape('10 // 3 * 2', '(* (// 10 3) 2)');
 shape('10 % 3 + 1', '(+ (% 10 3) 1)');
-shape('2 ** 3 ** 2', '(** 2 (** 3 2))');      // 우결합
-shape('2 * 3 ** 2', '(* 2 (** 3 2))');        // ** 가 * 보다 강함
+shape('2 ** 3 ** 2', '(** 2 (** 3 2))');
+shape('2 * 3 ** 2', '(* 2 (** 3 2))');
 shape('-2 ** 2', '(** (- 2) 2)');
 shape('-x + 1', '(+ (- x) 1)');
 
-/**
- * 비교 및 논리 연산자 우선순위 테스트
- */
 shape('hp > 0 and not dead', '(and (> hp 0) (not dead))');
 shape('a or b and c', '(or a (and b c))');
 shape('a and b or c', '(or (and a b) c)');
@@ -60,9 +46,6 @@ shape('score <= 100', '(<= score 100)');
 shape('item != "potion"', '(!= item "potion")');
 shape('a + 1 == b * 2', '(== (+ a 1) (* b 2))');
 
-/**
- * 함수 호출, 인덱스 접근 및 리터럴 처리 테스트
- */
 shape('random(1, 10)', '(random 1 10)');
 shape('random_color()', '(random_color)');
 shape('join(uppercase("a"), b)', '(join (uppercase "a") b)');
@@ -83,15 +66,13 @@ test('색상 리터럴은 소문자로 정규화한다', () => {
 });
 
 test('여섯 자리가 아닌 색과 색 이름도 #rrggbb 로 정규화한다', () => {
-  // CSS 줄임꼴: 세 자리는 늘리고, 네 자리는 알파까지 늘린다
   assert.equal(expr('#abc').value, '#aabbcc');
   assert.equal(expr('#abcd').value, '#aabbccdd');
-  // 알파는 캔버스가 읽는 자리라 그대로 남는다 (`#RRGGBBAA`)
+  // Preserve eight-digit color alpha because canvas uses it.
   assert.equal(expr('#ff0000cc').value, '#ff0000cc');
-  // 자리 수가 어중간하면 여섯 자리(여섯을 넘으면 여덟)에 맞춰 자르거나 채운다
+  // Pad or trim nonstandard hex lengths to six or eight digits.
   assert.equal(expr('#efeff').value, '#efeff0');
   assert.equal(expr('#ffffff100').value, '#ffffff10');
-  // 이름도 색이다
   assert.equal(expr('#검정').value, '#000000');
   assert.equal(expr('#하늘색').value, '#00bfff');
   assert.equal(expr('#RED').value, '#ff0000');
@@ -102,9 +83,6 @@ test('색 이름이 아닌 # 낱말은 주석이다', () => {
   assert.equal(parse(source).ok, true);
 });
 
-/**
- * 문장(Statement) AST 변환 테스트
- */
 test('say ... for ...', () => {
   assert.deepEqual(stmt('say "반갑습니다!" for 2'), {
     type: 'Say',

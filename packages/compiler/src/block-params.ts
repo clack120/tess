@@ -1,12 +1,3 @@
-/**
- * 엔트리 블록의 종류별 매개변수(params) 배열의 길이를 정의한 표입니다.
- * 컴파일러가 생성한 블록의 매개변수 개수가 올바른지 검증할 때 사용됩니다.
- *
- * @example
- * ```ts
- * const expectedCount = BLOCK_PARAM_COUNTS["add_effect_amount"]; // 3
- * ```
- */
 export const BLOCK_PARAM_COUNTS: Record<string, number> = {
   _if: 2,
   add_effect_amount: 3,

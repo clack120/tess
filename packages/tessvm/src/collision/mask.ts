@@ -1,27 +1,19 @@
-/**
- * @fileoverview 모양 이미지의 알파값을 한 번만 읽어 두는 마스크 저장소입니다.
- *
- * 엔트리는 충돌을 볼 때마다 두 스프라이트를 캔버스에 다시 그리고 `getImageData` 로
- * 픽셀을 읽습니다. 여기서는 모양마다 알파 배열을 한 번 만들어 두고 그 뒤로는 표를
- * 찾기만 합니다. 불투명한 부분의 경계 상자도 같이 재 두어 검사 범위를 줄입니다.
- */
+// Cache costume alpha and opaque bounds instead of redrawing textures for each collision.
 
 export interface AlphaMask {
   width: number;
   height: number;
-  /** One byte of alpha per pixel, row-major. */
+  // One alpha byte per pixel in row-major order.
   data: Uint8Array;
-  /** Tight box around every pixel with a non-zero alpha. */
+  // Bound only pixels with nonzero alpha.
   trimX: number;
   trimY: number;
   trimWidth: number;
   trimHeight: number;
 }
 
-/** Builds a mask, or null while the costume image has not arrived yet. */
 export type MaskLoader = (key: string, width: number, height: number) => AlphaMask | null;
 
-/** Builds the mask (and its trimmed box) from raw RGBA bytes. */
 export function maskFromPixels(
   pixels: Uint8ClampedArray | Uint8Array,
   width: number,
@@ -70,18 +62,13 @@ export function maskFromPixels(
   };
 }
 
-/** A mask whose every pixel is opaque — the stage walls are drawn from one. */
 export function solidMask(width: number, height: number): AlphaMask {
   const data = new Uint8Array(width * height);
   data.fill(255);
   return { width, height, data, trimX: 0, trimY: 0, trimWidth: width, trimHeight: height };
 }
 
-/**
- * Keeps one mask per costume. Masks are built the first time a costume takes
- * part in a collision, so projects that never call the touching blocks pay
- * nothing for them.
- */
+// Build masks lazily so projects without collision blocks pay no mask cost.
 export class MaskStore {
   private readonly masks = new Map<string, AlphaMask | null>();
   private readonly loader: MaskLoader;
@@ -97,7 +84,7 @@ export class MaskStore {
     }
     const mask = this.loader(key, width, height);
     if (!mask) {
-      // The image has not finished loading; ask again on a later frame.
+      // Retry on a later frame while the costume image is loading.
       return null;
     }
     this.masks.set(key, mask);

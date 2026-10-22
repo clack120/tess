@@ -1,10 +1,3 @@
-/**
- * @fileoverview 브라우저에서 tessvm 을 띄우는 진입점입니다.
- *
- * 작품을 받아 렌더러·소리·입력을 붙이고 프레임 루프를 돌립니다. 화면에 얹는 것 중
- * 캔버스에 그릴 이유가 없는 것(대답 입력칸, 실행 단추, 상태 표시)은 HTML 로 둡니다 —
- * 해상도를 올려도 흐려지지 않고, 모바일 키보드도 그대로 동작합니다.
- */
 import { Vm, type EntryProjectLike, type EntryUser, type VariableStore } from '../runtime/engine.ts';
 import { PixiRenderer } from '../render/renderer.ts';
 import { EntryTtsEngine, WebAudioEngine } from '../audio/sound.ts';
@@ -23,50 +16,29 @@ export interface BootOptions {
   projectUrl?: string;
   project?: EntryProjectLike;
   container?: HTMLElement;
-  /** Off by default — a work waits to be started, the way entry's player does. */
+  // Default to waiting for the viewer to start the work.
   autoStart?: boolean;
-  /**
-   * Scene a run starts on, by id or by name. Left unset, a work starts at its
-   * first scene; an editor passes the scene being worked on.
-   */
+  // Leave unset to start on the first scene; editors may select another by ID or name.
   scene?: string;
   quality?: number;
-  /** Overrides the project's own `speed`; leave unset to follow it. */
+  // Leave unset to use the project's speed.
   fps?: number;
   showStats?: boolean;
-  /** What `boost_mode?` answers. On by default — the renderer is WebGL anyway. */
   boost?: boolean;
-  /** Stage size in entry units. Entry's own stage is 480×270. */
   stageWidth?: number;
   stageHeight?: number;
-  /**
-   * Where key events are read from. `window` by default; a focusable element
-   * keeps the keys to the player when the page around it has its own inputs.
-   */
+  // A focusable target keeps work keys separate from surrounding page inputs.
   keyTarget?: HTMLElement;
-  /** Take the vector costume where the work has one. On unless turned off. */
   svg?: boolean;
-  /** Who `아이디` and `닉네임` answer with. Left unset, both answer a space. */
+  // Without a viewer, both identity blocks return a space.
   user?: EntryUser | null;
-  /** Runs numeric functions in the kernel. On unless turned off. */
   kernel?: boolean;
-  /** Called while the work's files come in, before it is allowed to run. */
   onProgress?(loaded: number, total: number): void;
-  /**
-   * Where shared and real-time variables are kept. Left unset, the browser's own
-   * storage holds them; `null` keeps them for the life of the runner only.
-   */
+  // Omitted uses browser storage; null keeps shared values in VM memory only.
   store?: VariableStore | null;
-  /**
-   * Where the `store` names are kept. Left unset, IndexedDB holds them through
-   * Dexie; `null` turns saving off altogether and `can_save` then says no.
-   */
+  // Omitted uses IndexedDB; null disables saving and clears can_save.
   saveStore?: SaveHost | null;
-  /**
-   * Hold the work until every costume and sound is in. On by default. Turned
-   * off, the runner is ready as soon as it is built and the files stream in
-   * behind it — a fast start in exchange for the first moments not being exact.
-   */
+  // Wait for all assets by default; disabling this allows loading during the run.
   waitForAssets?: boolean;
 }
 
@@ -74,9 +46,8 @@ export interface TessVmHandle {
   vm: Vm;
   renderer: PixiRenderer;
   audio: WebAudioEngine;
-  /** Live stage metrics — read `stage.width` · `stage.height`. */
   stage: typeof stage;
-  /** What this runner started with; the debug panel's "as it really is" restores these. */
+  // Keep initial environment settings for the debug panel's restore action.
   defaultBoost: boolean;
   defaultTouch: boolean;
   defaultDeviceType: 'desktop' | 'tablet' | 'mobile';
@@ -84,18 +55,13 @@ export interface TessVmHandle {
   start(): void;
   stop(): void;
   pause(): void;
-  /** Opens the stage's status and most recent failure, without pausing the work. */
   inspect(): void;
   downloadDiagnostics(): void;
-  /** Re-fits the canvas after the window or the quality setting changed. */
   relayout(): void;
-  /** Resizes the stage itself, in entry units. */
   setStageSize(width: number, height: number): void;
-  /** Ends the frame loop and releases the canvas, the audio and the listeners. */
   dispose(): void;
 }
 
-/** Legacy key codes entry stores in `when_some_key_pressed`. */
 const KEY_CODES: Record<string, number> = {
   Backspace: 8, Tab: 9, Enter: 13, ShiftLeft: 16, ShiftRight: 16, ControlLeft: 17,
   ControlRight: 17, AltLeft: 18, AltRight: 18, CapsLock: 20, Escape: 27, Space: 32,
@@ -123,24 +89,14 @@ function keyCodeOf(event: KeyboardEvent): number {
   return event.keyCode || 0;
 }
 
-/**
- * A worker that only ticks. Timers on a hidden page are clamped to one wake-up
- * a second (and one a minute after a while), but a dedicated worker's are not,
- * so this is what keeps the frames coming while the tab is in the background.
- */
+// Use a worker timer because hidden-page timers can be heavily throttled.
 const TICKER_WORKER = `let id = 0;
 onmessage = (e) => {
   clearInterval(id);
   id = e.data > 0 ? setInterval(() => postMessage(0), e.data) : 0;
 };`;
 
-/**
- * Calls `step` once a frame. `requestAnimationFrame` follows the display while
- * the page is visible; the browser stops it altogether once the tab is hidden,
- * so a worker's timer takes over there and the project keeps running. `step`
- * reads the clock itself, so a driver that fires late or unevenly only means
- * the engine catches up on its own.
- */
+// Use animation frames while visible and a worker timer while hidden; the engine catches up by clock.
 function startFrameDriver(step: (now: number) => void): () => void {
   const INTERVAL = 1000 / 60;
   let raf = 0;
@@ -161,8 +117,7 @@ function startFrameDriver(step: (now: number) => void): () => void {
       made.onmessage = tick;
       return made;
     } catch (error) {
-      // Blob workers can be barred (a page CSP, a hardened browser). A plain
-      // timer still runs in the background, just at whatever rate it is held to.
+      // Fall back to a plain timer when CSP or browser settings block blob workers.
       return null;
     }
   };
@@ -216,10 +171,6 @@ function startFrameDriver(step: (now: number) => void): () => void {
   };
 }
 
-/**
- * What names this work in storage. A work loaded from playentry carries its own
- * id; one built from a file is named by what it calls itself.
- */
 function storeKey(project: EntryProjectLike): string {
   const raw = (project as { id?: unknown; name?: unknown }).id ?? (project as { name?: unknown }).name;
   return String(raw ?? 'project').slice(0, 120);
@@ -238,13 +189,11 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
   const view = document.createElement('div');
   view.className = 'tessvm-stage';
   container.appendChild(view);
-  // The canvas and everything pinned to it live in one box, so the readout
-  // below can sit just outside the picture instead of over it.
   const frame = document.createElement('div');
   frame.className = 'tessvm-frame';
   view.appendChild(frame);
 
-  // 엔트리에서 부스트 모드는 그리는 방식까지 바꾸므로 렌더러도 같이 받습니다.
+  // Forward boost changes because they also affect renderer behavior.
   const boost = options.boost ?? true;
   const renderer = new PixiRenderer({
     parent: frame,
@@ -273,8 +222,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
 
   vm.load(project);
   if (options.scene) vm.setStartScene(options.scene);
-  // `store` names are put back before the work is started, the way the save
-  // manager puts them back each time a work is played (`runtime/save.ts`).
+  // Restore saved values before the work starts on every run.
   vm.save.host = options.saveStore === null ? null : (options.saveStore ?? dexieSaveStore(storeKey(project)));
   await vm.save.load();
   renderer.overlayView?.bind({
@@ -287,19 +235,9 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     timerVisible: () => vm.timerVisible,
     scene: () => vm.currentSceneId,
   });
-  // Nothing runs until every costume and every sound is in. Entry holds a work
-  // behind its loading bar for the same reason: a file that arrives after the
-  // work has started arrives at the wrong moment — a sound asked for while it
-  // was still coming would begin after the stop or the scene change that was
-  // meant to silence it, and a costume would pop in a frame late.
-  //
-  // `waitForAssets: false` gives that up for a start with nothing in front of
-  // it. The files are asked for all the same and they arrive while the work is
-  // already up; a sprite whose costume is not in yet draws nothing, and so is
-  // not there to touch either, until it lands.
+  // Wait for assets by default; opting out allows missing costumes and late sound loads during execution.
   const sounds = vm.targets.flatMap((target) => target.sounds);
   const waitForAssets = options.waitForAssets ?? true;
-  // Progress is reported either way, so a host that does not wait can still tell when the files are in.
   const total = PixiRenderer.costumeCount(vm.targets) + sounds.length;
   let loaded = 0;
   const arrived = () => {
@@ -307,8 +245,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     options.onProgress?.(loaded, total);
   };
   options.onProgress?.(0, total);
-  // Both are started either way — only the waiting is optional. Each keeps its
-  // own per-file failures, so these settle whatever the network does.
+  // Start both preloads regardless of whether the caller waits for them.
   const costumes = renderer
     .preload(vm.targets, vm.currentSceneId, arrived)
     .catch(() => undefined);
@@ -316,8 +253,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
   if (waitForAssets) {
     await Promise.all([costumes, files]);
   }
-  // Paint the opening frame even when the project is not started yet, then
-  // measure the text boxes again once the entry web fonts have arrived.
+  // Paint the idle stage, then remeasure text after web fonts finish loading.
   renderer.flush();
   void renderer.waitForFonts();
 
@@ -335,7 +271,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     question.hide();
   };
 
-  // 차트 창도 엔트리처럼 캔버스 밖에 둡니다 — 표 창만 캔버스에 남습니다.
+  // Charts use HTML windows; ordinary tables stay on the canvas.
   const chartWindow = mountChartWindow(frame, () => vm.openTable(null));
   const originalTable = renderer.showTable.bind(renderer);
   renderer.showTable = (table, chart = null) => {
@@ -348,8 +284,6 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
   };
 
   const cleanups: Array<() => void> = [];
-  // The clipboard, the cursor and the pointer the work can ask for; a work that
-  // names none of them binds listeners that never fire.
   const extras = bindExtras(vm, renderer, frame, view, cleanups);
   cleanups.push(() => extras.dispose());
   const syncCursor = bindInput(
@@ -361,11 +295,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     extras.cursor,
   );
 
-  // The canvas is fitted into the box the host gives us, and that box holds the
-  // canvas: writing a new canvas size from inside a ResizeObserver callback
-  // feeds straight back into the same observer. Two things break that loop —
-  // a box that has not changed is not laid out again, and the layout itself is
-  // written in a later frame instead of inside the observation pass.
+  // Skip unchanged sizes and defer layout writes to avoid a ResizeObserver feedback loop.
   let lastWidth = 0;
   let lastHeight = 0;
   const layout = (force: boolean) => {
@@ -417,9 +347,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
   let accumulated = 0;
 
   const step = (now: number) => {
-    // `advance` reports what it can itself; this is the last net, so a throw
-    // from anywhere in a frame ends the run with a reason instead of leaving a
-    // frozen canvas and a driver that keeps calling back into the same throw.
+    // Stop and report uncaught frame failures instead of leaving a frozen canvas with a live driver.
     const began = performance.now();
     try {
       vm.advance(now);
@@ -454,8 +382,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     defaultDeviceType: deviceType,
     defaultUser: vm.user,
     start: () => {
-      // Keys are read from the player, so it has to hold focus before the work
-      // can be played at all.
+      // Focus the player before it starts so keyboard input can reach the work.
       (options.keyTarget ?? view).focus?.({ preventScroll: true });
       vm.start();
     },
@@ -503,31 +430,19 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
   return handle;
 }
 
-/** Keys that are a modifier themselves, so holding one down is not a chord. */
 const MODIFIER_KEY_CODES = new Set([16, 17, 18]);
-/** `Escape` — never taken from the page. */
+// Never prevent Escape's browser action.
 const ESCAPE = 27;
 
-/** Controls that read keys of their own — the answer field, the player's bar. */
 const CONTROL_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A']);
 
-/**
- * Whether the key is the work's rather than the page's.
- *
- * Entry cancels the browser's own action for every key a running work reads
- * (`Entry.Utils.captureKeyEvent`), so space does not scroll the page out from
- * under the stage. A key event targets whatever holds focus, so one that landed
- * on a control is that control's; a ctrl/alt/cmd chord is the browser's.
- */
+// Capture work keys only while running and focused; leave text controls to their own key handlers.
 function worksKey(vm: Vm, event: KeyboardEvent, code: number): boolean {
-  // The work is only told about keys while it runs (`Vm.fireEvent`), so the page
-  // keeps them whenever it is stopped or held.
-  // Escape always leaves fullscreen and the page's own dialogs; the work still hears it.
+  // Stopped or paused works keep browser actions; Escape always reaches the browser and the work.
   if (code === 0 || code === ESCAPE || vm.state !== 'run') {
     return false;
   }
-  // A shortcut stays the browser's unless the work reacts to that key, which
-  // entry takes for the work while it runs.
+  // Keep browser shortcuts unless the running work reacts to their key.
   if ((event.ctrlKey || event.altKey || event.metaKey) && !MODIFIER_KEY_CODES.has(code) &&
     vm.usedKeys !== null && !vm.usedKeys.has(code)) {
     return false;
@@ -536,18 +451,14 @@ function worksKey(vm: Vm, event: KeyboardEvent, code: number): boolean {
   return !target?.isContentEditable && !CONTROL_TAGS.has(target?.tagName ?? '');
 }
 
-/**
- * Binds the page's keys and pointer to the vm. Hands back the per-frame job of
- * keeping focus and the cursor in step — the stage moves under a
- * still pointer, so a pointer event alone would leave the cursor behind.
- */
+// Refresh focus and cursor each frame because the stage can move under a stationary pointer.
 function bindInput(
   vm: Vm,
   renderer: PixiRenderer,
   view: HTMLElement,
   keyTarget: HTMLElement | Window,
   cleanups: Array<() => void>,
-  /** Cursor `$CURSOR` asked for; it comes before the runner's own. */
+  // Explicit work cursor requests take precedence over the automatic cursor.
   workCursor: () => string,
 ): () => void {
   const on = <T extends EventTarget>(target: T, type: string, handler: EventListener, capture = false) => {
@@ -562,7 +473,6 @@ function bindInput(
     };
   };
 
-  /** Takes the key off the page: neither its default action nor its listeners. */
   const claim = (event: KeyboardEvent, code: number) => {
     if (worksKey(vm, event, code)) {
       event.preventDefault();
@@ -574,9 +484,7 @@ function bindInput(
     const event = raw as KeyboardEvent;
     const code = keyCodeOf(event);
     vm.pressedKeys.add(code);
-    // Every keydown raises it, the repeats a held key sends included — entry
-    // does the same (`Entry.Utils.captureKeyEvent`), so holding a key runs the
-    // script again at whatever rate the browser repeats at.
+    // Forward repeated keydowns too because Entry runs key scripts at the browser's repeat rate.
     vm.fireEvent('keyPress', String(code));
     claim(event, code);
   });
@@ -587,7 +495,7 @@ function bindInput(
     claim(event, code);
   });
   let syncFocus = () => {};
-  // Focus may move between a press and release, while keydown stays scoped to the player.
+  // Key releases can arrive after focus moves; keep keydown scoped to the player.
   if (keyTarget !== window) {
     on(window, 'keyup', (raw) => vm.pressedKeys.delete(keyCodeOf(raw as KeyboardEvent)), true);
     const player = keyTarget as HTMLElement;
@@ -605,7 +513,7 @@ function bindInput(
         if (player.contains(active) || active?.closest('dialog[open]')) return;
       } else if (vm.state !== 'run' || active && active !== document.body &&
         active !== document.documentElement && active !== player) return;
-      // Browser activation can finish after the focus event; retain the retry until it succeeds.
+      // Retain focus retries because browser activation may finish after its focus event.
       if (active !== player) {
         player.focus({ preventScroll: true });
       }
@@ -623,8 +531,7 @@ function bindInput(
     on(document, 'visibilitychange', syncFocus);
     on(document, 'fullscreenchange', syncFocus);
   }
-  // A window that loses focus never sees the key come back up, whatever the keys
-  // are read from.
+  // Clear pressed keys on blur because the window may never receive their releases.
   on(window, 'blur', () => vm.pressedKeys.clear());
 
   const move = (clientX: number, clientY: number) => {
@@ -634,7 +541,6 @@ function bindInput(
     vm.pointerSeen = true;
   };
 
-  // The cursor is only worth working out while the pointer is over the stage.
   let hovering = false;
   on(view, 'pointerenter', () => {
     hovering = true;
@@ -644,19 +550,15 @@ function bindInput(
     renderer.setCursor(workCursor());
   });
 
-  // Entry lets a list box be dragged around the stage. It reads pointers through
-  // its own drag helper; here there is one pointer path, so a press that lands on
-  // a list starts a drag and the work is not told about that press at all.
+  // Monitor dragging consumes its press instead of sending it to work scripts.
   type Dragged = Parameters<NonNullable<typeof renderer.overlayView>['scrollTo']>[0];
   let dragging:
     | { variable: Dragged; fromRow: number; fromY: number; rowsPerPixel: number }
     | null = null;
-  /** A slide variable's knob, held between the press and the release. */
   let sliding: Dragged | null = null;
-  /** A list box being resized by its corner handle. */
   let resizing: { variable: Dragged; fromX: number; fromY: number } | null = null;
 
-  // A draggable link/image around the embedded player otherwise steals the pointer.
+  // Prevent surrounding draggable links and images from stealing the stage pointer.
   on(window, 'dragstart', (event) => {
     if (vm.mouseDown || vm.clickedEntityId || dragging || sliding || resizing) event.preventDefault();
   }, true);
@@ -667,7 +569,7 @@ function bindInput(
   });
   on(window, 'pointermove', (raw) => {
     const event = raw as PointerEvent;
-    // A held drag belongs to the stage after leaving its smaller on-page canvas too.
+    // Keep tracking held drags outside the embedded canvas.
     if (vm.mouseDown || vm.clickedEntityId) move(event.clientX, event.clientY);
     if (resizing) {
       const point = toStage(event.clientX, event.clientY);
@@ -686,7 +588,7 @@ function bindInput(
       return;
     }
     const point = toStage(event.clientX, event.clientY);
-    // The overlay counts y downwards, the stage upwards.
+    // Overlay y increases downward; stage y increases upward.
     const rows = (-point.y - dragging.fromY) * dragging.rowsPerPixel;
     renderer.overlayView?.scrollTo(dragging.variable, dragging.fromRow + rows);
     renderer.flush();
@@ -697,8 +599,7 @@ function bindInput(
     event.preventDefault();
     if (keyTarget !== window) (keyTarget as HTMLElement).focus({ preventScroll: true });
     move(event.clientX, event.clientY);
-    // A press on a slide variable's run moves its knob, the same way entry lets
-    // one be set while the work runs. The work is not told about that press.
+    // Slider track presses set the knob and do not reach work scripts.
     const slider = renderer.overlayView?.sliderAt(vm.mouseX, -vm.mouseY);
     if (slider && vm.state === 'run') {
       sliding = slider;
@@ -707,8 +608,7 @@ function bindInput(
       event.preventDefault();
       return;
     }
-    // A press on the table window belongs to the window: the close button takes
-    // it down, and the rest of it swallows the press the way entry's modal does.
+    // Table windows consume presses like Entry's modal, including on their close button.
     const onTable = renderer.overlayView?.tableAt(vm.mouseX, -vm.mouseY);
     if (onTable) {
       if (onTable === 'close') {
@@ -718,7 +618,6 @@ function bindInput(
       event.preventDefault();
       return;
     }
-    // The corner handle resizes the list box, the way entry's does.
     const handle = renderer.overlayView?.listHandleAt(vm.mouseX, -vm.mouseY);
     if (handle) {
       resizing = {
@@ -729,8 +628,7 @@ function bindInput(
       event.preventDefault();
       return;
     }
-    // A press inside a list box takes hold of it and scrolls; the work is not
-    // told about that press.
+    // List box presses begin scrolling and do not reach work scripts.
     const list = renderer.overlayView?.listAt(vm.mouseX, -vm.mouseY);
     if (list) {
       dragging = {
@@ -763,8 +661,7 @@ function bindInput(
       dragging = null;
       return;
     }
-    // A release outside the stage still clears the press. A release that never
-    // began on the stage (a click on the debug panel, say) is not the work's.
+    // Clear stage presses on outside release, but ignore releases that started elsewhere.
     if (!vm.mouseDown && !vm.clickedEntityId) {
       return;
     }
@@ -789,7 +686,6 @@ function bindInput(
   on(window, 'pointercancel', up);
   on(window, 'blur', () => up());
 
-  /** What `$CURSOR` last put on the canvas, so giving it back is noticed. */
   let forced = '';
   return () => {
     syncFocus();
@@ -799,8 +695,7 @@ function bindInput(
       renderer.setCursor(asked);
       return;
     }
-    // The work stopped asking: the cursor goes back to the runner's own, even
-    // with the pointer away from the stage.
+    // Restore the automatic cursor when the work clears its request, even outside the stage.
     if (forced) {
       forced = '';
       renderer.setCursor('');
@@ -819,7 +714,6 @@ function bindInput(
   };
 }
 
-/** Front-most entity under the pointer, tested against its own pixels. */
 function pick(vm: Vm): Entity | null {
   return vm.entityAtPoint(
     vm.mouseX * stage.scale + stage.worldWidth / 2,
@@ -838,7 +732,6 @@ function makeQuestionField(view: HTMLElement, submit: (value: string) => void) {
   button.type = 'submit';
   button.title = '확인';
   button.setAttribute('aria-label', '확인');
-  // `images/stage/submit.svg` — the check entry draws on its submit button.
   button.innerHTML =
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.237 8.354a1 1 0 0 1 1.526 ' +
     '1.292l-5.5 6.5a1 1 0 0 1-1.47.061l-3.5-3.5a1 1 0 0 1 1.414-1.414l2.732 2.731 4.798-5.67z"/></svg>';

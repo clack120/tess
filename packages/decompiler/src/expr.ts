@@ -1,22 +1,14 @@
-/**
- * 엔트리 값(value) 및 판단(boolean) 블록을 Tess 표현식 문자열로 변환하는 기능을 제공합니다.
- * 알려지지 않은 블록은 자리표시자를 남기고 경고에 기록합니다.
- */
 import { KEY_CODES, STORE_FLAG_ON, STORE_FLAG_VARIABLE } from '@tess/core';
 import { tessNumber, tessString, tessLiteral, ownsResource, isExactNumber } from './ident.ts';
 import { isBooleanBlock } from '../../compiler/src/expression.ts';
 import { expansionBlock } from '@tess/core';
 import type { DecompileContext, RawBlock, ResourceInfo } from './types.ts';
 
-/**
- * A condition slot's content. Tess puts any value there as it is, so entry reads
- * it with its own rule; an empty slot is written as `false`, which it reads as.
- */
+// Preserve condition values; an empty Entry slot reads as false.
 export function conditionOf(block: any, ctx: DecompileContext): string {
   return block === null || block === undefined ? 'false' : exprOf(block, ctx);
 }
 
-/** Whether Tess compiles this block's expression to a judgement block (`wait x` vs `wait until x`). */
 export function isJudgement(block: any): boolean {
   return isBooleanBlock(block);
 }
@@ -33,16 +25,10 @@ const REVERSE_MATH: Record<string, string> = {
   sin: 'sin', cos: 'cos', tan: 'tan', asin_radian: 'asin', acos_radian: 'acos', atan_radian: 'atan',
   ln: 'ln', log: 'log10', floor: 'floor', ceil: 'ceil', round: 'round', abs: 'abs',
   factorial: 'factorial',
-  // Entry offers `asin` next to `asin_radian`, but its calc_operation strips
-  // everything after the first `_` before switching, so both run the same
-  // `toDegrees(Math.asin(x))`. They therefore map to the same Tess function
-  // rather than to a placeholder.
+  // Entry strips calc_operation suffixes, so asin and asin_radian behave alike.
   asin: 'asin', acos: 'acos', atan: 'atan',
 };
-/**
- * `@확장프로그램 == 1` — Tess 의 `can_save` 다. 세이브 매니저가 있을 때만 그 변수를 1 로
- * 두므로, 작품은 이 비교로 저장 기능이 있는지 본다.
- */
+// The save manager sets its presence flag to 1.
 function isStoreFlagTest(block: RawBlock, ctx: DecompileContext): boolean {
   const params = block.params ?? [];
   if (params[1] !== 'EQUAL') return false;
@@ -57,13 +43,6 @@ function isStoreFlagTest(block: RawBlock, ctx: DecompileContext): boolean {
   return Number(literal) === STORE_FLAG_ON;
 }
 
-/**
- * 좌표 객체의 속성을 Tess 속성 이름으로 매핑합니다.
- * x, y, 방향, 크기 외에도 모양 번호와 모양 이름 등을 처리합니다.
- * 
- * @example
- * REVERSE_PROPERTY_COORD['picture_name']; // "costume"
- */
 const REVERSE_PROPERTY_COORD: Record<string, string> = {
   x: 'x', y: 'y', rotation: 'angle', direction: 'way', size: 'size',
   picture_name: 'costume', picture_index: 'costume_number',
@@ -84,37 +63,15 @@ for (const [name, code] of Object.entries(KEY_CODES)) {
   if (!(String(code) in REVERSE_KEY_CODE)) REVERSE_KEY_CODE[String(code)] = name;
 }
 
-/**
- * 값 블록이 없을 때(빈 슬롯) 사용하는 기본값입니다.
- * 
- * @example
- * const defaultVal = EMPTY; // "0"
- */
 const EMPTY = '0';
 
-/**
- * 주어진 문자열이 `#RRGGBB` 형태의 색상 리터럴이면 그대로 반환하고, 그 외의 경우 Tess 문자열로 변환합니다.
- * 
- * @param raw - 변환할 원본 문자열입니다.
- * @returns 변환된 색상 리터럴 또는 Tess 문자열입니다.
- * 
- * @example
- * colorLiteral("#FF0000"); // "#FF0000"
- * colorLiteral("transparent"); // "transparent"
- * colorLiteral("blue"); // "\"blue\""
- */
 export function colorLiteral(raw: string): string {
   if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw;
   if (raw === 'transparent') return 'transparent';
   return tessString(raw);
 }
 
-/**
- * 오브젝트 슬롯의 값을 Tess 이름으로 바꿉니다. 원본에서 지워진 오브젝트를 가리키는
- * 블록이면 `_missing_object_<아이디>` 로 적습니다 — 엔트리도 그 슬롯을 그대로 두고
- * 실행할 때 찾다가 마는 자리이고, 컴파일러가 이 이름을 보고 아이디를 되돌려 놓습니다.
- * 변수·리스트의 `_missing_var_*` 와 같은 규칙입니다.
- */
+// Keep missing object IDs in placeholder names so compilation can restore the unresolved target.
 export function targetName(ctx: DecompileContext, raw: unknown): string {
   if (raw === 'self' || raw === 'mouse') return raw;
   if (typeof raw === 'string' && raw.startsWith('wall')) return raw;
@@ -126,19 +83,7 @@ export function targetName(ctx: DecompileContext, raw: unknown): string {
   return `_missing_object_${String(raw)}`;
 }
 
-/**
- * 편집기 목록에서 선택한 모양이나 소리 자원을 참조합니다.
- * 전역 함수 내부에서는 객체를 특정할 수 없으므로 이름 대신 ID를 남깁니다.
- * 
- * @param ctx - 디컴파일 컨텍스트입니다.
- * @param id - 자원의 ID입니다.
- * @param byId - ID로 자원 정보를 찾는 맵입니다.
- * @param nameOf - ID로 자원의 이름을 가져오는 함수입니다.
- * @returns 자원 참조를 나타내는 Tess 표현식 문자열입니다.
- * 
- * @example
- * resourceRef(ctx, "sound_1", soundsById, soundName);
- */
+// Keep resource IDs in global functions because the calling object is unknown.
 function resourceRef(
   ctx: DecompileContext,
   id: string,
@@ -151,11 +96,7 @@ function resourceRef(
 
 const BARE_NAME = /^[\p{L}_][\p{L}0-9_]*$/u;
 
-/**
- * Whether `${text}[i]` reads the i-th character of `text`. It must be a single
- * name, and not a list or table name — on those, `[i]` reads an item or a cell
- * instead (compiler/expression.ts resolveList).
- */
+// Indexing reads characters only when the name does not refer to a list or table.
 function indexableName(text: string, ctx: DecompileContext): boolean {
   if (!BARE_NAME.test(text)) return false;
   for (const info of ctx.varsById.values()) if (info.isList && info.identifier === text) return false;
@@ -163,14 +104,10 @@ function indexableName(text: string, ctx: DecompileContext): boolean {
   return true;
 }
 
-/** `stringParam_xxxx` · `booleanParam_xxxx` — a function's parameter in its body. */
 function isParamBlock(type: string): boolean {
   return type.startsWith('stringParam_') || type.startsWith('booleanParam_');
 }
 
-/**
- * 소리를 트는 문장 블록입니다. 값 자리에 놓이면 아래 `SOUND_PROBE` 규칙이 걸립니다.
- */
 const SOUND_PLAY_BLOCKS = new Set([
   'sound_something_with_block',
   'sound_something_wait_with_block',
@@ -180,19 +117,7 @@ const SOUND_PLAY_BLOCKS = new Set([
   'sound_from_to_and_wait',
 ]);
 
-/**
- * 값 자리에 놓인 소리 블록은 1 로 읽습니다.
- *
- * 엔트리는 블록보다 값 자리를 먼저 읽으므로 이 자리의 소리 블록이 실제로 돌고, 소리가
- * 아직 풀리지 않았으면 조용히 지나가고 다 풀렸으면 `AudioBufferSourceNode.start` 가
- * 던져서 **대입 자체가 건너뛰어집니다.** 대입 앞줄에서 1 을 넣어 두고 이 블록으로 그
- * 1 이 살아남는지 보는 것이 널리 쓰이는 '소리 다 받았나' 확인법입니다
- * (`__entryMergy_*` 가 붙은 합작 작품들).
- *
- * tessvm 은 소리를 전부 받은 뒤에야 작품을 시작하므로 그 답은 언제나 '다 받았다' 이고,
- * 그래서 이 자리를 1 로 둡니다. 블록 자체는 옮기지 않습니다 — 값 자리에 놓인 문장은
- * Tess 에 적을 자리가 없습니다.
- */
+// Sound probes become 1 because tessvm loads all sounds before starting.
 function soundProbe(ctx: DecompileContext, block: RawBlock | undefined): string | null {
   if (!block?.type || !SOUND_PLAY_BLOCKS.has(block.type)) return null;
   ctx.notices.add(
@@ -201,13 +126,7 @@ function soundProbe(ctx: DecompileContext, block: RawBlock | undefined): string 
   return '1';
 }
 
-/**
- * 함수 지역변수 이름. 지금 쓰고 있는 함수의 것이 아니면 null 입니다.
- *
- * 엔트리는 실행 중인 함수의 목록에서만 찾고 없으면 `0` 을 돌려줍니다
- * (`Entry.Func.getValue`). 합쳐서 만든 작품에는 함수를 통째로 복사하면서 본체가 원본의
- * 지역변수를 그대로 가리키는 자리가 남습니다.
- */
+// Entry returns 0 for a local ID absent from the running function.
 function funcLocal(ctx: DecompileContext, id: string): string | null {
   const name = ctx.funcLocalName(id);
   if (name === null) {
@@ -226,17 +145,6 @@ function placeholder(ctx: DecompileContext, block: RawBlock | undefined): string
   return `"[decompile: ${type}]"`;
 }
 
-/**
- * 단일 값 또는 판단 블록을 Tess 표현식 문자열로 변환합니다.
- * 
- * @param block - 변환할 엔트리 블록 객체입니다.
- * @param ctx - 디컴파일 컨텍스트입니다.
- * @returns 변환된 Tess 표현식 문자열입니다.
- * 
- * @example
- * const expr = exprOf({ type: 'number', params: [42] }, ctx);
- * console.log(expr); // "42"
- */
 export function exprOf(block: any, ctx: DecompileContext): string {
   if (block === null || block === undefined) return EMPTY;
   if (typeof block === 'string') return tessString(block);
@@ -247,10 +155,7 @@ export function exprOf(block: any, ctx: DecompileContext): string {
   const at = (i: number) => p[i];
 
   switch (block.type) {
-    /**
-     * 숫자와 텍스트 블록은 모두 입력된 문자열을 반환합니다.
-     * 숫자로 해석 가능한 리터럴은 숫자로 변환하고, 문자열 형태가 유지되어야 하는 값(예: "01")은 문자열로 변환합니다.
-     */
+    // Preserve literal text such as leading zeros instead of converting it to a number.
     case 'number': case 'text': {
       const raw = String(at(0) ?? '');
       if (raw === 'transparent') return 'transparent';
@@ -269,23 +174,19 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       if (target === 'self' || target === null) return coordinate;
       return `${coordinate}(${tessString(targetName(ctx, target))})`;
     }
-    // --- 10여 년 전 이름 (엔트리가 옛 작품을 위해 아직 들고 있는 블록) ---------
     case 'get_x_coordinate': return 'x';
     case 'get_y_coordinate': return 'y';
     case 'calc_mod': return `(${exprOf(at(0), ctx)} % ${exprOf(at(2), ctx)})`;
     case 'calc_share': return `(${exprOf(at(0), ctx)} // ${exprOf(at(2), ctx)})`;
-    // The pre-`calc_basic` operator blocks: one block per operator, operands at 0 and 2.
-    // Entry reads both sides as numbers here, so `+` never concatenates in these.
+    // Legacy arithmetic reads both operands as numbers, so + never concatenates.
     case 'calc_plus': return `(${exprOf(at(0), ctx)} + ${exprOf(at(2), ctx)})`;
     case 'calc_minus': return `(${exprOf(at(0), ctx)} - ${exprOf(at(2), ctx)})`;
     case 'calc_times': return `(${exprOf(at(0), ctx)} * ${exprOf(at(2), ctx)})`;
     case 'calc_divide': return `(${exprOf(at(0), ctx)} / ${exprOf(at(2), ctx)})`;
-    // The pre-`boolean_basic_operator` comparisons, same operand slots.
     case 'boolean_equal': return `(${exprOf(at(0), ctx)} == ${exprOf(at(2), ctx)})`;
     case 'boolean_bigger': return `(${exprOf(at(0), ctx)} > ${exprOf(at(2), ctx)})`;
     case 'boolean_smaller': return `(${exprOf(at(0), ctx)} < ${exprOf(at(2), ctx)})`;
-    // 리스트 자리의 `첫번째`·`마지막`·`무작위`. 엔트리는 그 글자를 그대로 번호 자리에서
-    // 풀고(`Entry.getListRealIndex`), tessvm 도 같은 자리에서 같게 읽습니다.
+    // Entry resolves FIRST, LAST, and RANDOM in list index slots.
     case 'options_for_list': return tessString(String(at(0) ?? 'FIRST'));
 
     case 'coordinate_mouse': {
@@ -307,21 +208,12 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       const op = at(3);
       if (op === 'square') return `(${exprOf(at(1), ctx)} ** 2)`;
       if (op === 'root') return `(${exprOf(at(1), ctx)} ** 0.5)`;
-      // Entry's fractional-part operator (`소수 부분`) subtracts with BigNumber:
-      // `BigNumber(x).minus(floor(x))`, so 49.1 gives exactly 0.1. `%` is not the
-      // same thing — entryjs runs MOD as plain `l - r * floor(l / r)` in binary
-      // floating point, which gives 0.09999999999999787 instead, and a work that
-      // reads the decimal digits off that string (deltarune does) then computes
-      // something else entirely. `-` is the block that subtracts decimally, so
-      // the fraction is written out with it. `abs` covers the negative side:
-      // entry's operator answers the fraction of |x| there too.
+      // Use decimal subtraction for fractional parts; modulo introduces binary rounding errors.
       if (op === 'unnatural') {
         const value = `abs(${exprOf(at(1), ctx)})`;
         return `(${value} - floor(${value}))`;
       }
-      // Entry checks the operator against its own list and takes anything else
-      // as `round` (`block_calc.js`), so an operator this does not know is not
-      // a block it cannot carry over — it is a rounding.
+      // Entry treats unknown rounding operators as round.
       const fn = REVERSE_MATH[op as string] ?? 'round';
       return `${fn}(${exprOf(at(1), ctx)})`;
     }
@@ -333,20 +225,16 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       return `(${exprOf(at(0), ctx)} ${op} ${exprOf(at(2), ctx)})`;
     }
     case 'boolean_and_or': {
-      // Entry applies Boolean() here, so an empty side is false.
+      // Entry applies Boolean here, so an empty side is false.
       const side = (i: number) => at(i) == null ? 'false' : exprOf(at(i), ctx);
       return `(${side(0)} ${at(1) === 'AND' ? 'and' : 'or'} ${side(2)})`;
     }
-    /** Entry's older and/or pair, kept for works saved before `boolean_and_or`. */
     case 'boolean_and': return `(${conditionOf(at(0), ctx)} and ${conditionOf(at(2), ctx)})`;
     case 'boolean_or': return `(${conditionOf(at(0), ctx)} or ${conditionOf(at(2), ctx)})`;
     case 'boolean_not': return `not (${conditionOf(at(1), ctx)})`;
     case 'True': return 'true';
     case 'False': return 'false';
-    /**
-     * 판단 블록을 값으로 사용할 때 감싸는 블록입니다.
-     * Tess에서는 값 위치에 판단식을 그대로 사용할 수 있으므로 내부 표현식만 변환합니다.
-     */
+    // Keep judgement expressions directly because Tess value slots accept them.
     case 'get_boolean_value': return `boolean_value(${conditionOf(at(0), ctx)})`;
     case 'is_clicked': case 'is_object_clicked': case 'is_boost_mode':
     case 'is_touch_supported': case 'get_user_name': case 'get_nickname':
@@ -360,7 +248,7 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       return `block_count(${tessString(targetName(ctx, target))})`;
     }
     case 'is_press_some_key': {
-      // A code with no name of its own is written as the number itself.
+      // Keep unnamed key codes as numbers.
       const code = String(at(0) ?? '').trim();
       const key = REVERSE_KEY_CODE[code] ?? (/^[0-9]{1,3}$/.test(code) ? code : null);
       return key ? `key_down(${tessString(key)})` : placeholder(ctx, block);
@@ -380,10 +268,6 @@ export function exprOf(block: any, ctx: DecompileContext): string {
     case 'char_at': {
       const index = exprOf(at(3), ctx);
       const target = exprOf(at(1), ctx);
-      // `이름[i]` is the only Tess form that compiles back to char_at, and it
-      // takes a bare name (parser.js indexExpr). Everything else has to go
-      // through slice, which evaluates the index twice — a different value
-      // every time when the index is random or an answer.
       if (indexableName(target, ctx)) return `${target}[${index}]`;
       const literalIndex = at(3) === null || at(3) === undefined
         || ['number', 'text'].includes((at(3) as RawBlock | undefined)?.type ?? '');
@@ -416,15 +300,13 @@ export function exprOf(block: any, ctx: DecompileContext): string {
     }
     case 'text_read': return `text_content(${tessString(targetName(ctx, at(0)))})`;
 
-    // --- 테이블 --------------------------------------------------------------
     case 'get_table_count':
       return `${String(at(1)) === 'COL' ? 'column_count' : 'row_count'}(${ctx.tableName(at(0))})`;
     case 'get_value_from_table':
       return `${ctx.tableName(at(0))}[${exprOf(at(1), ctx)}, ${exprOf(at(2), ctx)}]`;
     case 'get_value_from_cell':
       return `${ctx.tableName(at(0))}[${exprOf(at(1), ctx)}]`;
-    // 열 고르기 드롭다운. 엔트리는 이름을 보여 주지만 담고 있는 것은 1부터 세는
-    // 열 번호이고, 표의 열 자리는 그 번호로 읽는다.
+    // Entry stores one-based column numbers even when the dropdown displays names.
     case 'get_table_fields':
       return tessLiteral(at(0));
     case 'get_value_from_last_row':
@@ -442,21 +324,12 @@ export function exprOf(block: any, ctx: DecompileContext): string {
 
     case 'get_pictures': return resourceRef(ctx, at(0), ctx.picturesById, ctx.pictureName);
     case 'get_sounds': return resourceRef(ctx, at(0), ctx.soundsById, ctx.soundName);
-    /** 소리 길이 블록은 드롭다운 필드에서 소리 ID를 직접 사용합니다. */
     case 'get_sound_duration':
       return `sound_duration(${resourceRef(ctx, at(1), ctx.soundsById, ctx.soundName)})`;
-    /**
-     * 색상 선택 필드에서 선택한 색상(#RRGGBB)을 리터럴로 반환합니다.
-     * Both blocks are primitive colour pickers holding that hex string: `color`
-     * fills the brush blocks' slot, `text_color` the text blocks' one.
-     */
+    // Both primitive color pickers hold a plain hex string.
     case 'color': case 'text_color': return colorLiteral(String(at(0) ?? ''));
 
-    /** 사용자 정의 함수 호출 및 확장 블록을 처리합니다. */
     default: {
-      /**
-       * 확장 블록(날씨, 축제 등)의 드롭다운 값은 문자열로 처리하고, 값 슬롯은 표현식으로 변환합니다.
-       */
       const expansion = expansionBlock(block.type);
       if (expansion) {
         const args = expansion.slots.map((slot, i) => (slot === 'value'
@@ -465,13 +338,9 @@ export function exprOf(block: any, ctx: DecompileContext): string {
         return `${block.type}(${args.join(', ')})`;
       }
 
-      /** 함수 본문에서 매개변수를 참조하는 블록을 처리합니다. */
       const paramName = ctx.funcParamName?.(block.type);
       if (paramName) return paramName;
-      // A parameter block of some other function — dragged in while the work was
-      // being written, and left there. Entry finds nothing for it in the running
-      // function's `paramMap` and hands the slot an empty value, so the slot is
-      // written the way an empty slot is rather than as a name nothing declares.
+      // Entry treats another function's parameter as an empty slot.
       if (isParamBlock(block.type)) {
         ctx.notices.add(
           `'${block.type}' 은(는) 다른 함수의 매개변수입니다. 엔트리도 이 자리를 빈 값으로 읽으므로 그렇게 옮겼습니다.`,

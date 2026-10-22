@@ -1,16 +1,4 @@
-/**
- * @fileoverview Builds the loadable extension folder.
- *
- * No bundler: every module keeps its own file, its own lines and its own name,
- * exactly as the run server serves them. The graph is walked from the entry
- * points, types are stripped, and the import specifiers are pointed at where
- * each file lands — tessvm's browser sources under `vendor/tessvm`, pixi next
- * to them.
- *
- * The content script is the exception. A file listed in `content_scripts` is
- * loaded as a **classic script**, where `import` is a syntax error and nothing
- * in the file runs, so its own small graph is flattened into one script instead.
- */
+// Keep modules separate, but flatten content scripts because browsers load them as classic scripts.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -32,21 +20,17 @@ const DEXIE_IO_OUT = path.join(VENDOR, 'dexie-export-import.mjs');
 const ZIP = path.join(ROOT, 'tessvm-extension.zip');
 const CHROME_ZIP = path.join(ROOT, 'tessvm-extension-chrome.zip');
 const CRX = path.join(ROOT, 'tessvm-extension.crx');
-/** Signing key for the crx. The extension id is derived from it, so it stays put. */
+// The signing key determines the extension ID, so keep it stable.
 const CRX_KEY = path.join(ROOT, 'crx-key.pem');
 
-/** Loaded as modules, by a document that asks for them. */
 const MODULE_ENTRIES = ['page/main.ts', 'popup/popup.ts', 'background.ts'];
-/** Loaded as classic scripts by the browser itself. */
 const CLASSIC_ENTRIES = ['content.ts'];
 const ICON_SIZES = [16, 32, 48, 128];
 
-/** Relative `.ts` specifiers and the bare ones the sources use. */
 const RELATIVE_IMPORT = /(['"])(\.\.?\/[^'"]*\.ts)\1/g;
 const PIXI_IMPORT = /(['"])pixi\.js\1/g;
 const DEXIE_IMPORT = /(['"])dexie\1/g;
 const DEXIE_IO_IMPORT = /(['"])dexie-export-import\1/g;
-/** `import … from '…';`, and the side-effect form. */
 const IMPORT_STATEMENT = /^import\s[\s\S]*?from\s*['"][^'"]*['"];?[^\S\n]*$/gm;
 const BARE_IMPORT = /^import\s*['"][^'"]*['"];?[^\S\n]*$/gm;
 const EXPORT_KEYWORD = /^export\s+(?=(?:const|let|var|function|class|async)\b)/gm;
@@ -54,7 +38,6 @@ const LEFTOVER_MODULE = /^\s*(?:import|export)\b/m;
 
 const read = (file: string) => stripTypes(fs.readFileSync(file, 'utf-8'));
 
-/** Where one source file lands in the build, by the tree it came from. */
 function outputFor(file: string): string {
   const roots = [
     { src: SRC, out: DIST },
@@ -74,7 +57,6 @@ function link(from: string, to: string): string {
   return relative.startsWith('.') ? relative : `./${relative}`;
 }
 
-/** What this file imports, as absolute paths. */
 function importsOf(file: string): string[] {
   const text = read(file);
   const found: string[] = [];
@@ -84,7 +66,6 @@ function importsOf(file: string): string[] {
   return found;
 }
 
-/** Strips types and repoints the imports; returns what this file pulls in. */
 function emitModule(file: string): string[] {
   const out = outputFor(file);
   const found: string[] = [];
@@ -119,7 +100,7 @@ function emitModules(roots: string[]): Set<string> {
   return seen;
 }
 
-/** Dependencies first, so the flattened script declares things before it uses them. */
+// Emit dependencies first so flattened scripts declare names before using them.
 function inOrder(file: string, seen: Set<string>, out: string[]): void {
   if (seen.has(file)) {
     return;
@@ -131,11 +112,7 @@ function inOrder(file: string, seen: Set<string>, out: string[]): void {
   out.push(file);
 }
 
-/**
- * Flattens one entry and everything it imports into a single classic script.
- * `new Function` is the check that it really is one — it catches a leftover
- * `import` and a name two of the flattened files both declare.
- */
+// Parse the flattened script to catch remaining imports and duplicate declarations.
 function emitClassic(entry: string): number {
   const files: string[] = [];
   inOrder(entry, new Set(), files);
@@ -165,7 +142,6 @@ function emitClassic(entry: string): number {
   return files.length;
 }
 
-/** Every specifier an emitted module points at has to be there. */
 function checkLinks(): void {
   const walk = (dir: string): string[] =>
     fs.readdirSync(dir, { withFileTypes: true }).flatMap((item) => {
@@ -186,11 +162,7 @@ function checkLinks(): void {
   }
 }
 
-/**
- * Every file the manifest names has to be in the build. A missing one is not a
- * warning at install time — firefox refuses the whole add-on ("Extension is
- * invalid"), and chrome quietly drops the part that named it.
- */
+// Missing manifest files can prevent installation or silently disable extension features.
 function checkManifest(): void {
   const manifest = JSON.parse(fs.readFileSync(path.join(DIST, 'manifest.json'), 'utf-8'));
   const named: string[] = [
@@ -221,7 +193,6 @@ function checkManifest(): void {
   }
 }
 
-/** The folder an installed package sits in, wherever the store put it. */
 function packageDir(from: string, name: string): string {
   const require = createRequire(from);
   let dir = path.dirname(require.resolve(name));
@@ -235,12 +206,12 @@ function packageDir(from: string, name: string): string {
   return dir;
 }
 
-/** One dependency's own esm build, with its source map comment dropped. */
+// Drop source map comments because package maps are not shipped with the extension.
 function copyVendor(from: string, name: string, inside: string, out: string): void {
   const source = path.join(packageDir(from, name), inside);
   const code = fs.readFileSync(source, 'utf-8')
     .replace(/\n?\/\/# sourceMappingURL=.*$/, '\n')
-    // An addon names the library it sits on; nothing resolves a bare name here.
+    // Rewrite bare library imports because the browser cannot resolve package names here.
     .replace(DEXIE_IMPORT, (_match, quote: string) => `${quote}${link(out, DEXIE_OUT)}${quote}`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, code);
@@ -248,16 +219,12 @@ function copyVendor(from: string, name: string, inside: string, out: string): vo
 
 const rel = (file: string) => path.relative(process.cwd(), file);
 
-/**
- * The manifest each browser gets. `browser_specific_settings` is firefox's own
- * key; chrome has no use for it and its store checks the manifest for keys it
- * does not know.
- */
+// Remove Firefox-only manifest keys from Chrome builds.
 function writeManifest(target: 'chrome' | 'firefox'): void {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf-8'));
   if (target === 'chrome') {
     delete manifest.browser_specific_settings;
-    // Chrome runs the worker as a service worker; firefox as an event page.
+    // Chrome uses a service worker; Firefox uses an event page.
     manifest.background = { service_worker: 'background.js', type: 'module' };
   }
   fs.writeFileSync(path.join(DIST, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -301,12 +268,11 @@ copy(path.join(SRC, 'popup', 'popup.css'), path.join(DIST, 'popup', 'popup.css')
 writeIcons();
 checkLinks();
 
-// The two browsers get the same files under a manifest of their own, so the
-// build writes one, packs it, then writes the other over it.
+// Pack each browser's manifest before writing the next one over it.
 writeManifest('firefox');
 checkManifest();
 zipDirectory(DIST, ZIP);
-// `dist` is left as the chrome build — that is the one loaded unpacked.
+// Leave the Chrome manifest in dist for unpacked loading.
 writeManifest('chrome');
 checkManifest();
 zipDirectory(DIST, CHROME_ZIP);

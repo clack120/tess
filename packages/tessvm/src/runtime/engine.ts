@@ -1,10 +1,3 @@
-/**
- * @fileoverview 작품을 실제로 돌리는 실행 엔진입니다.
- *
- * 엔트리의 `Entry.engine.update` 한 틱과 같은 일을 합니다 — 지금 장면의 오브젝트를
- * 순서대로 훑으면서 그 오브젝트에 붙은 스레드를 한 번씩 진행시킵니다. 다른 점은 각
- * 스레드가 블록 트리를 해석하는 대신 미리 컴파일해 둔 제너레이터라는 것뿐입니다.
- */
 import { Codegen, type CompileInput, type FunctionEntry, type RawBlock, type ScriptPlan } from '../compile/codegen.ts';
 import { attachJsKernel, CALL_DEPTH_LIMIT, type KernelHandle } from '../kernel/bridge.ts';
 import { planKernel, type KernelPlan } from '../kernel/plan.ts';
@@ -35,11 +28,7 @@ import { SaveStore, functionName } from './save.ts';
 import { Extras } from './extras.ts';
 import { blockOfError, snapshotVm, RuntimeBlockError, type GeneratedTrace, type RuntimeValue, type VmSnapshot } from './diagnostics.ts';
 
-/**
- * Tick rate used when the project does not declare one. Entry drives its loop
- * with `setInterval(Math.floor(1000 / Entry.FPS))`, so its real cadence sits a
- * little above the nominal number.
- */
+// Entry floors the interval in milliseconds, so actual tick cadence can exceed the nominal rate.
 export const DEFAULT_FPS = 64;
 export const MAX_CLONES = 360;
 
@@ -54,7 +43,6 @@ export interface EntryProjectLike {
   name?: string;
 }
 
-/** Reads text aloud for the TTS blocks; resolves when the reading ends. */
 export interface SpeechEngine {
   speak(text: string, voice: VoiceProps): Promise<void>;
   stop(): void;
@@ -62,36 +50,22 @@ export interface SpeechEngine {
   resume?(): void;
 }
 
-/**
- * Answers the `번역` blocks. Entry asks its own papago service and takes a
- * default answer when nothing comes back within three seconds, so an
- * implementation carries its own deadline rather than leaving a script waiting.
- */
+// Translation hosts need a deadline so failed API calls cannot hold scripts forever.
 export interface Translator {
-  /** The text in `target`, or an empty string where nothing could be had. */
   translate(text: string, source: string, target: string): Promise<string>;
-  /** The language code the text was written in, or an empty string. */
   detect(text: string): Promise<string>;
 }
 
-/** Measures a text box exactly the way the renderer will draw it. */
 export interface TextMeasurer {
   measureTextBox(entity: Entity): { width: number; height: number } | null;
 }
 
 export interface Renderer extends RendererLike, Partial<TextMeasurer> {
-  /** Called once per project load, before any entity is added. */
   attach?(targets: Target[], scenes: Scene[]): void;
-  /** `FRONT` · `BACK` · `FORWARD` · `BACKWARD`, as the block names them. */
   moveEntity?(entity: Entity, location: string): void;
-  /**
-   * The scene's entities in the order they are drawn, front-most first.
-   * `오브젝트 순서 바꾸기` moves an object within that order, so a click has to
-   * be looked for in it rather than in the order the work declared its objects.
-   */
+  // Use live draw order for picking because layer changes leave declaration order unchanged.
   drawOrder?(sceneId: string): Entity[];
   syncDialog?(entity: Entity): void;
-  /** `테이블 창 열기` · `차트 창 열기` — null closes whichever window is open. */
   showTable?(table: Table | null, chart?: number | null): void;
   stamp?(entity: Entity): void;
   eraseAll?(entity: Entity): void;
@@ -102,7 +76,7 @@ export interface Renderer extends RendererLike, Partial<TextMeasurer> {
   maskFor?(pictureId: string, width: number, height: number): AlphaMask | null;
   reset?(): void;
   setScene?(sceneId: string): void;
-  /** 부스트 모드가 바뀌었다 — 그리는 방식이 달라지므로 다시 그려야 한다. */
+  // Redraw when boost changes the drawing rules.
   setBoost?(on: boolean): void;
 }
 
@@ -113,7 +87,6 @@ export interface AudioEngine {
   stopAll(): void;
   stopEntity(entityId: string): void;
   stopExcept(entityId: string): void;
-  /** Holds what is playing where it is; `resume` picks it back up. */
   pause?(): void;
   resume?(): void;
   setVolume(volume: number): void;
@@ -122,67 +95,40 @@ export interface AudioEngine {
   getSpeed(): number;
 }
 
-/** Who the work is running for; `null` where nobody is signed in. */
 export interface EntryUser {
-  /** `아이디` — entry's `window.user.username`. */
   id: string;
-  /** `닉네임` — entry's `window.user.nickname`. */
   nickname: string;
 }
 
-/** What `아이디` and `닉네임` answer when nobody is signed in. */
+// Entry returns a space for both fields when signed out.
 export const GUEST = ' ';
 
-/** How often a running work writes its shared and real-time variables out. */
 const STORE_FLUSH_MS = 1000;
 
 export interface VmOptions {
   renderer?: Renderer | null;
   audio?: AudioEngine | null;
   speech?: SpeechEngine | null;
-  /** Answers the `번역` blocks; without one they answer as entry does offline. */
+  // Without a translation host, return Entry's offline result.
   translator?: Translator | null;
-  /** Overrides the project's own `speed`. Leave unset to follow the project. */
+  // Leave unset to use the project's speed.
   fps?: number;
-  /** Stage size in entry units; entry's own stage is 480×270. */
   stageWidth?: number;
   stageHeight?: number;
-  /**
-   * What `boost_mode?` answers. On by default: boost mode is entry's switch
-   * between its 2D and WebGL renderers, and tessvm only has the WebGL one, so
-   * the flag is the whole of it here. Works that check it do so to tell the
-   * player to turn it on.
-   */
+  // Boost defaults on and also selects Entry-compatible fill and text behavior.
   boost?: boolean;
   deviceType?: 'desktop' | 'tablet' | 'mobile';
   touch?: boolean;
-  /**
-   * Who `아이디`(`get_user_name`) and `닉네임`(`get_nickname`) answer with.
-   * Entry reads `window.user`, which only the site itself fills in, so a runner
-   * outside it leaves this unset and both blocks answer a space, as entry does.
-   */
+  // Without a signed-in viewer, both identity blocks return a space.
   user?: EntryUser | null;
-  /** Ticks per frame ceiling when catching up on lost time. */
   maxCatchUp?: number;
-  /** Where shared and real-time variables are kept between runs. */
   store?: VariableStore | null;
-  /**
-   * Runs the numeric functions the work spends its frame in as specialised
-   * javascript. Off keeps every function on the block runner's own path.
-   */
+  // Disable the kernel to keep all functions on the block execution path.
   kernel?: boolean;
 }
 
-/**
- * Standing storage for the work's shared (`isCloud`) and real-time variables.
- *
- * Entry keeps these on its server, so they hold what the last run left and
- * every player of the work sees the same value. A runner outside the site puts
- * them wherever it can — the browser's own storage — and one with nowhere to
- * put them leaves this unset, which still keeps them across a stop and start.
- */
+// Use the supplied store for persistent shared values; without one they survive only VM restarts.
 export interface VariableStore {
-  /** Value of one variable, or undefined when nothing is stored for it. */
   read(key: string): string | number | boolean | Array<{ data: string | number | boolean }> | undefined;
   write(key: string, value: string | number | boolean | Array<{ data: string | number | boolean }>): void;
 }
@@ -191,13 +137,12 @@ export interface VmError {
   message: string;
   blockId: string | null;
   targetId: string | null;
-  /** Where it happened, for a person: scene, object, and the function calls it was inside. */
   where?: string;
   name?: string;
   stack?: string;
   blockType?: string;
   inputs?: Record<string, RuntimeValue>;
-  /** Captured before the host stops or resets the work. */
+  // Capture before stopping or resetting the work.
   snapshot?: VmSnapshot;
   context?: {
     frame: number;
@@ -225,15 +170,13 @@ export class Vm implements Project {
   renderer: Renderer | null;
   audio: AudioEngine | null;
   readonly cast = cast;
-  /** `$TESSVM` and the names beside it — what this runner has and entry has not. */
   readonly extras = new Extras(this);
-  /** `store` names the work keeps between runs (`save.ts`). */
   readonly save = new SaveStore(this);
   readonly masks: MaskStore;
   readonly collision: CollisionSystem;
   ops!: Ops;
 
-  /** `Entry.FPS` — drives the tick step and every `초` → 프레임 conversion. */
+  // Use project FPS for tick timing and seconds-to-frame conversion.
   frameRate: number;
   private boostOn: boolean;
   deviceType: 'desktop' | 'tablet' | 'mobile';
@@ -242,51 +185,41 @@ export class Vm implements Project {
 
   state: 'stop' | 'run' | 'pause' = 'stop';
   currentSceneId = '';
-  /** Scene a run begins on; empty means the first one, the way entry starts. */
   private startSceneId = '';
-  /** Milliseconds of running time; frozen while paused or stopped. */
   clock = 0;
   frame = 0;
   answer: string | number = '';
   answerVisible = true;
   question: string | null = null;
-  /** Set by the renderer when the viewer submits an answer. */
   pendingAnswer: string | null = null;
   pressedKeys = new Set<number>();
   mouseX = 0;
   mouseY = 0;
-  /**
-   * Whether the pointer has been over the stage yet. Until then entry's canvas
-   * pointer sits at the canvas's top left corner, not at the stage middle.
-   */
+  // Before the pointer enters, Entry places it at the canvas's top-left corner.
   pointerSeen = false;
   mouseDown = false;
   clickedEntityId: string | null = null;
-  /** The table whose window stands open, and when it closes itself. */
   private shownTable: Table | null = null;
   private tableCloseAt: number | null = null;
   errors: VmError[] = [];
-  /** Kept through stop/reset so the failed run can still be inspected. */
+  // Keep failure state through stop and reset so it can still be inspected.
   lastError: VmError | null = null;
-  /** Called right after an error is recorded, for the debug panel to report it. */
   onError: ((error: VmError) => void) | null = null;
 
-  /** `Entry.engine.projectTimer` — off until a `초시계 시작하기` block runs. */
+  // The project timer stays stopped until a timer-start block runs.
   private timerInit = false;
   private timerPaused = false;
   private timerStart = 0;
   private timerBase = 0;
   timerVisible = false;
 
-  /** Messages sent this frame, raised once the frame is over. */
+  // Deliver ordinary messages after the current frame.
   private pendingMessages: string[] = [];
 
   private scripts: CompiledScript[] = [];
   private readonly traces = new WeakMap<CompiledScript['body'], GeneratedTrace>();
   private kernelOn: boolean;
-  /** What the last `load` found it could move to the kernel, for `tessvm check`. */
   kernelPlan: KernelPlan | null = null;
-  /** The running kernel, or null when the work stayed on javascript. */
   kernel: KernelHandle | null = null;
   private plans: ScriptPlan[] = [];
   private targetById = new Map<string, Target>();
@@ -297,15 +230,13 @@ export class Vm implements Project {
   private readonly maxCatchUp: number;
   private readonly requestedFps: number | undefined;
   private store: VariableStore | null;
-  /** Shared and real-time variables, the only ones the store holds. */
   private storedVars: Variable[] = [];
-  /** Last text written for each stored variable, so an unmoved one is skipped. */
+  // Skip unchanged stored values on the next write.
   private readonly written = new Map<string, string>();
   private lastStoreFlush = 0;
   unknownBlocks = new Map<string, number>();
-  /** Key codes the work reacts to or reads; null when it may read any key. */
+  // A null key set means the work may read any key.
   usedKeys: Set<number> | null = new Set();
-  /** What the loaded work was compiled from; `evaluate` compiles against the same records. */
   private compileInput: CompileInput | null = null;
 
   constructor(options: VmOptions = {}) {
@@ -340,13 +271,9 @@ export class Vm implements Project {
     return this.renderer?.measureTextBox?.(entity) ?? null;
   }
 
-  // -------------------------------------------------------------------------
-  //  Loading
-  // -------------------------------------------------------------------------
   load(project: EntryProjectLike): void {
     this.lastError = null;
-    // `Entry.FPS = project.speed ? project.speed : 60` — a work can ask for a
-    // slower loop, and every timed block counts frames at that rate.
+    // Match Entry's project speed fallback and use it for timed blocks.
     this.frameRate = this.requestedFps ?? (Number(project.speed) || DEFAULT_FPS);
     this.scenes = project.scenes.map((scene) => ({ id: scene.id, name: scene.name }));
     this.sceneById = new Map(this.scenes.map((scene) => [scene.id, scene]));
@@ -431,7 +358,7 @@ export class Vm implements Project {
     this.snapshot();
     this.renderer?.attach?.(this.targets, this.scenes);
     for (const target of this.targets) {
-      // 작품이 담고 있던 높이는 그대로 씁니다 — 엔트리도 `setText` 로 폭만 다시 잽니다.
+      // Preserve saved text height; Entry remeasures only width after setText.
       target.entity.measure(false);
       this.renderer?.addEntity(target.entity);
     }
@@ -510,7 +437,7 @@ export class Vm implements Project {
     ) => { scripts: CompiledScript['body'][]; functions: CompiledFunction[] };
     const built = factory(this);
     built.scripts.forEach(body => this.traces.set(body, program.trace));
-    // A call frame is a generator, and its prototype says which function made it.
+    // Identify function frames by their generator prototypes.
     this.functionOf = new WeakMap();
     const note = () => this.rememberFunctions(built.functions, input.functions);
     note();
@@ -531,13 +458,7 @@ export class Vm implements Project {
     });
   }
 
-  /**
-   * Moves the numeric functions a work spends its frame in over to the kernel.
-   *
-   * Nothing here changes what the work does: a call that the kernel cannot
-   * finish the same way entry would leaves its mark, and the javascript body
-   * runs instead on data the kernel never wrote to.
-   */
+  // Fall back to the original body on untouched data if kernel execution cannot preserve Entry behavior.
   private installKernel(input: CompileInput, table: CompiledFunction[]): void {
     this.kernelPlan = null;
     this.kernel = null;
@@ -560,8 +481,7 @@ export class Vm implements Project {
         continue;
       }
       table[index] = function* (entity, thread, args) {
-        // Entry ends a call chain this deep, and the kernel's own chain has to
-        // fit inside what is left of it.
+        // Leave room for the kernel's call chain inside the remaining recursion limit.
         if (thread.depth + handle.depth < CALL_DEPTH_LIMIT) {
           let numeric = true;
           for (let at = 0; at < root.arity; at += 1) {
@@ -584,11 +504,7 @@ export class Vm implements Project {
     }
   }
 
-  /**
-   * Works out one value block for an object as the work stands now. A block
-   * that waits (an api answer, a timer) is stepped again every frame until it
-   * is done or `timeoutMs` has gone by, which gives undefined.
-   */
+  // Step waiting reporter blocks across frames until completion or the evaluation timeout.
   async evaluate(block: RawBlock, targetId: string, timeoutMs = 5000): Promise<unknown> {
     const target = this.targetOf(targetId);
     if (!target || !this.compileInput) {
@@ -624,21 +540,12 @@ export class Vm implements Project {
     return thread.done ? thread.state.result : undefined;
   }
 
-  /**
-   * Starts one stack of blocks in an object while the work runs, the way a hat
-   * would: it gets a thread of its own and carries on with everything else.
-   * An editor uses it to run a stack in a session that is already going.
-   */
   runStack(stack: RawBlock[], targetId: string, extraFunctions: FunctionEntry[] = []): boolean {
     const body = this.compileStack(stack, extraFunctions);
     return body ? this.startStack(body, targetId, String(stack[0]?.id ?? '')) : false;
   }
 
-  /**
-   * Compiles one stack against the loaded work, once, for `startStack` to run
-   * as often as it is asked. Functions the stack calls that the running work
-   * does not have (the compiler's own helpers, most often) come along.
-   */
+  // Compile added helper functions alongside editor-started stacks when the loaded work lacks them.
   compileStack(stack: RawBlock[], extraFunctions: FunctionEntry[] = []): CompiledScript['body'] | null {
     if (!this.compileInput) {
       return null;
@@ -654,10 +561,7 @@ export class Vm implements Project {
     return built.scripts[0] ?? null;
   }
 
-  /**
-   * Starts a compiled stack in an object: its first step runs right away,
-   * then it carries on frame by frame with everything else.
-   */
+  // Run a newly started stack immediately, then continue with other scripts each frame.
   startStack(body: CompiledScript['body'], targetId: string, blockId = ''): boolean {
     const target = this.targetOf(targetId);
     if (!target) {
@@ -671,7 +575,6 @@ export class Vm implements Project {
     return true;
   }
 
-  /** Generated source, for `tessvm build --emit-js` and for debugging. */
   compiledSource(project: EntryProjectLike): string {
     const input: CompileInput = {
       objects: project.objects.map((raw) => ({
@@ -693,9 +596,6 @@ export class Vm implements Project {
     return new Codegen(input).compile().source;
   }
 
-  // -------------------------------------------------------------------------
-  //  Lookup
-  // -------------------------------------------------------------------------
   targetOf(id: string): Target | null {
     return this.targetById.get(id) ?? null;
   }
@@ -704,14 +604,7 @@ export class Vm implements Project {
     return this.targetById.get(id)?.entity ?? null;
   }
 
-  /**
-   * The entity a press at these stage coordinates lands on, or null.
-   *
-   * Entry reads the stage's own display list to find what was clicked, so an
-   * object that `오브젝트 순서 바꾸기` moved to the front takes the click from
-   * whatever it now covers. The renderer holds that list; the order the work
-   * declared its objects in stands in only while there is no renderer to ask.
-   */
+  // Pick by the renderer's live display order; declared order is only a headless fallback.
   entityAtPoint(worldX: number, worldY: number): Entity | null {
     const scene = this.currentSceneId;
     const drawn = this.renderer?.drawOrder?.(scene);
@@ -728,14 +621,8 @@ export class Vm implements Project {
     return null;
   }
 
-  /** Hat blocks that answer a press on the object itself. */
   private static readonly CLICK_EVENTS = ['when_object_click', 'when_object_click_canceled'];
 
-  /**
-   * Whether a press at these stage coordinates would start a script. The page
-   * shows the reader a pointer over such a spot; a work that is not running has
-   * none, since nothing would answer the press.
-   */
   clickableAt(worldX: number, worldY: number): boolean {
     if (this.state !== 'run') {
       return false;
@@ -766,10 +653,6 @@ export class Vm implements Project {
     return this.targets.filter((target) => target.sceneId === scene);
   }
 
-  // -------------------------------------------------------------------------
-  //  Shared and real-time variables
-  // -------------------------------------------------------------------------
-  /** Puts back what the store holds, over the values the work was saved with. */
   readStore(): void {
     this.written.clear();
     if (!this.store) {
@@ -790,11 +673,7 @@ export class Vm implements Project {
     }
   }
 
-  /**
-   * Hands the store every shared or real-time variable that moved since the
-   * last write. Called on a beat while the work runs and once more when it
-   * stops, so the value that outlives the run is the one the work left.
-   */
+  // Save changed shared values periodically and once more when stopping.
   flushStore(): void {
     if (!this.store) {
       return;
@@ -812,9 +691,6 @@ export class Vm implements Project {
     }
   }
 
-  // -------------------------------------------------------------------------
-  //  Running
-  // -------------------------------------------------------------------------
   private snapshot(): void {
     for (const variable of this.variables) {
       variable.takeSnapshot();
@@ -831,7 +707,6 @@ export class Vm implements Project {
     if (this.state === 'pause') {
       this.state = 'run';
       this.lastTime = 0;
-      // `Entry.Utils.recoverSoundInstances` — what was held goes on from there.
       this.audio?.resume?.();
       this.speech?.resume?.();
       return;
@@ -845,11 +720,10 @@ export class Vm implements Project {
     this.accumulator = 0;
     this.clearTimer();
     this.extras.started();
-    // What was kept goes back in before the first block runs, the way the save
-    // manager puts it back every time the work is played.
+    // Restore stored values before the first block on every run.
     this.save.started();
     this.fireEvent('start');
-    // A run the editor starts on a later scene also counts as that scene starting.
+    // Starting on a later scene also fires that scene's start event.
     if (this.currentSceneId !== (this.scenes[0]?.id ?? '')) this.fireEvent('when_scene_start');
   }
 
@@ -866,9 +740,7 @@ export class Vm implements Project {
     this.audio?.stopAll();
     this.audio?.stopBgm();
     this.speech?.stop();
-    // Stopping out of a pause has to lift the pause as well: nothing is being
-    // held any more, and an audio context left suspended makes the next run
-    // silent all the way through.
+    // Clear audio pause state on stop or the next run can stay silent.
     this.audio?.resume?.();
     this.speech?.resume?.();
     this.clearQuestion();
@@ -880,9 +752,9 @@ export class Vm implements Project {
 
   pause(): void {
     if (this.state === 'run') {
-      // The clock stops with the engine, so the project timer stops with it too.
+      // Stop the project timer with the engine clock.
       this.state = 'pause';
-      // `Entry.engine.togglePause` holds the sounds rather than ending them.
+      // Pause sounds in place rather than ending them.
       this.audio?.pause?.();
       this.speech?.pause?.();
       for (const target of this.targets) {
@@ -891,7 +763,6 @@ export class Vm implements Project {
     }
   }
 
-  /** Puts every entity, clone and variable back to its saved state. */
   reset(): void {
     for (const target of this.targets) {
       for (const clone of target.clones.slice()) {
@@ -919,7 +790,6 @@ export class Vm implements Project {
     this.clearQuestion();
   }
 
-  /** Drives the engine from a real timestamp, keeping a fixed 60 Hz tick. */
   advance(timestamp: number): void {
     if (this.state !== 'run') {
       this.lastTime = timestamp;
@@ -932,10 +802,7 @@ export class Vm implements Project {
     this.accumulator += Math.min(timestamp - this.lastTime, step * this.maxCatchUp);
     this.lastTime = timestamp;
     let ticks = 0;
-    // A throw from outside a script — the renderer, the collision store, a lost
-    // webgl context — used to leave the frame driver. The driver queues the next
-    // frame before this one runs, so nothing stopped: the work froze on its last
-    // painted frame and threw again every frame, with nothing said about it.
+    // Catch frame failures so the driver cannot repeat the same throw over a frozen canvas.
     try {
       while (this.accumulator >= step && ticks < this.maxCatchUp) {
         this.accumulator -= step;
@@ -951,28 +818,21 @@ export class Vm implements Project {
     }
   }
 
-  /**
-   * Ends the run on a failure that is not one script's — the frame itself could
-   * not be finished, so there is nothing to carry on with. Reported the same way
-   * a script error is, which is what puts it on screen.
-   */
+  // Frame-level failures stop the work and use the same reporting path as script errors.
   fail(error: unknown, blockId: string | null = null, targetId: string | null = null): void {
     const record = this.errorRecord(error, null, blockId, targetId);
     this.errors.push(record);
     this.lastError = record;
     this.stop();
-    // The message alone rarely says where a frame-level throw came from, and the
-    // host only gets the message; the console keeps the stack.
+    // Keep the full stack in the console because the host may display only the message.
     console.error('[tessvm] 프레임을 끝내지 못했습니다', error);
     this.onError?.(record);
   }
 
-  /** One engine frame. */
   tick(deltaMs = 1000 / this.frameRate): void {
     this.clock += deltaMs;
     this.frame += 1;
-    // `Entry.engine.setTimeout` — a window opened for so many seconds closes
-    // itself, and the engine's own clock is what counts them.
+    // Auto-close table windows using engine time so pauses stop their countdown.
     if (this.tableCloseAt !== null && this.clock >= this.tableCloseAt) {
       this.openTable(null);
     }
@@ -1010,7 +870,7 @@ export class Vm implements Project {
     } catch (error) {
       thread.done = true;
       if (error instanceof ThreadStop) {
-        // The script asked to end itself; that is not a failure.
+        // A script ending itself is normal control flow, not an error.
         return;
       }
       const record = this.errorRecord(error, thread);
@@ -1020,7 +880,6 @@ export class Vm implements Project {
     }
   }
 
-  /** Function each call frame's generator belongs to, by its prototype. */
   private functionOf = new WeakMap<object, string>();
 
   private rememberFunctions(functions: CompiledFunction[], entries: FunctionEntry[]): void {
@@ -1071,7 +930,6 @@ export class Vm implements Project {
     return steps;
   }
 
-  /** `장면 '1' · 오브젝트 '쉘' (복제본) · 함수 a → b` for the thread an error stopped. */
   private whereOf(thread: Thread, steps: Array<{ name: string; count: number }>): string {
     const target = thread.target;
     const scene = this.scenes.find((item) => item.id === target.sceneId);
@@ -1079,23 +937,14 @@ export class Vm implements Project {
       `장면 '${scene?.name ?? target.sceneId}'`,
       `오브젝트 '${target.name}'${thread.entity.isClone ? ' (복제본)' : ''}`,
     ];
-    // A call repeated back to back is one step with its count, and a long
-    // chain keeps its two ends.
+    // Collapse repeated calls and retain both ends of long stacks.
     const shown = steps.map((step) => (step.count > 1 ? `${step.name} ×${step.count}` : step.name));
     const calls = shown.length > 8 ? [...shown.slice(0, 3), '…', ...shown.slice(-3)] : shown;
     if (calls.length) parts.push(`함수 ${calls.join(' → ')}`);
     return parts.join(' · ');
   }
 
-  // -------------------------------------------------------------------------
-  //  Events
-  // -------------------------------------------------------------------------
-  /** Starts every matching script on every entity of the current scene. */
-  /**
-   * `부스트 모드인가?` 가 돌려주는 값이자, 엔트리에서는 **어느 렌더러로 그릴지를 고르는
-   * 스위치**입니다(`Entry.setBasicPaint` 의 `GEHelper.isWebGL`). 값만 바꾸고 그리는 쪽을
-   * 그대로 두면 켜고 꺼도 같은 그림이 나오므로, 바뀔 때 렌더러에게도 알립니다.
-   */
+  // Notify the renderer when boost changes because it affects fill and text layout rules.
   get boost(): boolean {
     return this.boostOn;
   }
@@ -1124,18 +973,12 @@ export class Vm implements Project {
     return started;
   }
 
-  /**
-   * `신호 보내기` — `message_cast` hands the raise to `setTimeout`, so entry
-   * starts the receivers after the frame that sent it, not inside it. Anything
-   * the sender does next in that frame — a scene restart above all — therefore
-   * happens before a single receiver exists. `신호 보내고 기다리기` raises on
-   * the spot instead, which is why only this one is queued.
-   */
+  // Queue ordinary messages until after the sending frame; send-and-wait starts receivers immediately.
   queueMessage(id: string): void {
     this.pendingMessages.push(id);
   }
 
-  /** Raises the frame's queued messages, on the scene the frame ended in. */
+  // Deliver queued messages in the scene active at the end of the frame.
   private flushMessages(): void {
     if (!this.pendingMessages.length) {
       return;
@@ -1147,7 +990,6 @@ export class Vm implements Project {
     }
   }
 
-  /** Same, but only for the one entity that the event happened to. */
   fireEventOn(event: string, entity: Entity, filter?: string): Thread[] {
     if (this.state !== 'run') {
       return [];
@@ -1171,13 +1013,7 @@ export class Vm implements Project {
     return started;
   }
 
-  /**
-   * `Entry.Code.clearExecutorsByEntity` — the threads are only marked ended;
-   * `tick` drops them on its next pass. Splicing here would pull the threads
-   * behind them into slots the running loop has already gone past, so those
-   * would sit out the frame — a whole batch of clones deleting themselves
-   * would then need one frame per pair instead of one frame in total.
-   */
+  // Mark stopped threads instead of splicing them, or later threads can miss the current frame.
   stopThreadsOf(entity: Entity): void {
     for (const thread of entity.target.threads) {
       if (thread.entity === entity) {
@@ -1186,13 +1022,6 @@ export class Vm implements Project {
     }
   }
 
-  // -------------------------------------------------------------------------
-  //  Scenes and clones
-  // -------------------------------------------------------------------------
-  /**
-   * Picks the scene a run starts on, by id or by name. An editor runs the
-   * scene being worked on; a player leaves this alone and starts at the first.
-   */
   setStartScene(scene: string | null | undefined): void {
     const wanted = String(scene ?? '');
     const found = this.sceneById.has(wanted)
@@ -1206,7 +1035,6 @@ export class Vm implements Project {
     return this.sceneById.has(this.startSceneId) ? this.startSceneId : this.scenes[0]?.id ?? '';
   }
 
-  /** Called with the new scene's id whenever the running work moves to another scene. */
   onSceneChange: ((id: string) => void) | null = null;
 
   selectScene(id: string): void {
@@ -1219,10 +1047,7 @@ export class Vm implements Project {
     }
     this.resetSceneDuringRun(this.currentSceneId);
     this.currentSceneId = scene.id;
-    // `Entry.scene.selectScene` — leaving a scene silences the sounds it left
-    // running. The scripts that started them are gone with the scene, so
-    // nothing is left that could stop them later. Background music carries
-    // over: entry files it apart from the sounds this clears.
+    // Stop scene sounds on exit, but let background music continue.
     if (this.state === 'run') {
       this.audio?.stopAll();
       this.speech?.stop();
@@ -1231,11 +1056,7 @@ export class Vm implements Project {
     this.onSceneChange?.(scene.id);
   }
 
-  /**
-   * `Entry.container.resetSceneDuringRun` — leaving a scene puts its objects
-   * back the way they started: snapshot restored, effects and pen cleared,
-   * clones gone, scripts stopped.
-   */
+  // Restore objects and clear clones, effects, pens, and scripts when leaving a scene.
   private resetSceneDuringRun(sceneId: string): void {
     for (const target of this.targets) {
       if (target.sceneId !== sceneId) {
@@ -1250,30 +1071,23 @@ export class Vm implements Project {
       }
       this.resetEntity(target.entity);
     }
-    // `Entry.stage.hideInputField` — the script that asked is gone with the
-    // scene, so the box it was waiting on goes with it.
+    // Hide the answer field because its waiting script leaves with the scene.
     this.clearQuestion();
   }
 
-  /**
-   * `DataTable.showTable` — puts a table's window up, or takes it down with
-   * null. Entry's block does not hold the script while the window stands; a
-   * window opened for a number of seconds closes itself when they are up.
-   */
+  // Table windows do not hold scripts; timed windows close using engine time.
   openTable(table: Table | null, seconds?: number, chart: number | null = null): void {
     this.shownTable = table;
     this.tableCloseAt = table && seconds ? this.clock + seconds * 1000 : null;
     this.renderer?.showTable?.(table, table ? chart : null);
   }
 
-  /** Takes down the `묻고 기다리기` box and the answer it was waiting for. */
   private clearQuestion(): void {
     this.question = null;
     this.pendingAnswer = null;
     this.renderer?.hideQuestion?.();
   }
 
-  /** `Entry.EntityObject.reset` — snapshot back, effects and drawings gone. */
   private resetEntity(entity: Entity): void {
     loadEntitySnapshot(entity);
     entity.effect = initialEffects();
@@ -1304,10 +1118,6 @@ export class Vm implements Project {
     return clone;
   }
 
-  // -------------------------------------------------------------------------
-  //  Timer
-  // -------------------------------------------------------------------------
-  /** Back to the state a freshly loaded project has: stopped and reading 0. */
   clearTimer(): void {
     this.timerInit = false;
     this.timerPaused = false;
@@ -1315,7 +1125,6 @@ export class Vm implements Project {
     this.timerStart = 0;
   }
 
-  /** `초시계 시작하기` — starts it the first time, resumes it after a stop. */
   startTimer(): void {
     if (!this.timerInit) {
       this.timerInit = true;
@@ -1330,7 +1139,6 @@ export class Vm implements Project {
     }
   }
 
-  /** `초시계 정지하기`. */
   pauseTimer(): void {
     if (this.timerInit && !this.timerPaused) {
       this.timerBase = this.clock - this.timerStart;
@@ -1338,10 +1146,7 @@ export class Vm implements Project {
     }
   }
 
-  /**
-   * `Entry.engine.resetTimer` — does nothing before the timer has been started
-   * once, and resetting a stopped timer puts it back to "never started".
-   */
+  // Reset does nothing before the timer starts; resetting a stopped timer returns it to never-started.
   resetTimer(): void {
     if (!this.timerInit) {
       return;
@@ -1419,7 +1224,7 @@ function loadEntitySnapshot(entity: Entity): void {
     return;
   }
   Object.assign(entity, saved);
-  // 되돌린 글은 그대로이므로 폭만 다시 잽니다 — 높이는 작품이 담고 있던 값입니다.
+  // Remeasure restored text width while preserving its saved height.
   entity.measure(false);
   entity.scaleOriginX = saved.scaleX;
   entity.scaleOriginY = saved.scaleY;

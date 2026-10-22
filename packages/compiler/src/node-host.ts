@@ -1,6 +1,3 @@
-/**
- * @fileoverview The compiler's filesystem port, on node.
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { CompilerHost } from './host.ts';

@@ -1,9 +1,3 @@
-/**
- * 내용이 변경되지 않은 파일은 다시 파싱하지 않는 증분 컴파일 기능을 검사합니다.
- *
- * 파싱은 컴파일 시간의 대부분을 차지합니다. 캐시를 사용하여 변경된 파일만
- * 파싱하도록 최적화하면서도, 캐시 없이 컴파일한 결과와 동일하게 작동하는지 검증합니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -21,11 +15,6 @@ when start do
   say "${message}"
 end`;
 
-/**
- * main.tess와 두 개의 오브젝트 조각을 포함하는 테스트용 프로젝트를 임시 폴더에 생성합니다.
- *
- * @returns 생성된 임시 폴더의 경로
- */
 function makeProject() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-incremental-'));
   fs.mkdirSync(path.join(dir, 'objects'));
@@ -60,7 +49,7 @@ test('바뀐 게 없으면 한 파일도 다시 파싱하지 않는다', () => {
   const cache = createCompileCache();
 
   build(dir, cache);
-  assert.equal(cache.parsed, 3); // main.tess + 조각 2개
+  assert.equal(cache.parsed, 3);
   assert.equal(cache.reused, 0);
 
   build(dir, cache);
@@ -79,7 +68,6 @@ test('한 파일만 고치면 그 파일만 다시 파싱한다', () => {
   const result = build(dir, cache);
   assert.equal(cache.parsed - before, 1);
 
-  /** 변경된 내용이 실제로 반영되었는지 확인합니다. 이전 AST 캐시가 남아있으면 안 됩니다. */
   const object = result.project!.objects.find((o) => o.name === '가');
   assert.match(object!.script, /바뀐 인사/);
 });
@@ -107,11 +95,10 @@ test('문법 에러가 난 파일은 캐시에 남지 않고 매번 다시 알�
 
   const first = build(dir, cache);
   assert.ok(first.errors.length > 0);
-  /** 에러를 캐시하고 무시하지 않도록, 다시 빌드 시 동일한 에러를 반환해야 합니다. */
+  // Report cached-file errors again on subsequent builds.
   const second = build(dir, cache);
   assert.deepEqual(second.errors, first.errors);
 
-  /** 파일을 올바르게 수정하면 에러 없이 정상적으로 파싱되어야 합니다. */
   fs.writeFileSync(broken, FRAGMENT('고침'));
   const fixed = build(dir, cache);
   assert.deepEqual(fixed.errors, []);
@@ -132,16 +119,11 @@ test('두 오브젝트가 같은 조각을 use 하면 한 번만 파싱한다', 
   const result = build(dir, cache);
 
   assert.deepEqual(result.errors, []);
-  /** main.tess, 가, 나, 공통 파일이 파싱됩니다. 공통 파일은 한 번만 파싱됩니다. */
   assert.equal(cache.parsed, 4);
-  /** 나.tess에서 다시 호출된 공통 파일은 재사용(reused) 처리됩니다. */
   assert.equal(cache.reused, 1);
 });
 
-/**
- * 누락된 조각 파일이 있을 경우 사용자에게 명시적으로 에러를 반환해야 합니다.
- * 에러를 발생시키지 않으면 누락된 오브젝트가 조용히 제외되어 표시될 수 있습니다.
- */
+// Missing includes must report errors instead of silently removing an object.
 test('불러올 파일이 없으면 에러로 알려준다', () => {
   const dir = makeProject();
   fs.writeFileSync(path.join(dir, 'main.tess'), 'scene "s":\n  useobject "objects/없는파일.tess"\nend');

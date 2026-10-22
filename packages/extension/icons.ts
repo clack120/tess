@@ -1,15 +1,9 @@
-/**
- * @fileoverview Draws the toolbar icon at the sizes the manifest asks for.
- *
- * A tiny PNG writer keeps the build free of an image dependency: one IHDR, one
- * deflated IDAT of 8-bit RGBA rows, one IEND.
- */
 import zlib from 'node:zlib';
 import { crc32 } from './pack.ts';
 
 const BACKGROUND = [0x16, 0xd7, 0x99];
 const MARK = [0xff, 0xff, 0xff];
-/** Samples per pixel side; smooths the corner curve and the mark's edges. */
+// Supersampling smooths the icon edges.
 const SAMPLES = 4;
 
 function chunk(type: string, data: Buffer): Buffer {
@@ -40,7 +34,6 @@ function encodePng(size: number, rgba: Buffer): Buffer {
   ]);
 }
 
-/** Rounded square, in unit coordinates. */
 function insideTile(x: number, y: number): boolean {
   const radius = 0.22;
   const dx = Math.max(radius - x, 0, x - (1 - radius));
@@ -48,7 +41,6 @@ function insideTile(x: number, y: number): boolean {
   return Math.hypot(dx, dy) <= radius;
 }
 
-/** A "T": one bar across the top, one stem down the middle. */
 function insideMark(x: number, y: number): boolean {
   const bar = x >= 0.22 && x <= 0.78 && y >= 0.25 && y <= 0.39;
   const stem = x >= 0.43 && x <= 0.57 && y >= 0.25 && y <= 0.76;

@@ -19,7 +19,7 @@ export type RuntimeValue =
   | { type: 'boolean'; value: boolean }
   | { type: 'null' | 'undefined' | 'object' | 'function' | 'symbol' | 'bigint' };
 
-/** Capture only on failure, without retaining large strings or invoking user code. */
+// Capture only on failure, without retaining large strings or invoking user code.
 export function runtimeValue(value: unknown): RuntimeValue {
   if (typeof value === 'string') return { type: 'string', value: value.slice(0, 1024), length: value.length, truncated: value.length > 1024 };
   if (typeof value === 'number') return { type: 'number', value: Number.isFinite(value) ? value : String(value) };
@@ -45,7 +45,7 @@ export class RuntimeBlockError extends Error {
   }
 }
 
-/** Small, detached previews: inspecting a large work must not duplicate its heap. */
+// Keep previews small and detached so inspecting a large work does not copy its heap.
 export function snapshotVm(vm: Vm) {
   let budget = 512;
   const variables = (items: readonly (Variable | undefined)[]) => items.filter((item): item is Variable => !!item).slice(0, 200).map((item) => {
@@ -92,7 +92,7 @@ export function snapshotVm(vm: Vm) {
 
 export type VmSnapshot = ReturnType<typeof snapshotVm>;
 
-/** Resolve an engine stack location to a block without instrumenting executed blocks. */
+// Resolve stack locations to blocks without instrumenting every executed block.
 export function blockOfError(stack: string | undefined, trace: GeneratedTrace | undefined): BlockSite | null {
   if (!stack || !trace) return null;
   const at = stack.indexOf(`${trace.sourceId}:`);

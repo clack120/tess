@@ -1,58 +1,38 @@
-/**
- * @fileoverview 커널을 실행기에 붙입니다.
- *
- * 커널이 맡은 함수는 `F[i]` 자리를 이 파일이 만든 제너레이터로 바꿔 끼웁니다.
- * 그 제너레이터는 커널이 읽는 변수·리스트를 공유 영역으로 옮기고, 커널 함수를
- * 한 번 부르고, 커널이 쓴 것만 되돌려 놓습니다. 되돌릴 수 없는 자리를 만나면
- * 커널이 표시만 남기고 끝내므로, 여기서 그 판을 버리고 원래 자바스크립트
- * 함수를 대신 돌립니다.
- */
+// Copy kernel inputs, run once, then commit writes or fall back to the original function.
 import { BAIL_SLOT, canonical, judged, type KernelPlan, type KernelSlot } from './plan.ts';
 import { decimals } from '../runtime/cast.ts';
 import { kernelOps, type KernelMarks } from './runtime-js.ts';
 import { scalarPlaces } from './values.ts';
 import type { Variable } from '../runtime/model.ts';
 
-/** Entry unwinds a call chain this deep; the kernel needs room for its own. */
+// Leave room for kernel calls inside Entry's call depth limit.
 const CALL_DEPTH_LIMIT = 1000000;
 
-/** Calls timed before deciding whether an entry point is worth its crossing. */
+// Measure enough calls to decide whether crossing into the kernel is worthwhile.
 const TRIAL_CALLS = 24;
-/**
- * A trial also runs until this much time was measured. A page's clock is
- * coarse, so most short calls read as no time at all; summed over enough of
- * them the readings still say which side costs more.
- */
+// Accumulate timings because short calls can fall below the page clock's precision.
 const TRIAL_MIN_MS = 2;
 const TRIAL_MAX_CALLS = 2048;
-/** Calls between looks at how much a kept root copies, against its trial. */
+// Periodically compare copying cost with the original trial.
 const WATCH_CALLS = 256;
-/** Fallbacks in a row before a root rests, and the longest rest, in calls. */
+// Repeated fallbacks make roots rest, up to this limit.
 const FAIL_LIMIT = 8;
 const REST_FIRST = 16;
 const REST_MAX = 4096;
-/** Calls a root dropped for its crossing sits out before it is timed again. */
+// Retry roots after this many calls to see whether copying became worthwhile.
 const RETRY_FIRST = 8192;
 const RETRY_MAX = 1 << 20;
 
 type KernelFn = (...args: unknown[]) => unknown;
 
 export interface KernelHandle {
-  /** Runs one root, or returns null when the caller should use javascript. */
   run(root: number, args: unknown[]): unknown;
-  /** Roots the kernel can take, by function table index. */
   roots: Map<number, { name: string; arity: number }>;
   depth: number;
-  /**
-   * How many times a root ran in the kernel, how often it fell back, how many
-   * numbers crossed, and how many entry points were given back to the block
-   * runner — because the crossing cost more than it saved, or because their
-   * data no longer fits the module.
-   */
+  // Count executions, fallbacks, copied values, and roots retired for cost or incompatible data.
   readonly stats: { runs: number; fallbacks: number; copied: number; dropped: number };
 }
 
-/** Builds the kernel's functions over one `Float64Array` the work's numbers cross into. */
 export function attachJsKernel(
   plan: Pick<KernelPlan, 'javascript' | 'slots' | 'roots' | 'access' | 'depth' | 'size'>,
   variables: Variable[],
@@ -82,26 +62,23 @@ interface Trial {
   cross: number;
   inside: number;
   cells: number;
-  /** The first call copies everything at least once; it says nothing about the rest. */
+  // Ignore the first call's full copy when estimating ongoing costs.
   cold: boolean;
 }
 
-/** What one entry point copies, and how it has been doing. */
 interface Root {
   reading: KernelSlot[];
   writing: KernelSlot[];
   trial: Trial | null;
-  /** Cells a call moved on average while it was last timed. */
   baseline: number;
   calls: number;
   cells: number;
   fails: number;
-  /** Calls left to sit out, and what that ends in. */
   wait: number;
   waitEnds: 'retry' | 'trial';
   rest: number;
   retry: number;
-  /** Its data no longer fits the module; it never comes back. */
+  // Retire roots permanently when their data no longer matches the module.
   stopped: boolean;
 }
 
@@ -109,10 +86,7 @@ function newTrial(cold: boolean): Trial {
   return { calls: 0, cross: 0, inside: 0, cells: 0, cold };
 }
 
-/**
- * Moving the work's numbers across. `marks` records the list items a run
- * stored into, and only those go back.
- */
+// Mark changed list items so only actual writes are copied back.
 function marshal(
   plan: Pick<KernelPlan, 'slots' | 'roots' | 'access' | 'depth' | 'size'>,
   variables: Variable[],
@@ -120,7 +94,7 @@ function marshal(
   data: () => Float64Array,
   marks: KernelMarks,
 ): KernelHandle {
-  // Each root copies only what its own call tree reads and writes.
+  // Copy only the variables each root's call tree touches.
   const roots = new Map<number, Root>([...plan.access].map(([index, used]) => [index, {
     reading: used.touched.map((at) => plan.slots[at]!),
     writing: used.written.map((at) => plan.slots[at]!),
@@ -136,17 +110,8 @@ function marshal(
     stopped: false,
   }]));
   const stats = { runs: 0, fallbacks: 0, copied: 0, dropped: 0 };
-  /** Cells the current call moved, both ways. */
   let moved = 0;
-  /**
-   * What each slot's variable stood at when the kernel last agreed with it.
-   * A table the work only reads — a connectome, a lookup curve — then crosses
-   * once instead of every frame.
-   *
-   * Keyed by the variable, not by where it sits: a list of no length takes no
-   * room, so the slot after it starts at the same place, and a key of the place
-   * would have one of them answer for the other.
-   */
+  // Cache by variable, not offset, because empty lists share offsets with later slots.
   const stamp = new Map<number, number>();
 
   const agree = (slot: KernelSlot, variable: Variable): void => {
@@ -154,14 +119,7 @@ function marshal(
     variable.synced();
   };
 
-  /**
-   * Copies one variable or list in.
-   *
-   * `stop` means the work and the module no longer describe the same data —
-   * a list that changed length, or one holding text a run would rewrite — and
-   * the roots that touch it step aside for good. `skip` is only this call's
-   * business.
-   */
+  // Permanently reject changed layouts or unsafe text; skip only the current call for temporary failures.
   function copyIn(slot: KernelSlot, cells: Float64Array): 'ok' | 'skip' | 'stop' {
     const variable = variables[slot.variable];
     if (!variable) {
@@ -176,7 +134,7 @@ function marshal(
       if (array.length !== slot.length) {
         return 'stop';
       }
-      // Items written one at a time since the last copy are all that changed.
+      // Copy only items written since the last synchronization.
       const span = seen === undefined ? null : variable.changedSince(seen);
       const from = span ? Math.max(0, span[0]) : 0;
       const to = span ? Math.min(slot.length - 1, span[1]) : slot.length - 1;
@@ -187,9 +145,7 @@ function marshal(
         for (let at = from; at <= to; at += 1) {
           const item = array[at]!.data;
           if (!judged(item)) {
-            // A work that has not filled the list yet still carries whatever it
-            // was saved with; javascript writes the words, and the kernel takes
-            // the list over from the next call.
+            // Let JavaScript fill an initially nonnumeric list before trying the kernel again.
             return 'skip';
           }
           cells[slot.base + at] = item === true ? 1 : 0;
@@ -205,8 +161,7 @@ function marshal(
         cells[slot.base + at] = Number(item);
         marks.strings[slot.base + at] = typeof item === 'string' ? 1 : 0;
       }
-      // A table the kernel only reads carries its tails across with it, counted
-      // here once instead of inside every loop that reads it.
+      // Count decimal tails once for read-only tables instead of inside their loops.
       if (slot.tails >= 0) {
         for (let at = from; at <= to; at += 1) {
           cells[slot.tails + at] = decimals(cells[slot.base + at]!);
@@ -224,21 +179,18 @@ function marshal(
       return 'skip';
     }
     cells[slot.base] = value;
-    // How the stored text is written decides the next `change_variable`, so the
-    // places come across with the value.
+    // Preserve stored decimal formatting because change_variable reads it on the next update.
     cells[slot.places] = places;
     agree(slot, variable);
     return 'ok';
   }
 
-  /** Whether a run stored into this list item. */
   const stored = (cell: number): boolean => marks.flags[cell] === 1;
 
   function copyOut(slot: KernelSlot, cells: Float64Array): void {
     const variable = variables[slot.variable]!;
     if (slot.list) {
       const array = variable.array;
-      // Only the stored items, inside the span the run touched.
       const from = Math.max(slot.base, marks.span[0]!) - slot.base;
       const to = Math.min(slot.base + slot.length - 1, marks.span[1]!) - slot.base;
       let wrote = false;
@@ -254,11 +206,10 @@ function marshal(
       const places = cells[slot.places]!;
       const value = cells[slot.base]!;
       moved += 1;
-      // Entry keeps what `toFixed` wrote, so a counter holds "1", not 1.
+      // Entry stores toFixed results as text, so counters can hold "1" rather than 1.
       variable.setValue(places >= 0 ? value.toFixed(places) : places === -2 ? String(value) : value);
     }
-    // The kernel and the work now hold the same thing, so nothing crosses back
-    // until something outside writes it.
+    // Skip copying unchanged values until an external write occurs.
     agree(slot, variable);
   }
 
@@ -269,7 +220,7 @@ function marshal(
     marks.span[1] = -1;
   };
 
-  /** A call that could not finish in the kernel; a root that keeps failing rests. */
+  // Repeated kernel failures make a root rest before retrying.
   const fell = (state: Root): null => {
     stats.fallbacks += 1;
     state.fails += 1;
@@ -344,9 +295,7 @@ function marshal(
         const measured = trial.inside + trial.cross;
         if (trial.calls >= TRIAL_CALLS && (measured >= TRIAL_MIN_MS || trial.calls >= TRIAL_MAX_CALLS)) {
           state.trial = null;
-          // The blocks this stands in for cost a small multiple of what the
-          // kernel does, so a crossing that costs as much as the run itself
-          // has already eaten the difference.
+          // Reject crossings whose copy cost consumes the kernel's execution savings.
           if (trial.cross > trial.inside) {
             stats.dropped += 1;
             state.wait = state.retry;
@@ -359,8 +308,7 @@ function marshal(
           }
         }
       } else {
-        // A root that passed its trial can start copying far more later, when
-        // something outside begins rewriting what it reads; it is timed again.
+        // Retime accepted roots when external writes increase their copying cost.
         state.calls += 1;
         state.cells += moved;
         if (state.calls >= WATCH_CALLS) {

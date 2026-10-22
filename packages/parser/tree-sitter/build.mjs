@@ -1,9 +1,4 @@
-/**
- * Builds the Tess tree-sitter parser to `tree-sitter-tess.wasm`.
- *
- * Writes `src/colors.h` from `@tess/core` first, so the scanner reads colour
- * names from the same table the lexer does.
- */
+// Generate scanner color names from the same table the lexer uses.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

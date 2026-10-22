@@ -1,10 +1,3 @@
-/**
- * 차트 창(`packages/tessvm/src/web/chart-view.ts`)을 확인합니다.
- *
- * 엔트리도 차트는 캔버스가 아니라 모달로 띄우므로(`DataTable.createChart`), 여기서도
- * HTML 로 올립니다. 브라우저 모듈이라 노드 타입 검사에서 빠져 있어, 다른 브라우저
- * 모듈 테스트와 같은 방식으로 타입만 지운 원본을 jsdom 위에 올립니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -32,7 +25,6 @@ interface TableLike {
   revision?: number;
 }
 
-/** 한 계열짜리 표 하나에 차트 네 가지를 모두 달아 둔 것. */
 function sampleTable(): TableLike {
   return {
     name: '판매',
@@ -52,7 +44,6 @@ function sampleTable(): TableLike {
   };
 }
 
-/** 차트 창을 jsdom 에 올린다 — 실행 페이지가 무대 옆에 올리는 것과 같은 자리다. */
 function mountChart(t: any) {
   const dom = new JSDOM('<!doctype html><body><div id="stage"><div id="frame"></div></div></body>', {
     pretendToBeVisual: true,
@@ -86,7 +77,6 @@ function mountChart(t: any) {
   return {
     dom, frame, closed, chart: window_, find, all,
     sandbox,
-    /** 그림 조각만 — 눈금 선과 글자는 뺀다. */
     marks: (tag: string) => all(`.tessvm-chart-plot ${tag}`),
     press(type: string, on: Element) {
       const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
@@ -117,12 +107,10 @@ test('막대 차트는 줄마다 계열 수만큼 막대를 세운다', (t) => {
 
   const bars = view.marks('rect');
   assert.equal(bars.length, 6, '세 줄 × 두 계열');
-  // 계열 색은 엔트리가 쓰는 열두 가지의 앞에서부터.
   assert.deepEqual(
     [...new Set(bars.map((bar) => bar.getAttribute('fill')))],
     ['#4f80ff', '#f16670'],
   );
-  // 값이 큰 막대가 더 높다.
   const first = bars.filter((bar) => bar.getAttribute('fill') === '#4f80ff');
   assert.ok(
     Number(first[2]!.getAttribute('height')) > Number(first[1]!.getAttribute('height')),
@@ -144,7 +132,6 @@ test('꺾은선 차트는 계열마다 선을 하나씩 긋는다', (t) => {
   assert.equal(lines[0]!.getAttribute('fill'), 'none');
   assert.equal(lines[1]!.getAttribute('stroke'), '#f16670');
   assert.equal(view.marks('circle').length, 6, '꼭짓점마다 점');
-  // 양 끝의 가로축 이름은 그림 밖으로 넘지 않도록 안쪽으로 붙인다.
   const ends = view.all('.tessvm-chart-plot text').filter((t) => t.textContent!.endsWith('분기'));
   assert.deepEqual(
     ends.map((text) => [text.textContent, text.getAttribute('text-anchor')]),
@@ -165,10 +152,8 @@ test('원 차트는 줄마다 다른 색의 부채꼴을 그린다', (t) => {
   for (const slice of slices) {
     assert.match(slice.getAttribute('d') ?? '', /^M [\d.-]+ [\d.-]+ L [\d.-]+ [\d.-]+ A /);
   }
-  // 조각 위에는 그 몫을 적는다 — 120 · 90 · 150 이면 33% · 25% · 42%.
   const labels = view.all('.tessvm-chart-slice').map((text) => text.textContent);
   assert.deepEqual(labels, ['33%', '25%', '42%']);
-  // 계열 표시는 줄 이름으로 — 엔트리가 원 차트에 붙이는 것과 같다.
   assert.equal(view.find('.tessvm-chart-legend')!.textContent, '1분기2분기3분기');
 });
 
@@ -179,11 +164,9 @@ test('점 차트는 두 열을 가로·세로로 놓고 점을 찍는다', (t) =
   const dots = view.marks('circle');
   assert.equal(dots.length, 3);
   assert.equal(dots[0]!.getAttribute('fill'), '#4f80ff');
-  // 서울이 가장 큰 줄(150)이 가장 오른쪽에 찍힌다.
   const xs = dots.map((dot) => Number(dot.getAttribute('cx')));
   assert.ok(xs[2]! > xs[0]! && xs[0]! > xs[1]!, `가로 자리: ${xs.join(',')}`);
-  // 가로축도 줄 이름이 아니라 값으로 — 0·50·100·150 처럼 읽히는 수에 적고,
-  // 양 끝은 그림 밖으로 넘지 않도록 안쪽으로 붙인다.
+  // Scatter x axes use numeric values with ticks, not row labels.
   const labels = view.all('.tessvm-chart-plot text:not([dominant-baseline])');
   assert.deepEqual(
     labels.map((text) => [text.textContent, text.getAttribute('text-anchor')]),
@@ -224,7 +207,6 @@ test('창을 열 때 고른 차트가 드롭다운에도 그대로 뜬다', (t) 
   view.chart.show(sampleTable(), 1);
   assert.equal((view.find('.tessvm-chart-pick') as HTMLSelectElement).value, '1');
   assert.equal(view.find('.tessvm-chart-title')!.textContent, '꺾은선 차트');
-  // 없는 번호를 부르면 있는 것 중 가까운 쪽으로.
   view.chart.show(sampleTable(), 9);
   assert.equal(view.find('.tessvm-chart-title')!.textContent, '점 차트');
 });
@@ -242,7 +224,6 @@ test('닫기 단추는 창을 내려 달라고 알린다', (t) => {
   assert.equal(view.marks('rect').length, 0);
 });
 
-/** 엔트리의 모달처럼, 창 위의 누름은 뒤에 있는 무대가 받지 않는다. */
 test('창 위의 누름은 무대로 새지 않는다', (t) => {
   const view = mountChart(t);
   view.chart.show(sampleTable(), 0);
@@ -284,7 +265,6 @@ test('그릴 것이 없는 차트는 그렇다고 알린다', (t) => {
   assert.equal(view.marks('rect').length, 0);
 });
 
-/** 눈금은 1·2·5 배수로 — 0, 10000, 20000 처럼 읽히는 수에만 선을 긋는다. */
 test('눈금 간격은 읽히는 수로 잡는다', (t) => {
   const view = mountChart(t);
   const step = view.sandbox.tickStep as (span: number, count: number) => number;

@@ -1,17 +1,4 @@
-/**
- * 실행 페이지의 디버그 패널 UI 컴포넌트입니다. Preact로 렌더링되며, 서버가 `/debug-ui.js`로 제공합니다.
- *
- * 이 파일은 다음 부분들로 구성됩니다.
- * 1. 상태 (State) - 상태가 변경되면 패널 전체를 다시 렌더링합니다. (Preact가 실제 DOM 차이만 업데이트함)
- * 2. 실행기 브리지 - `window.Entry` 객체 조작 등 엔트리 런타임과의 상호작용
- * 3. 위젯 컴포넌트 - 입력 칸, 선택 칸, 토글 칸, 블록 트리 등의 UI 요소
- * 4. 탭 컴포넌트 - 실행, 자료, 오브젝트, 오류 탭 화면
- * 5. 외부 API - 실행 페이지에서 호출하는 `window.tess*` 훅 연결
- */
-// The url the player server serves preact at. TypeScript resolves a rooted
-// specifier as a filesystem path, so it cannot find it; `h` and `render` are
-// declared in globals.d.ts instead.
-// @ts-ignore -- resolved by the browser, not by the type checker
+// @ts-ignore -- The browser resolves /preact; globals.d.ts supplies its types.
 import { h, render } from "/preact/preact.mjs";
 
 const TABS = [
@@ -21,37 +8,20 @@ const TABS = [
   { id: "errors", label: "오류" },
 ];
 const STATE_TEXT: Record<string, string> = { run: "실행 중", pause: "일시정지됨", stop: "멈춰 있음" };
-/** The run button's label, which is also what pressing it does next. */
 const RUN_TOGGLE_TEXT: Record<string, string> = {
   run: "일시정지", pause: "이어서 하기", stop: "시작하기",
 };
 const DEFAULT_SECTION_HEIGHT = 200;
 
-// 이 크기 아래로 끌면 창이 딱 붙어서 0 이 되고, 다시 이만큼 끌어내면 딱 하고 펴진다.
-// 접혀도 손잡이는 있던 자리에 그대로 남아서 다시 끌 수 있다.
+// Snap small sections closed while leaving their handles available to reopen them.
 const STICKY = 56;
 const sticky = (size: number) => (size < STICKY ? 0 : size);
 
-// ============================================================================
-//  1. 상태
-// ============================================================================
-// The player page always renders the panel shell, so these lookups cannot miss.
 const panel = document.getElementById("debug-panel")!;
 
 let scheduled = false;
 
-/**
- * 상태가 변경되면 변경 사항을 모아 한 번만 다시 렌더링하도록 예약합니다.
- *
- * `requestAnimationFrame` 대신 `queueMicrotask` 또는 `setTimeout`을 사용하여,
- * 탭이 숨겨져 있을 때도 업데이트가 멈추지 않도록 합니다.
- * 
- * @example
- * ```typescript
- * state.runState = 'pause';
- * schedule();
- * ```
- */
+// Use microtasks or timers because animation frames stop in hidden tabs.
 function schedule() {
   if (scheduled) return;
   scheduled = true;
@@ -65,18 +35,6 @@ function schedule() {
 
 const proxies = new WeakMap();
 
-/**
- * 객체의 속성이 변경될 때마다 자동으로 다시 렌더링하도록 만드는 프록시 래퍼입니다.
- *
- * @param target 감시할 원본 객체
- * @returns 반응형으로 감싸진 프록시 객체
- *
- * @example
- * ```typescript
- * const state = observable({ count: 0 });
- * state.count++; // 자동으로 schedule() 이 호출됨
- * ```
- */
 function observable(target: any) {
   const cached = proxies.get(target);
   if (cached) return cached;
@@ -102,16 +60,16 @@ const state = observable({
   errors: [],
   runState: "",
   env: { boost: "", device: "", touch: "", userId: "", nickname: "" },
-  // 실행기가 실제로 도는 렌더러 (run --boost). 흉내내기 값과 달리 못 바꾼다.
-  realBoost: null as boolean | null, // 실행기가 부스트로 렌더러를 가르지 않으면 null
+  // The actual renderer is fixed at startup; environment overrides cannot change it.
+  realBoost: null as boolean | null,
   scenes: [],
   currentId: "",
   currentName: "",
   variables: [],
   messages: [],
   functions: [],
-  expanded: "", // 펼쳐 둔 리스트/함수의 키 ('list:<id>' · 'func:<id>')
-  editing: "", // 지금 고쳐 쓰고 있는 칸의 키
+  expanded: "",
+  editing: "",
   heights: {
     "run-control": DEFAULT_SECTION_HEIGHT,
     "data-vars": DEFAULT_SECTION_HEIGHT,
@@ -119,16 +77,16 @@ const state = observable({
     "objects-tree": DEFAULT_SECTION_HEIGHT,
     "objects-info": DEFAULT_SECTION_HEIGHT,
   },
-  tick: 0, // 실행기에서 그때그때 읽는 값들을 다시 읽게 하는 카운터
-  inspecting: false, // 고르기 도구가 켜져 있는가 — 대는 곳이 그대로 골라진다
-  pinned: false, // 눌러서 지금 고른 것에 붙박아 두었는가
+  tick: 0,
+  inspecting: false,
+  pinned: false,
 });
 
 const touch = () => {
   state.tick += 1;
 };
 
-// 반응형 밖에 두는 큰 데이터
+// Keep large block data outside reactive state.
 let project: any = null;
 const blockOwner = new Map<string, any>();
 const blockById = new Map<string, any>();
@@ -136,7 +94,6 @@ const functionContentById = new Map<string, any>();
 let currentThreads: any[] = [];
 let highlighted: string[] = [];
 
-// --- 패널 열고 닫기 ---------------------------------------------------------
 const syncPanelWidth = () => {
   const width = state.open ? panel.getBoundingClientRect().width : 0;
   document.documentElement.style.setProperty(
@@ -153,24 +110,16 @@ const setOpen = (open: boolean, tab?: string) => {
   syncPanelWidth();
 };
 const openPanel = (tab?: string) => {
-  // 딱 붙여 접어 둔 상태로 다시 열면 아무것도 안 보이므로 폭을 되살린다
+  // Restore the width when reopening a snapped-shut panel.
   if (panel.style.width === "0px") panel.style.width = "";
   setOpen(true, tab);
 };
 const closePanel = () => setOpen(false);
 
-// ============================================================================
-//  2. 실행기 붙이기
-// ============================================================================
-// 패널은 실행기를 어댑터 하나로만 만난다. 기본은 엔트리 실행기(entryjs)이고,
-// tessvm 은 이 모듈이 뜨기 전에 자기 어댑터를 `window.tessRuntime` 에 걸어 둔다 —
-// 같은 패널이 두 실행기를 모두 몬다. 찾기는 부를 때마다 하므로 실행기가 늦게 떠도
-// 된다.
+// Look up the runtime adapter on each call so either engine can load later.
 const engine = () => (window.Entry && Entry.engine) || null;
 
-/** Everything the panel needs from a runtime. `entryRuntime` is the default. */
 const entryRuntime = {
-  /** `run` · `pause` · `stop`, or `""` while no runtime answers. */
   state(): string {
     const e = engine();
     if (!e || typeof e.isState !== "function") return "";
@@ -178,7 +127,6 @@ const entryRuntime = {
       try {
         if (e.isState(s)) return s;
       } catch (error) {
-        /* 다음 상태를 본다 */
       }
     }
     return "";
@@ -206,7 +154,6 @@ const entryRuntime = {
   sendSignal(id: string) {
     Entry.engine.fireEvent("when_message_cast", id);
   },
-  /** `{ object, entity }` — the object as the project declares it, plus its live entity. */
   object(objectId: string) {
     const object =
       window.Entry && Entry.container && Entry.container.getObject
@@ -214,22 +161,11 @@ const entryRuntime = {
         : null;
     return object && object.entity ? { object, entity: object.entity } : null;
   },
-  /**
-   * 지금 장면에 있는 오브젝트만, 앞에 있는 것부터.
-   *
-   * `Entry.container.objects_` 에는 **모든 장면의** 오브젝트가 다 들어 있고, 다른 장면
-   * 것도 `getVisible()` 이 참인 채로 제자리에 남아 있다(마녀 작품 기준 558개 중 지금
-   * 장면은 13개, 다른 장면인데 보이는 것으로 잡히는 게 285개). 이걸 그대로 훑으면 화면에
-   * 있지도 않은 다른 장면의 배경이 먼저 걸려서, 장면을 한 번 넘긴 뒤로는 엉뚱한
-   * 오브젝트만 골라진다.
-   */
-  /**
-   * entryjs 는 임의의 점에 대한 픽셀 판정을 내주지 않는다. `null` 은 "모르겠다"
-   * 라서, 고르기는 상자 판정으로 떨어진다.
-   */
+  // Entry cannot test arbitrary pixels; null lets picking fall back to bounds.
   hitTest(_entity: any, _x: number, _y: number): boolean | null {
     return null;
   },
+  // Other scenes remain visible in memory, so filter picks to the current scene.
   currentObjects(): any[] {
     const container = window.Entry && Entry.container;
     if (!container) return [];
@@ -237,7 +173,6 @@ const entryRuntime = {
       const current = container.getCurrentObjects?.();
       if (Array.isArray(current)) return current;
     } catch (error) {
-      /* 아래에서 직접 걸러 낸다 */
     }
     const all = Array.isArray(container.objects_) ? container.objects_ : [];
     const sceneId = window.Entry?.scene?.selectedScene?.id;
@@ -246,39 +181,26 @@ const entryRuntime = {
       (object: any) => (object.scene?.id ?? object.scene) === sceneId,
     );
   },
-  /**
-   * Jumps to a scene and runs it, the same way entry's "start scene" block does
-   * (`Entry.scene.selectScene` + `Entry.engine.fireEvent('when_scene_start')`).
-   *
-   * selectScene only swaps what the stage draws: without the event the scene's
-   * "when scene starts" scripts never run, so the scene opens frozen. The engine
-   * drops every event unless it is running, so it is started or resumed first.
-   */
+  // Start or resume before firing the scene-start event; selecting a scene alone leaves it frozen.
   goToScene(sceneId: string) {
     const scene = Entry.scene.getSceneById(sceneId);
     const runner = engine();
     if (!scene) return;
     Entry.scene.selectScene(scene);
     if (!runner) return;
-    // Events are dropped while stopped or paused, so run the engine first
+    // Entry drops events while stopped or paused, so run the engine first.
     if (entryRuntime.state() === "pause") runner.togglePause();
     else if (entryRuntime.state() !== "run") runner.toggleRun();
     runner.fireEvent("when_scene_start");
   },
-  /** Ask the runtime to redraw after the panel changed something. */
   requestUpdate() {
     if (window.Entry) Entry.requestUpdate = true;
   },
-  /**
-   * Renderer the runtime actually draws with — WebGL or 2D. `null` from a
-   * runtime where boost mode picks no renderer, and so has no current value
-   * worth showing.
-   */
+  // Show renderer state only when boost actually selects a renderer.
   realBoost(): boolean | null {
     return Boolean(window.Entry && Entry.options && Entry.options.useWebGL);
   },
-  // 브라우저에 직접 묻는 판단 블록들이라, func 을 감싸 패널에서 고른 값을 돌려준다.
-  // `env` 는 패널이 들고 있는 그 객체라, 감싼 함수는 늘 지금 고른 값을 읽는다.
+  // Wrap browser checks so they read the panel's current environment overrides.
   patchEnvironment(env: {
     boost: string;
     device: string;
@@ -308,11 +230,11 @@ const entryRuntime = {
         return null;
       }
     });
-    // 엔트리는 `window.user` 를 그대로 읽으므로, 패널에서 적어 둔 값이 있을 때만 가로챈다.
+    // Override Entry's window.user only when the panel supplies a value.
     wrap("get_user_name", () => (env.userId === "" ? null : env.userId));
     wrap("get_nickname", () => (env.nickname === "" ? null : env.nickname));
   },
-  /** 엔트리 무대의 논리 크기. 화면에 어떻게 늘어나 있든 좌표는 늘 이 칸으로 센다. */
+  // Use logical stage dimensions regardless of the displayed canvas size.
   stageSize() {
     return { width: 480, height: 270 };
   },
@@ -325,7 +247,7 @@ export type DebugRuntime = typeof entryRuntime;
 
 const rt = (): DebugRuntime => window.tessRuntime ?? entryRuntime;
 
-/** 실행기 호출은 죄다 이 밖으로 나가므로, 터져도 패널은 살아 있어야 한다. */
+// Runtime errors must not take down the debug panel.
 const guard = <T,>(what: string, fallback: T, action: () => T): T => {
   try {
     return action();
@@ -355,13 +277,10 @@ const control = (action: () => void) => {
 const doRun = () => control(() => rt().run());
 const doPause = () => control(() => rt().pause());
 const doStop = () => control(() => rt().stop());
-/** One button both starts and holds: what it does next depends on the state. */
 const doRunToggle = () => (engineState() === "run" ? doPause() : doRun());
 
-// --- 실행 환경 흉내내기 -------------------------------------------------------
 const choice = (value: any) => (value === "" ? null : value === "true");
 
-/** Renderer entry actually runs on — what "실제 값 그대로" resolves to for boost mode. */
 const realBoostLabel = () => (state.realBoost ? "켜짐 (WebGL)" : "꺼짐 (2D)");
 
 window.tessPatchEnvironmentBlocks = function patchEnvironmentBlocks() {
@@ -369,7 +288,6 @@ window.tessPatchEnvironmentBlocks = function patchEnvironmentBlocks() {
   guard("실행 환경 흉내내기", undefined, () => rt().patchEnvironment(state.env));
 };
 
-// --- 자료 -------------------------------------------------------------------
 const preview = (value: any) => {
   if (value === null || value === undefined) return "(없음)";
   const text = typeof value === "string" ? value : JSON.stringify(value);
@@ -391,46 +309,22 @@ const liveList = (id: string) => {
   }
 };
 
-/** 
- * 엔트리 리스트 객체의 항목들을 원본 배열 형태(`[{ data }]`)로 반환합니다. 
- * 실행 전이라면 `project.json`의 초기값을 사용합니다.
- *
- * @param entry 리스트 변수 정보 객체
- * @returns 리스트 항목들의 배열
- *
- * @example
- * ```typescript
- * const items = listArray(myList);
- * ```
- */
 const listArray = (entry: any) => {
   const list = liveList(entry.id);
   try {
     if (list && typeof list.getArray === "function") return list.getArray();
   } catch (error) {
-    /* 실행기에서 못 읽으면 초기값을 보여 준다 */
+    // Show initial values when the runtime is unavailable.
   }
   return entry.array || [];
 };
 
-/** 
- * 변수의 현재 원시 값을 반환합니다. 실행 전이라면 `project.json`의 초기값을 반환합니다.
- *
- * @param entry 변수 정보 객체
- * @returns 변수의 값
- *
- * @example
- * ```typescript
- * const value = rawValue(myVar);
- * ```
- */
 const rawValue = (entry: any) => {
   const variable = liveVariable(entry.id);
   try {
     if (variable && typeof variable.getValue === "function")
       return variable.getValue();
   } catch (error) {
-    /* 아래에서 초기값을 쓴다 */
   }
   return entry.value;
 };
@@ -448,7 +342,7 @@ const liveValue = (entry: any) => {
   return preview(rawValue(entry));
 };
 
-/** 엔트리 변수는 숫자도 글자도 담는다. 숫자로 읽히면 숫자로 넣어야 계산 블록이 제대로 돈다. */
+// Parse numeric edits so Entry arithmetic receives numbers.
 const coerce = (text: string) => {
   const trimmed = String(text).trim();
   if (trimmed === "" || !Number.isFinite(Number(trimmed))) return text;
@@ -469,7 +363,7 @@ const setVariable = (id: string, text: string) => {
 const setListItem = (id: string, index: number, text: string) => {
   try {
     const list = liveList(id);
-    // 엔트리 리스트 API 는 1 부터 센다
+    // Entry list APIs use one-based indices.
     if (list && typeof list.replaceValue === "function")
       list.replaceValue(index + 1, coerce(text));
   } catch (error) {
@@ -499,7 +393,6 @@ const removeListItem = (id: string, index: number) => {
   touch();
 };
 
-/** 무대에 값이 보이는지 — 변수·리스트 모두 같은 API 를 쓴다 */
 const liveEntryOf = (entry: any) =>
   entry.variableType === "list" ? liveList(entry.id) : liveVariable(entry.id);
 
@@ -508,7 +401,6 @@ const entryVisible = (entry: any) => {
   try {
     if (live && typeof live.isVisible === "function") return live.isVisible();
   } catch (error) {
-    /* 실행기가 아직 없으면 선언된 값을 쓴다 */
   }
   return Boolean(entry.visible);
 };
@@ -528,7 +420,6 @@ const sendSignal = (id: string) => {
   guard("신호 보내기", undefined, () => rt().sendSignal(id));
 };
 
-/** 함수 머리 사슬에서 이름·인자 개수·종류를 읽는다 */
 const describeFunction = (fn: any) => {
   let name = fn.id;
   let params = 0;
@@ -551,12 +442,11 @@ const describeFunction = (fn: any) => {
     }
     if (labels.length) name = labels.join(" … ");
   } catch (error) {
-    /* 못 읽으면 id 를 보여 준다 */
+    // Fall back to the ID when the function header cannot be read.
   }
   return { id: fn.id, name, params, kind };
 };
 
-// --- 오브젝트 ----------------------------------------------------------------
 const liveEntity = (objectId: string) => {
   try {
     return rt().object(objectId);
@@ -593,7 +483,6 @@ const setEntityNumber = (name: string) => (objectId: string, text: string) => {
   touch();
 };
 
-// 오브젝트 정보 칸. 숫자 칸은 눌러서 바로 고칠 수 있다 (엔트리 편집기의 그 칸들과 같다).
 const ENTITY_FIELDS = [
   {
     key: "x",
@@ -643,7 +532,6 @@ const pictureInfo = (live: any) => {
 const setPicture = (objectId: string, pictureId: any) => {
   const live = liveEntity(objectId);
   try {
-    // 엔트리의 "모양으로 바꾸기" 와 같은 길이다 (entryjs block_looks.js)
     const picture =
       live && live.object.getPicture ? live.object.getPicture(pictureId) : null;
     if (picture) live!.entity.setImage(picture);
@@ -707,35 +595,16 @@ const showObject = (object: any) => {
   touch();
 };
 
-/** 그 장면으로 넘어가서 그 장면을 실행한다 (실행기마다 하는 일은 어댑터에 있다). */
 const goToScene = (sceneId: string) => {
   guard("장면 바로가기", undefined, () => rt().goToScene(sceneId));
   state.runState = engineState();
   touch();
 };
 
-/** 이름을 눌러 펼치고 접는다. 같은 것을 다시 누르면 접힌다. */
 const toggleExpanded = (key: string) => {
   state.expanded = state.expanded === key ? "" : key;
 };
 
-// ============================================================================
-//  3. 위젯
-// ============================================================================
-
-/**
- * 값을 클릭하여 수정할 수 있는 입력 칸 컴포넌트입니다.
- *
- * @param key 현재 편집 중인 항목의 고유 식별자
- * @param value 표시할 현재 값
- * @param commit 사용자가 입력을 완료했을 때 호출할 함수
- * @returns Preact VNode 객체
- *
- * @example
- * ```tsx
- * {editable('var_1', 10, (newVal) => setVariable('var_1', newVal))}
- * ```
- */
 function editable(key: string, value: any, commit: any) {
   if (state.editing !== key) {
     const text = preview(value);
@@ -748,13 +617,13 @@ function editable(key: string, value: any, commit: any) {
         onClick: () => {
           state.editing = key;
         },
-        // 빈 값도 눌러서 고칠 수 있어야 하므로 자리를 채워 둔다
+        // Keep empty values clickable for editing.
       },
       text === "" ? "(빈 값)" : text,
     );
   }
 
-  // Enter 로 끝내면 입력칸이 사라지면서 blur 까지 이어 나므로 한 번만 반영한다
+  // Enter also triggers blur when the input disappears; commit only once.
   let settled = false;
   const done = (event: any) => {
     if (settled) return;
@@ -766,7 +635,6 @@ function editable(key: string, value: any, commit: any) {
     class: "val debug-edit-input",
     type: "text",
     value: String(value ?? ""),
-    // 막 나타난 입력칸에 바로 커서를 둔다
     ref: (node: any) => {
       if (!node || node.dataset.ready) return;
       node.dataset.ready = "1";
@@ -785,19 +653,6 @@ function editable(key: string, value: any, commit: any) {
   });
 }
 
-/** 
- * 주어진 옵션 목록에서 값을 선택할 수 있는 드롭다운 컴포넌트입니다.
- *
- * @param options 선택 가능한 옵션 목록 (`{ label, value }` 형태)
- * @param value 현재 선택된 값
- * @param commit 사용자가 값을 변경했을 때 호출할 함수
- * @returns Preact VNode 객체
- *
- * @example
- * ```tsx
- * {chooser([{label:'켜기', value:'on'}], 'on', (val) => console.log(val))}
- * ```
- */
 function chooser(options: any, value: any, commit: any) {
   return h(
     "select",
@@ -820,19 +675,6 @@ function chooser(options: any, value: any, commit: any) {
   );
 }
 
-/** 
- * 두 가지 상태(켬/끔)를 전환하는 토글 버튼 컴포넌트입니다.
- *
- * @param on 현재 켜짐 여부
- * @param commit 사용자가 버튼을 클릭했을 때 상태를 변경하는 함수
- * @param labels 켜졌을 때와 꺼졌을 때 표시할 텍스트 배열 `[켜짐라벨, 꺼짐라벨]`
- * @returns Preact VNode 객체
- *
- * @example
- * ```tsx
- * {toggle(true, (val) => console.log(val), ['보이기', '숨기기'])}
- * ```
- */
 function toggle(on: boolean, commit: any, labels: any) {
   return h(
     "button",
@@ -845,7 +687,6 @@ function toggle(on: boolean, commit: any, labels: any) {
   );
 }
 
-// --- 블록 트리 --------------------------------------------------------------
 const blockLabel = (block: any) => {
   const params = (block.params || [])
     .filter((p: any) => p !== null && p !== undefined && typeof p !== "object")
@@ -879,7 +720,6 @@ function blockNode(block: any) {
   );
 }
 
-// --- 섹션 (위아래 크기 조절 · 딱 붙이기) ------------------------------------------
 const startVerticalResize = (event: any, id: string) => {
   const section = event.currentTarget.closest(".debug-section");
   const startY = event.clientY;
@@ -899,17 +739,6 @@ const startVerticalResize = (event: any, id: string) => {
   window.addEventListener("mouseup", up);
 };
 
-/** 
- * 섹션 목록을 렌더링하고, 마지막 섹션을 제외한 나머지 섹션 하단에 높이 조절 핸들을 추가합니다.
- *
- * @param list 렌더링할 섹션 데이터 목록
- * @returns Preact VNode 배열
- *
- * @example
- * ```tsx
- * {sections([{ id: 'sec1', title: '섹션 1', body: h('div') }])}
- * ```
- */
 function sections(list: any) {
   return list.map((section: any, index: number) => {
     const last = index === list.length - 1;
@@ -944,9 +773,6 @@ const empty = (text: string) => h("p", { class: "debug-empty" }, text);
 const emptyRow = (text: string) =>
   h("li", { key: "empty", class: "debug-empty" }, text);
 
-// ============================================================================
-//  4. 탭
-// ============================================================================
 function RunTab() {
   const field = (id: string, label: string, value: any, options: any) =>
     h("div", { class: "debug-field" }, [
@@ -958,8 +784,7 @@ function RunTab() {
           value,
           onChange: (event: any) => {
             state.env[id.replace("env-", "")] = event.target.value;
-            // 엔트리는 감싼 블록이 그때그때 이 값을 읽지만, 실행기에 값을 직접
-            // 넣는 쪽(tessvm)은 고를 때마다 다시 넣어 줘야 한다.
+            // Push environment changes into runtimes that do not read the shared object directly.
             window.tessPatchEnvironmentBlocks();
           },
         },
@@ -969,7 +794,6 @@ function RunTab() {
       ),
     ]);
 
-  /** 고를 것이 아니라 적어 넣는 칸 — 아이디·닉네임처럼 값이 자유로운 자리에 쓴다. */
   const textField = (id: string, label: string, value: string, placeholder: string) =>
     h("div", { class: "debug-field" }, [
       h("label", { for: id }, label),
@@ -1054,8 +878,7 @@ function RunTab() {
           ["true", "켜짐 (참)"],
           ["false", "꺼짐 (거짓)"],
         ]),
-        // 부스트로 렌더러가 갈리는 실행기에서만 지금 값을 알려 준다. tessvm 은 늘
-        // WebGL 하나뿐이라 "지금은 켜짐/꺼짐" 이라고 할 것이 없다.
+        // tessvm always uses WebGL, so it has no boost renderer state to display.
         state.realBoost === null
           ? h(
               "p",
@@ -1093,7 +916,6 @@ function RunTab() {
   ]);
 }
 
-/** 무대에 값을 띄울지 말지 (엔트리의 "변수 보이기/숨기기" 와 같은 것) */
 const visibleToggle = (entry: any) =>
   toggle(
     entryVisible(entry.source),
@@ -1139,7 +961,6 @@ function listRow(entry: any) {
   ]);
 }
 
-/** 펼친 리스트 항목들 — 이름 줄이 아니라 그 다음 줄로 따로 낸다 */
 function listItemsRow(entry: any) {
   const key = "list:" + entry.id;
   const array = listArray(entry.source);
@@ -1293,7 +1114,6 @@ function DataTab() {
   ]);
 }
 
-/** 지금 고른 오브젝트의 실행기 쪽 짝 */
 const currentLive = () =>
   state.currentId ? liveEntity(state.currentId) : null;
 
@@ -1317,8 +1137,7 @@ function objectInfoRows() {
     ];
   }
 
-  // 글상자인지는 오브젝트 종류로 가른다 — 실행기에 따라 글이 없는 오브젝트도
-  // `entity.text` 를 빈 문자열로 들고 있다.
+  // Check object type because some runtimes give sprites an empty text field too.
   const isText = live.object && live.object.objectType
     ? live.object.objectType === "textBox"
     : live.entity.text !== undefined;
@@ -1383,7 +1202,6 @@ function objectInfoRows() {
       ),
     );
   } else {
-    // 글상자는 글 내용도 여기서 바로 고친다
     rows.push(
       infoRow(
         "글 내용",
@@ -1524,7 +1342,6 @@ const TAB_BODY: Record<string, () => any> = {
   errors: ErrorsTab,
 };
 
-// --- 패널 폭 조절 (딱 붙이기) ----------------------------------------------------
 const startHorizontalResize = (event: any) => {
   event.preventDefault();
   document.body.style.userSelect = "none";
@@ -1544,7 +1361,6 @@ const startHorizontalResize = (event: any) => {
   window.addEventListener("mouseup", up);
 };
 
-// --- 패널 전체 ---------------------------------------------------------------
 function Panel() {
   return [
     h("div", {
@@ -1614,7 +1430,7 @@ function Panel() {
         ),
       ),
     ),
-    // 안 보이는 탭은 아예 그리지 않는다 — 블록 트리가 수만 개짜리 작품도 있다.
+    // Skip hidden tabs because a block tree can contain tens of thousands of nodes.
     ...TABS.map((tab) =>
       h(
         "div",
@@ -1633,9 +1449,6 @@ function Panel() {
 
 render(h(Panel, null), panel);
 
-// ============================================================================
-//  5. 바깥 연결
-// ============================================================================
 const toggleBtn = document.getElementById("debug-toggle")!;
 const badge = document.getElementById("debug-badge")!;
 toggleBtn.addEventListener("click", () =>
@@ -1703,12 +1516,11 @@ window.tessRenderProjectDebug = function renderProjectDebug(loaded) {
   }));
   state.functions = (project.functions || []).map(describeFunction);
 
-  // 함수 코드는 펼쳤을 때 그린다. 블록 트리는 반응형 밖에 둔다(크다).
+  // Render function blocks only when expanded and keep their data outside reactive state.
   functionContentById.clear();
   for (const fn of project.functions || []) {
     try {
-      // 정의 블록은 모자다 — 본문은 그 스택의 나머지로 오고(playentry 작품 데이터),
-      // .ent 로 저장하면 같은 본문이 정의 블록의 칸 안에 들어간다. 둘 다 읽는다.
+      // Accept both inline function bodies and bodies nested inside the definition block.
       const stack = JSON.parse(fn.content || "[]")[0] || [];
       const create = stack[0];
       const nested = create && create.statements && create.statements[0];
@@ -1718,7 +1530,7 @@ window.tessRenderProjectDebug = function renderProjectDebug(loaded) {
       );
       indexBlocks(stack, { id: "func:" + fn.id, name: fn.id });
     } catch (error) {
-      /* 못 읽으면 펼쳤을 때 안내만 보여 준다 */
+      // Keep the function visible even when its blocks cannot be read.
     }
   }
 
@@ -1726,13 +1538,12 @@ window.tessRenderProjectDebug = function renderProjectDebug(loaded) {
     try {
       indexBlocks(JSON.parse(object.script), object);
     } catch (e) {
-      /* 블록을 못 읽어도 목록은 보여준다 */
     }
   }
   if (project.objects.length > 0) showObject(project.objects[0]);
 };
 
-/** 이 블록과 그 안에 값으로 꽂힌 블록들의 id. 실제 원인이 자식 쪽일 수 있다. */
+// Include nested value IDs because the failing block may be inside an input.
 window.tessCollectParamIds = function collectParamIds(node, out) {
   out = out || [];
   if (!node || typeof node !== "object" || !node.id) return out;
@@ -1760,7 +1571,6 @@ window.tessHighlightBlock = function highlightBlock(blockId) {
   });
 };
 
-/** 실행 화면에서 고른 오브젝트를 디버거에서 연다 */
 const selectObjectById = (objectId: string) => {
   const found =
     (project &&
@@ -1770,7 +1580,7 @@ const selectObjectById = (objectId: string) => {
   if (!found || !found.script) return;
   showObject(found);
   openPanel("objects");
-  // 오브젝트가 149개나 되는 작품도 있어서, 고른 줄이 목록 밖에 있으면 안 보인다
+  // Scroll the selected row into view for long object lists.
   requestAnimationFrame(() => {
     const row = panel.querySelector('[data-object-id="' + objectId + '"]');
     if (row && row.scrollIntoView) row.scrollIntoView({ block: "nearest" });
@@ -1779,7 +1589,6 @@ const selectObjectById = (objectId: string) => {
 
 window.tessSelectObjectById = selectObjectById;
 
-/** The pointer-in-a-frame glyph every devtools uses for this tool. */
 function inspectIcon() {
   return h(
     "svg",
@@ -1802,17 +1611,13 @@ function inspectIcon() {
   );
 }
 
-/**
- * 고르기 도구를 켜고 끈다. 끄면 붙박아 둔 것도 같이 풀린다 — 다시 켰을 때
- * "왜 안 따라오지" 하는 상태로 시작하지 않게.
- */
+// Clear pinned selection when disabling the picker so re-enabling follows the pointer.
 function toggleInspect() {
   state.inspecting = !state.inspecting;
   state.pinned = false;
   showInspectCursor();
 }
 
-/** 도구가 켜져 있는 동안에는 무대 위 커서를 십자선으로 바꾼다. */
 function showInspectCursor() {
   const canvas = stageCanvas();
   const host = canvas?.parentElement ?? canvas;
@@ -1821,19 +1626,12 @@ function showInspectCursor() {
   }
 }
 
-/**
- * 엔트리 실행 화면을 그리는 캔버스.
- *
- * 그냥 `#workspace canvas` 로 찾으면 안 된다 — 부스트 모드(WebGL)에서는 PIXI 가
- * 글자 따위를 그리려고 눈에 안 보이는 도우미 캔버스를 열 몇 개나 먼저 만들어 둬서,
- * 첫 번째로 걸리는 것이 크기 0 짜리 엉뚱한 캔버스다. 그러면 좌표를 못 재서 무대를
- * 눌러도 고르기가 아예 시작되지 않는다. 엔트리가 붙이는 이름으로 집는다.
- */
+// Select Entry's named stage canvas; PIXI may create zero-sized helper canvases first.
 function entryStageCanvas() {
   const named = document.getElementById("entryCanvas");
   if (named) return named;
 
-  // 이름이 바뀌었더라도 화면에서 자리를 가장 많이 차지한 것이 무대다.
+  // If the canvas name changes, use the largest visible canvas.
   let best = null;
   let bestArea = 0;
   for (const canvas of document.querySelectorAll("#workspace canvas")) {
@@ -1855,10 +1653,7 @@ function stageCanvas() {
   }
 }
 
-/**
- * 화면 좌표를 무대 좌표로. 무대는 가운데가 (0,0) 이고 y 가 위로 자란다.
- * 무대 칸의 크기는 실행기가 정한다 — tessvm 은 480×270 이 아닐 수 있다.
- */
+// Convert to runtime stage coordinates with the origin centered and y increasing upward.
 function toStagePoint(clientX: number, clientY: number) {
   const canvas = stageCanvas();
   if (!canvas) return null;
@@ -1871,17 +1666,11 @@ function toStagePoint(clientX: number, clientY: number) {
   };
 }
 
-/**
- * 누른 자리가 실행 화면 안인가.
- *
- * 눌린 요소가 무대 안에 있는지로 따지면 안 된다 — 작품이 멈춰 있는 동안 엔트리가
- * 덮어 두는 "눌러서 시작" 판은 `#workspace` **바깥**에 붙어서, 정작 오브젝트를
- * 살펴보고 싶은 그때 이 판정이 늘 빗나갔다. 캔버스가 놓인 자리로 따진다.
- */
+// Test canvas bounds because Entry's stopped-work cover sits outside the workspace element.
 function insideStage(event: any) {
   const canvas = stageCanvas();
   if (!canvas) {
-    // 캔버스가 아직 없으면(또는 테스트라면) 무대 상자 안인지로 본다
+    // Fall back to stage bounds when there is no canvas.
     const stage = document.getElementById("workspace");
     return Boolean(stage && stage.contains(event.target));
   }
@@ -1894,14 +1683,7 @@ function insideStage(event: any) {
   );
 }
 
-/**
- * 그 자리에 있는 오브젝트를 앞에 있는 것부터 찾는다.
- *
- * 실행기가 쏘는 클릭 이벤트만 기다리면 안 된다 — 그 이벤트는 늘 오지 않는다.
- * 멈춰 있을 때는 "눌러서 시작" 덮개(<div>)가 클릭을 먼저 먹어서 캔버스까지 가지도
- * 않고, 실행 중이어도 렌더러에 따라 다음 차례로 넘어간다. 경계 상자로 직접 맞히면
- * 멈춰 있든 돌고 있든, 2D 든 WebGL 이든 언제나 답이 나온다.
- */
+// Pick directly from bounds because the stopped cover and renderers can intercept clicks.
 function stageObjects() {
   try {
     return rt().currentObjects();
@@ -1910,7 +1692,7 @@ function stageObjects() {
   }
 }
 
-/** 실행기가 픽셀로 답해 주면 그 답, 못 하면 `null`. 터져도 고르기는 이어 간다. */
+// Keep picking with bounds if the runtime cannot provide a pixel hit test.
 function pixelHit(entity: any, x: number, y: number): boolean | null {
   try {
     return rt().hitTest(entity, x, y) ?? null;
@@ -1930,12 +1712,9 @@ function objectAtPoint(clientX: number, clientY: number) {
     try {
       if (typeof entity.getVisible === "function" && !entity.getVisible())
         continue;
-      // 완전히 투명한 오브젝트는 화면에 없는 것과 같다. 무대를 덮는 투명한 판이
-      // 하나 있으면 어디를 눌러도 그것만 잡혀서 고르기가 안 되는 것처럼 보인다.
+      // Skip transparent objects so invisible overlays cannot hide visible picks.
       if (entity.effect && entity.effect.alpha === 0) continue;
-      // 모양의 그 자리에 정말로 그림이 있는지까지 보는 실행기면 그 답을 그대로
-      // 쓴다. 상자만 보면 960x540 짜리 빈 판 하나가 무대 전체를 가로채, 그 밑의
-      // 오브젝트는 영영 고를 수 없다.
+      // Use pixel tests when available so empty texture areas do not hide objects below.
       const exact = pixelHit(entity, point.x, point.y);
       if (exact !== null) {
         if (exact) return object;
@@ -1951,26 +1730,22 @@ function objectAtPoint(clientX: number, clientY: number) {
       )
         return object;
     } catch (error) {
-      /* 이 오브젝트는 건너뛴다 */
     }
   }
   return null;
 }
 
-/** The stage-pick listeners are installed once, however often this is called. */
+// Install stage-pick listeners only once.
 let stagePicksArmed = false;
 
 window.tessWatchStagePicks = function watchStagePicks() {
   if (stagePicksArmed) return;
   stagePicksArmed = true;
 
-  /**
-   * 무대 위에서 일어난 일인가. 도구가 꺼져 있으면 어떤 이벤트도 우리 것이 아니다 —
-   * 남아 있는 상태로 판단하지 않고 그때그때 이벤트만 본다.
-   */
+  // Check the tool's current state for each event so stale selection cannot intercept input.
   const ours = (event: any) => state.inspecting && insideStage(event);
 
-  // 같은 오브젝트 위에서 마우스가 움직일 때마다 패널을 다시 그리지는 않는다.
+  // Avoid rerendering while the pointer stays on the same object.
   let shownId: string | null = null;
 
   const track = (clientX: number, clientY: number) => {
@@ -1986,11 +1761,7 @@ window.tessWatchStagePicks = function watchStagePicks() {
     track(event.clientX, event.clientY);
   };
 
-  /**
-   * 누르면 지금 고른 것에 붙박고, 한 번 더 누르면 풀린다. 이 클릭은 디버깅하려고
-   * 누른 것이라 작품까지 내려보내지 않는다 — 실행기가 못 보므로 "오브젝트를
-   * 클릭했을 때" 도 돌지 않고, 멈춰 있는 작품을 시작시키지도 않는다.
-   */
+  // Picker clicks pin selection and must not run object-click scripts.
   const onDown = (event: any) => {
     if (!ours(event)) return;
     event.preventDefault();
@@ -2005,20 +1776,17 @@ window.tessWatchStagePicks = function watchStagePicks() {
     state.pinned = shownId !== null;
   };
 
-  // 누른 뒤에 잇따라 오는 것들도 같은 기준으로 삼킨다. 멈춰 있는 작품 위에 덮인
-  // "눌러서 시작" 판은 click 으로 시작하므로, 이걸 막지 않으면 오브젝트를 살펴보려던
-  // 클릭이 작품을 시작시켜 버린다.
+  // Also swallow the following click so Entry's stopped-work cover cannot start the work.
   const swallow = (event: any) => {
     if (!ours(event)) return;
     event.preventDefault();
     event.stopPropagation();
   };
 
-  // 도구를 켜 둔 채 무대를 벗어나면 따라가던 것을 그대로 열어 둔다 — 패널로 마우스를
-  // 가져가는 동안 골라 둔 것이 사라지면 살펴볼 수가 없다.
+  // Keep selection when leaving the stage so it can be inspected in the panel.
   document.addEventListener("pointermove", onMove, true);
   document.addEventListener("mousemove", onMove, true);
-  // createjs 는 mousedown, PIXI 는 pointerdown 을 쓴다. 둘 다 듣는다.
+  // Listen for both mousedown from CreateJS and pointerdown from PIXI.
   document.addEventListener("pointerdown", onDown, true);
   document.addEventListener("mousedown", onDown, true);
   document.addEventListener("mouseup", swallow, true);
@@ -2029,7 +1797,7 @@ window.tessWatchStagePicks = function watchStagePicks() {
   });
 };
 
-/** value_of_index_from_list 의 "can not insert value to array" 를 리스트 이름·길이가 담긴 메시지로 바꾼다 */
+// Add the list name and length to Entry's generic index error.
 window.tessDescribeListIndexError = function describeListIndexError(
   reportedBlockId,
   err,
@@ -2075,14 +1843,12 @@ window.tessDescribeListIndexError = function describeListIndexError(
   }
 };
 
-// --- 캔버스 배치 ------------------------------------------------------------
 let resolutionFixed = false;
 
-// Buffer size every hard-coded pixel offset inside entryjs assumes.
+// Entry's hardcoded pixel offsets assume this buffer size.
 const ENTRY_BUFFER_WIDTH = 640;
 const ENTRY_BUFFER_HEIGHT = 360;
 
-/** Drawing buffer width to aim for: the widest the stage is ever shown at. */
 const wantedBufferWidth = () => {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const wanted =
@@ -2091,13 +1857,7 @@ const wantedBufferWidth = () => {
   return Math.round(Math.min(Math.max(wanted, 960), 1920));
 };
 
-/**
- * Rescales the ask() input box to the canvas buffer we actually use.
- * Entry draws it onto the canvas at raw pixel offsets (x 15, y 275, width 520)
- * that assume a 640x360 buffer, so a bigger buffer leaves it small in the
- * top-left corner. The stage-local submit button and the hit test both stay in
- * entry coordinates, so scaling every length by the same ratio lines them up.
- */
+// Scale ask input lengths together to keep drawing and hit tests aligned with Entry coordinates.
 const scaleInputFieldToBuffer = (bufferW: any) => {
   const stage = window.Entry && Entry.stage;
   const ratio = bufferW / ENTRY_BUFFER_WIDTH;
@@ -2109,8 +1869,7 @@ const scaleInputFieldToBuffer = (bufferW: any) => {
     const field = this.inputField;
     if (!field || field.tessScaled || typeof field.width !== "function") return;
     field.tessScaled = true;
-    // These setters return undefined, so they cannot be chained. Lengths that
-    // feed outerW/outerH go before the position so the last call redraws.
+    // Set dimensions before positions because the last setter redraws; setters cannot be chained.
     for (const name of [
       "fontSize",
       "borderWidth",
@@ -2127,7 +1886,7 @@ const scaleInputFieldToBuffer = (bufferW: any) => {
   };
 };
 
-/** 그리기 해상도는 처음 한 번만 정한다. 바꿀 때마다 캔버스가 지워지고 화면이 깜빡인다. */
+// Set buffer resolution once because changing it clears the canvas and causes flicker.
 const setCanvasResolution = () => {
   if (resolutionFixed) return;
   try {
@@ -2136,10 +1895,7 @@ const setCanvasResolution = () => {
     if (!canvasEl) return;
 
     const bufferW = wantedBufferWidth();
-    // Boost mode draws through PIXI, which owns the canvas: writing to
-    // canvasEl.width behind its back would leave it rendering into one corner.
-    // Raising the renderer resolution instead keeps the stage in entry's
-    // 640x360 space, so every hard-coded offset in entryjs still lands right.
+    // Change PIXI resolution rather than canvas width so Entry's logical coordinates stay intact.
     const renderer = stage._app && stage._app.renderer;
     if (
       renderer &&
@@ -2148,9 +1904,7 @@ const setCanvasResolution = () => {
     ) {
       renderer.resolution = bufferW / ENTRY_BUFFER_WIDTH;
       renderer.resize(ENTRY_BUFFER_WIDTH, ENTRY_BUFFER_HEIGHT);
-      // The interaction plugin keeps its own copy, taken once in setTargetElement,
-      // and divides the raw buffer offset by it (mapPositionToPoint). Left at 1 it
-      // reports hits at <resolution> times the real distance from the top-left.
+      // Update PIXI's cached interaction resolution too, or pointer coordinates scale incorrectly.
       const interaction = renderer.plugins && renderer.plugins.interaction;
       if (interaction) interaction.resolution = renderer.resolution;
     } else {
@@ -2166,29 +1920,24 @@ const setCanvasResolution = () => {
     Entry.requestUpdate = true;
     resolutionFixed = true;
   } catch (e) {
-    /* 실패하면 엔트리 기본 해상도를 쓴다 */
+    // Keep Entry's default resolution if changing it fails.
   }
 };
 
-/**
- * Entry caches the canvas client rect and only refreshes it on window resize,
- * so mouse coordinate blocks read stale positions after the debug panel moves
- * or resizes the stage.
- */
+// Refresh Entry's cached canvas rect when the panel moves or resizes the stage.
 const refreshBoundRect = () => {
   const stage = window.Entry && Entry.stage;
   if (stage && typeof stage.updateBoundRect === "function")
     stage.updateBoundRect();
 };
 
-/** 남은 공간에 16:9 로 꽉 차도록 캔버스의 CSS 크기만 맞춘다 (엔트리 실행기) */
 const entryLayoutCanvas = function layoutCanvas() {
   const workspace = document.getElementById("workspace");
   const canvas = document.getElementById("entryCanvas");
   if (!workspace || !canvas) return;
   const engineBar = document.querySelector(".entryEngine");
   const engineHeight = engineBar ? engineBar.getBoundingClientRect().height : 0;
-  // clientWidth 는 padding(디버그 패널 자리)을 포함하므로 그만큼 뺀다
+  // Exclude panel padding because clientWidth includes it.
   const panelWidth =
     parseFloat(
       getComputedStyle(document.documentElement).getPropertyValue(
@@ -2204,14 +1953,12 @@ const entryLayoutCanvas = function layoutCanvas() {
   setCanvasResolution();
   refreshBoundRect();
 };
-/** 무대를 다시 맞춘다 — 실행기마다 하는 일은 어댑터에 있다. */
 window.tessLayoutCanvas = function tessLayoutCanvas() {
   guard("무대 배치", undefined, () => rt().layoutCanvas());
 };
 window.addEventListener("resize", () => window.tessLayoutCanvas());
 
-// Opening the panel slides the stage sideways over a CSS transition, so its
-// final position is only known once that transition ends.
+// Wait for the panel transition to finish before measuring the stage's final position.
 document
   .getElementById("workspace")
   ?.addEventListener("transitionend", (event) => {

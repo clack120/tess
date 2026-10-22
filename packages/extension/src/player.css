@@ -1,10 +1,5 @@
-/*
- * The runner's own styles. Everything is scoped under `.tessvm-player` so the
- * work page's stylesheet and this one keep out of each other's way, and the
- * measurements follow entry's player: a 47px white bar under a 16:9 stage.
- */
-/* Laid over the emptied entry frame, so the page's own sizing rules still decide
-   how big the player is. */
+/* Scope styles to the player so they do not affect the host page. */
+/* Keep the original iframe's layout box so page sizing rules still apply. */
 .tessvm-host {
   position: absolute;
   inset: 0;
@@ -34,7 +29,6 @@
   display: none !important;
 }
 
-/* ------------------------------------------------------------------ stage */
 .tessvm-view {
   position: relative;
   flex: 1;
@@ -44,7 +38,6 @@
   overflow: hidden;
 }
 
-/* Written by tessvm's own boot code, styled here. */
 .tessvm-player .tessvm-stage {
   position: relative;
   display: grid;
@@ -62,9 +55,7 @@
   display: block;
 }
 
-/* ------------------------------------------------------- the start screen */
-/* Sits over the canvas: the stage is written into this box after the cover is,
-   so without a layer of its own the first frame would paint on top. */
+/* Keep the cover above the canvas even though the canvas is inserted later. */
 .tessvm-cover {
   position: absolute;
   inset: 0;
@@ -119,7 +110,6 @@
   display: none;
 }
 
-/* --------------------------------------------------------- the control bar */
 .tessvm-bar {
   display: flex;
   align-items: center;
@@ -174,7 +164,7 @@
   stroke-linejoin: round;
 }
 
-/* Entry hides stop and pause until the work is running; so does this. */
+/* Hide stop and pause until the work is running, matching Entry. */
 .tessvm-player.is-idle .tessvm-stop,
 .tessvm-player.is-idle .tessvm-pause {
   visibility: hidden;
@@ -250,7 +240,6 @@
   outline-offset: 2px;
 }
 
-/* ------------------------------------------------------------------ errors */
 .tessvm-error {
   flex: none;
   padding: 4px 14px;
@@ -265,15 +254,11 @@
   overflow: auto;
 }
 
-/* A block this runner does not have yet: the work runs, that block does not. */
 .tessvm-error.is-notice {
   background: #fffaf0;
   color: #8a6116;
 }
 
-/* -------------------------------------------------------------- fullscreen */
-/* Full screen is the work and nothing else, the way entry's is: the bar goes
-   away and the stage takes the whole screen. Escape is what comes back. */
 .tessvm-player:fullscreen,
 .tessvm-player.is-full {
   width: 100vw;
@@ -291,8 +276,7 @@
   display: none;
 }
 
-/* A message still has to reach the viewer, but it may not take a strip of the
-   screen away from the work — over the stage, not under it. */
+/* Overlay messages in fullscreen so they do not shrink the stage. */
 .tessvm-player:fullscreen .tessvm-error,
 .tessvm-player.is-full .tessvm-error {
   position: absolute;
@@ -311,10 +295,7 @@
   color: #ffd479;
 }
 
-/* ------------------------------------------------ the right-click menu */
-/* Sizes here are plain pixels, not stage fractions: this is the runner talking
-   to the viewer, not a part of the work's picture. Each rule also outweighs the
-   host page's own button reset, which zeroes padding and line height. */
+/* Use readable pixel sizes and override the host page's button resets. */
 .tessvm-menu {
   position: absolute;
   z-index: 6;

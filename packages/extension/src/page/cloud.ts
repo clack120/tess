@@ -80,19 +80,18 @@ export class CloudClient implements VariableStore {
         if (msg.startsWith('0')) {
           const packet = JSON.parse(msg.slice(1));
           
-          // MUST send 40 to upgrade to Socket.IO namespace
+          // Send 40 to open the Socket.IO namespace after the Engine.IO handshake.
           console.log("[CloudClient] Sending 40 to init Socket.IO");
           this.ws?.send('40');
 
           if (packet.pingInterval) {
             this.pingTimer = window.setInterval(() => {
               if (this.ws?.readyState === WebSocket.OPEN) {
-                this.ws.send('2'); // Ping
+                this.ws.send('2');
               }
             }, packet.pingInterval);
           }
         } else if (msg === '3') {
-          // Pong
         } else if (msg.startsWith('4')) {
           const type = msg.charAt(1);
           if (type === '2') {
@@ -107,8 +106,6 @@ export class CloudClient implements VariableStore {
                   this.handleAction(arr[1]);
                 }
                 
-                // If server expects an ACK (idStr exists), we can optionally send it back:
-                // if (idStr) this.ws?.send('43' + idStr + '[]');
               } catch (e) {
                 console.error('Cloud parsing error', e);
               }

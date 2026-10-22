@@ -1,10 +1,3 @@
-/**
- * @fileoverview `tessvm run` 이 띄우는 정적 서버입니다.
- *
- * 번들 단계가 없습니다 — 브라우저 쪽 소스는 `.ts` 그대로 두고 내보낼 때 타입만
- * 지웁니다(`stripTypes`). Bun 의 변환기는 코드를 다시 찍으므로 개발자 도구의 줄
- * 위치가 저장소와 다를 수 있습니다.
- */
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -30,11 +23,10 @@ export interface ServeOptions {
   assets: AssetFile[];
   assetDirs: string[];
   name: string;
-  /** Block id → the `.tess` line that made it, for the debug panel. */
   sourceMap?: SourceMap;
   port?: number;
   quality?: number;
-  /** Leave unset to follow the project's own `speed`. */
+  // Leave unset to use the project's speed.
   fps?: number;
   stageWidth?: number;
   stageHeight?: number;
@@ -43,14 +35,12 @@ export interface ServeOptions {
   autoStart?: boolean;
   boost?: boolean;
   svg?: boolean;
-  /** Off leaves every function on the javascript path. */
   kernel?: boolean;
 }
 
 export interface RunningServer {
   url: string;
   port: number;
-  /** What the CLI shows as the runner behind this server. */
   runtime: string;
   close(): Promise<void>;
   update(next: {
@@ -88,12 +78,7 @@ const MIME: Record<string, string> = {
   '.m4a': 'audio/mp4',
 };
 
-/**
- * Whether a request really came to this machine's own name. The server listens
- * on the loopback address only, but a page elsewhere can point a name of its own
- * at 127.0.0.1 and then read what is served here as its own origin; the name it
- * used is the one thing that tells the two apart.
- */
+// Check the Host header to prevent DNS rebinding from exposing the local server.
 function isLoopbackHost(host: string | undefined): boolean {
   if (!host) {
     return false;
@@ -102,30 +87,20 @@ function isLoopbackHost(host: string | undefined): boolean {
   return name === '127.0.0.1' || name === 'localhost' || name === '::1';
 }
 
-/** Whether a request carries no origin of its own, or this server's. */
 function isOwnOrigin(request: http.IncomingMessage): boolean {
   const origin = request.headers.origin;
   return origin === undefined || origin === `http://${request.headers.host}`;
 }
 
-/**
- * The papago calls the `번역` blocks make. This runner is not on entry's site, so
- * the browser refuses to call the api from the page; the request is passed along
- * here instead and comes back same-origin.
- */
+// Proxy translation through the local origin because Entry's API does not allow browser CORS.
 const PAPAGO_PREFIX = '/api/expansionBlock/papago/';
 const ENTRY_ORIGIN = 'https://playentry.org';
-/** Entry gives the api this long before it takes the default answer (`callApi`). */
+// Match Entry's API timeout before returning the default answer.
 const API_TIMEOUT_MS = 3000;
 
-/** Every control character but tab and line feed. */
 const CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
 
-/**
- * Text on its way to the terminal. Control characters are dropped so a message
- * cannot move the cursor or repaint the line it is printed on; tabs and line
- * breaks stay, since a stack trace is read by its lines.
- */
+// Drop terminal controls but keep tabs and newlines for readable stack traces.
 function plainText(value: unknown): string {
   const text = typeof value === 'string' ? value : (JSON.stringify(value) ?? '');
   return text.replace(CONTROL_CHARS, ' ');
@@ -142,8 +117,7 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
   const server = http.createServer((request, response) => {
     const url = decodeURIComponent((request.url ?? '/').split('?')[0] ?? '/');
 
-    // The work being run is served here, and so is every file under `/vm/`.
-    // A page that reached this port under a name of its own is not the run page.
+    // Reject foreign Host headers before serving project data or VM files.
     if (!isLoopbackHost(request.headers.host)) {
       return send(response, 403, 'text/plain', 'forbidden');
     }
@@ -177,15 +151,13 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
     }
 
     if (request.method === 'POST' && url === '/__log') {
-      // Anything that is not the run page itself has an origin of its own here,
-      // and this endpoint writes what it is sent into the terminal.
+      // Only the run page may post terminal logs to this endpoint.
       if (!isOwnOrigin(request)) {
         return send(response, 403, 'text/plain', 'forbidden');
       }
       return receiveLog(request, response);
     }
 
-    // The debug panel and the preact it uses: same file, same url as the entry runner.
     if (url === DEBUG_UI_PATH) {
       return send(response, 200, MIME['.js']!, debugUiSource());
     }
@@ -259,26 +231,21 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
   };
 }
 
-/**
- * Hands one papago request to entry and the answer back, unchanged. Only the
- * path the translate blocks use is passed on, and only to entry's own host.
- */
+// Proxy only the translation path to Entry's own host.
 async function passToEntry(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
   try {
     const answer = await fetch(`${ENTRY_ORIGIN}${request.url ?? ''}`, {
-      // Entry answers this api for its own pages only, and the page it is
-      // standing in for here is the work's — the referer says so.
+      // Set the work referer because Entry accepts API calls only for its pages.
       headers: { accept: 'application/json', referer: `${ENTRY_ORIGIN}/` },
       signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
     send(response, answer.status, MIME['.json']!, await answer.text());
   } catch {
-    // Offline or slower than entry itself waits: the block takes its own default.
+    // Keep Entry's default answer when offline or past its timeout.
     send(response, 502, MIME['.json']!, '{}');
   }
 }
 
-/** Prints an error the browser hit into the terminal this server runs in. */
 function receiveLog(request: http.IncomingMessage, response: http.ServerResponse): void {
   let body = '';
   request.on('data', (chunk: Buffer) => {
@@ -296,7 +263,7 @@ function receiveLog(request: http.IncomingMessage, response: http.ServerResponse
         console.error(plainText(stack));
       }
     } catch {
-      // An unreadable body is not worth stopping the server for.
+      // Keep serving when a log request body cannot be read.
     }
     response.writeHead(204).end();
   });
@@ -312,7 +279,7 @@ function sendFile(response: http.ServerResponse, file: string, type: string): vo
   try {
     size = fs.statSync(file).size;
   } catch {
-    // The file went away between the check and here.
+    // A file can disappear between checking and reading it.
     return send(response, 404, 'text/plain', 'not found');
   }
   response.writeHead(200, {
@@ -323,7 +290,7 @@ function sendFile(response: http.ServerResponse, file: string, type: string): vo
   fs.createReadStream(file).pipe(response);
 }
 
-/** Keeps the same port between runs when it is free, so bookmarks survive. */
+// Prefer a stable port so bookmarks keep working.
 function listen(server: http.Server, port: number): Promise<number> {
   return new Promise((resolve, reject) => {
     const onError = (error: NodeJS.ErrnoException) => {

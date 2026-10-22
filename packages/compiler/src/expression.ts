@@ -1,10 +1,4 @@
-/**
- * @fileoverview Tess 표현식을 엔트리 값(value) 블록으로 변환하는 모듈입니다.
- * 
- * 주요 차이점 주의:
- * - 리스트/문자열 인덱스, slice, index_of: Tess와 엔트리 모두 1부터 시작합니다.
- *   따라서 위치값을 변경 없이 그대로 변환합니다. (검색 실패 시 0, slice는 양끝 포함)
- */
+// Indices are one-based, slices include both ends, and failed searches return zero.
 import { KEY_CODES, keyCodeOf } from '@tess/core';
 import { didYouMean, orHint } from '@tess/core';
 import { requireMinMax, requirePowerRefiner, requireStoreFlag } from './runtime.ts';
@@ -19,11 +13,6 @@ import type {
   CompiledFunction, EntryBlock, EntryParam, EntryVariable,
 } from './types.ts';
 
-/** 
- * `resolveTarget` 함수가 오브젝트의 고유 이름 외에 추가로 허용하는 대상 옵션들입니다. 
- * @example
- * const options: TargetOptions = { mouse: true, wall: true };
- */
 interface TargetOptions {
   wall?: boolean;
   self?: boolean;
@@ -31,7 +20,6 @@ interface TargetOptions {
   mouse?: boolean;
 }
 
-/** 변환 결과가 엔트리의 "판단(boolean)" 블록 형태가 되는 블록 타입들의 집합입니다. */
 const BOOLEAN_TYPES = new Set([
   'True', 'False',
   'boolean_basic_operator', 'boolean_and_or', 'boolean_not',
@@ -40,7 +28,6 @@ const BOOLEAN_TYPES = new Set([
   'is_included_in_list',
 ]);
 
-// 계산할 필요 없이 값이 정해지는 리터럴들이다. 판단 자리에 오면 참으로 본다.
 const LITERAL_TYPES = new Set(['Number', 'String', 'Color', 'Transparent']);
 
 const COMPARE_OPERATORS: Record<string, string> = {
@@ -51,7 +38,6 @@ const COMPARE_OPERATORS: Record<string, string> = {
 
 const ARITHMETIC_OPERATORS: Record<string, string> = { '+': 'PLUS', '-': 'MINUS', '*': 'MULTI', '/': 'DIVIDE' };
 
-/** 엔트리의 `calc_operation` 블록으로 일대일 변환이 가능한 단항 수학 함수들의 매핑입니다. */
 const MATH_OPERATIONS: Record<string, string> = {
   sin: 'sin', cos: 'cos', tan: 'tan',
   asin: 'asin_radian', acos: 'acos_radian', atan: 'atan_radian',
@@ -60,18 +46,11 @@ const MATH_OPERATIONS: Record<string, string> = {
   factorial: 'factorial',
 };
 
-/**
- * 특정 오브젝트의 정보를 조회할 때 `coordinate_object` 블록의 조회 속성(COORDINATE)으로 사용할 값들의 매핑입니다.
- * 
- * X, Y, 방향, 이동방향, 크기 외에도 모양 번호(picture_index)와 모양 이름(picture_name)을 
- * 지원하여 다른 오브젝트의 모양 정보도 쉽게 읽어올 수 있도록 매핑합니다.
- */
 const OBJECT_COORDINATES: Record<string, string> = {
   x: 'x', y: 'y', angle: 'rotation', way: 'direction', size: 'size',
   costume: 'picture_name', costume_number: 'picture_index',
 };
 
-/** 괄호 없이 식별자만으로 조회할 수 있는 읽기 전용 전역 상태 값들의 매핑입니다. */
 const STATE_BLOCKS: Record<string, string> = {
   mouse_down: 'is_clicked',
   clicked: 'is_object_clicked',
@@ -83,7 +62,6 @@ const STATE_BLOCKS: Record<string, string> = {
   answer: 'get_canvas_input_value',
 };
 
-/** 자신(self)의 속성을 괄호 없이 조회할 때 사용되는 `coordinate_object`의 속성 매핑입니다. */
 const PROPERTY_COORDINATES: Record<string, string> = {
   x: 'x', y: 'y', angle: 'rotation', way: 'direction', size: 'size',
   costume: 'picture_name', costume_number: 'picture_index',
@@ -93,40 +71,20 @@ export function isBooleanBlock(node: EntryParam): boolean {
   if (!node || typeof node !== 'object') return false;
   const { type } = node as EntryBlock;
   if (expansionBlock(type)?.kind === 'boolean') return true;
-  // 판단 매개변수(`이름?`)를 가리키는 블록은 함수마다 타입 이름이 다르므로 접두사로 가린다
+  // Boolean parameter types vary by function, so match their prefix.
   return BOOLEAN_TYPES.has(type) || String(type).startsWith('booleanParam_');
 }
 
-/**
- * Compiles an expression for a condition slot. Any value goes in as it is and
- * entry reads it the way it reads every condition (`getBooleanValue`):
- * undefined is false, otherwise `Number(value)`, and text that is no number is true.
- */
+// Entry reads conditions through getBooleanValue, so keep the original value.
 export function compileBoolean(node: Expr | null | undefined, ctx: Context): EntryBlock | null {
   return compileAnyValue(node, ctx);
 }
 
-/**
- * Compiles an expression for a value slot. A judgement goes in as it is, so a
- * variable set from it holds the boolean, as in entry; `boolean_value(x)` asks
- * for entry's "TRUE"/"FALSE" text instead.
- */
+// Preserve boolean values; only boolean_value converts them to TRUE/FALSE text.
 export function compileValue(node: Expr | null | undefined, ctx: Context): EntryBlock | null {
   return compileAnyValue(node, ctx);
 }
 
-/**
- * 표현식을 가장 원형에 가까운 엔트리 블록으로 컴파일하여 반환합니다.
- * 
- * 결과가 값 블록일지 판단(boolean) 블록일지 확정되지 않은 상태로 반환합니다.
- * 값이나 판단이 모두 올 수 있는 위치(예: `wait` 블록 등)에서 내부적으로 직접 호출됩니다.
- *
- * @param node - 컴파일할 AST 노드
- * @param ctx - 현재 컴파일 컨텍스트
- * @returns 변환된 엔트리 블록 객체
- * @example
- * const rawBlock = compileAnyValue(exprNode, ctx);
- */
 export function compileAnyValue(node: Expr | null | undefined, ctx: Context): EntryBlock | null {
   if (!node) return null;
   switch (node.type) {
@@ -147,9 +105,6 @@ export function compileAnyValue(node: Expr | null | undefined, ctx: Context): En
   }
 }
 
-// ---------------------------------------------------------------------------
-//  식별자
-// ---------------------------------------------------------------------------
 function compileIdentifier(node: Node & { name: string }, ctx: Context): EntryBlock | null {
   const { name } = node;
 
@@ -158,14 +113,11 @@ function compileIdentifier(node: Node & { name: string }, ctx: Context): EntryBl
     if (found.kind === 'ambiguousLocal') return ambiguousLocalError(node, found, ctx);
     if (found.kind === 'param') {
       const type = ctx.funcScope!.params.get(name)!;
-      // 판단 칸 매개변수 블록은 엔트리가 만든 원본에서도 빈 자리를 하나 갖는다
+      // Entry's boolean parameter blocks include an empty slot.
       return ctx.block(type, type.startsWith('booleanParam_') ? [null] : []);
     }
     if (found.kind === 'funcLocal') return ctx.block('get_func_variable', [found.id, null]);
-    // Entry keeps variables and lists in separate containers, so a variable
-    // block holding a list id finds nothing at run time. Works that renamed a
-    // variable into a list still carry such blocks; they compile back as they
-    // were, under a warning, rather than failing the whole build.
+    // Preserve stale variable blocks that refer to lists; Entry keeps the containers separate.
     if (found.entry.variableType === 'list') {
       ctx.warn(node, `리스트 '${name}' 을(를) 값으로 바로 썼습니다. 실행할 때 값을 찾지 못합니다 — ${name}[i] 처럼 항목을 지정하세요.`);
     }
@@ -173,7 +125,7 @@ function compileIdentifier(node: Node & { name: string }, ctx: Context): EntryBl
   }
 
   if (name === 'block_count') return ctx.block('get_block_count', ['all']);
-  // 세이브 매니저가 있으면 `@확장프로그램` 을 1 로 둔다. 값이 아니라 판단으로 읽는다.
+  // The save manager sets its presence flag to 1; read it as a condition.
   if (name === 'can_save') {
     const flag = requireStoreFlag(ctx);
     return ctx.block('boolean_basic_operator', [
@@ -183,7 +135,6 @@ function compileIdentifier(node: Node & { name: string }, ctx: Context): EntryBl
     ]);
   }
   if (Object.hasOwn(STATE_BLOCKS, name)) {
-    // 블록마다 파라미터 자리 개수가 다르다 (엔트리 블록 스키마 기준)
     const slots: Record<string, number> = { get_nickname: 0, get_user_name: 0, get_project_timer_value: 2 };
     const count = slots[STATE_BLOCKS[name]!] ?? 1;
     return ctx.block(STATE_BLOCKS[name]!, new Array(count).fill(null));
@@ -202,14 +153,6 @@ function compileIdentifier(node: Node & { name: string }, ctx: Context): EntryBl
   return ctx.unresolvedName(node, name);
 }
 
-/**
- * 여러 오브젝트에서 동일한 이름으로 선언된 지역 변수를 모호한 위치에서 사용할 때 발생하는 오류를 보고합니다.
- * 
- * @param node - 오류가 발생한 AST 노드
- * @param found - 찾은 변수명과 해당 변수를 소유한 오브젝트 이름 목록
- * @param ctx - 현재 컴파일 컨텍스트
- * @returns 항상 null을 반환하며 컨텍스트에 오류를 기록합니다.
- */
 export function ambiguousLocalError(node: Node, found: { name: string; owners: string[] }, ctx: Context): null {
   return ctx.error(
     node,
@@ -218,9 +161,6 @@ export function ambiguousLocalError(node: Node, found: { name: string; owners: s
   );
 }
 
-// ---------------------------------------------------------------------------
-//  연산자
-// ---------------------------------------------------------------------------
 function compileBinary(node: BinaryNode, ctx: Context): EntryBlock | null {
   const { operator } = node;
 
@@ -253,17 +193,6 @@ function compileBinary(node: BinaryNode, ctx: Context): EntryBlock | null {
   return ctx.error(node, `연산자 '${operator}' 를 엔트리 블록으로 바꿀 수 없습니다.`);
 }
 
-/**
- * 표현식이 상수들로만 이루어져 있는 경우 미리 계산(Fold)하여 그 값을 반환합니다.
- * 변수나 런타임에 결정되는 값이 포함되어 있으면 null을 반환합니다.
- * 
- * (예: `x ** (1/3)` 같은 수식에서 지수 부분을 미리 계산해 두기 위한 용도로 사용됩니다.)
- *
- * @param node - 평가할 표현식 AST 노드
- * @returns 상수 값, 미리 계산할 수 없으면 null
- * @example
- * const result = foldConstant(exprNode); // 1.5 또는 null
- */
 export function foldConstant(node: Expr | null | undefined): number | null {
   if (!node) return null;
   switch (node.type) {
@@ -292,28 +221,9 @@ export function foldConstant(node: Expr | null | undefined): number | null {
   }
 }
 
-/** 
- * 소수부 계산 시 이진 전개할 최대 비트 수입니다. (20비트는 약 0.000001의 정밀도입니다.) 
- */
 const FRACTION_BITS = 20;
 
-/**
- * 거듭제곱 연산을 제곱(square)과 제곱근(root) 연산의 조합으로 변환합니다.
- * 
- * 엔트리에는 임의의 거듭제곱을 수행하는 내장 블록이 없으므로, 모든 실수 지수를
- * 제곱과 제곱근 블록을 중첩하여 계산하는 구조로 펼쳐서 컴파일합니다.
- * 
- * - 정수부: 자릿수만큼 제곱과 곱셈을 반복하여 전개합니다.
- * - 소수부: 이진 소수로 전개한 뒤, 제곱근을 겹쳐서 전개합니다. 
- *   (예: 0.5, 0.25 등은 정확히 떨어지며 무한소수는 20자리에서 절사하여 오차를 줄입니다.)
- *
- * 컴파일 시점에 블록 트리로 모두 펼치는 이유는, 엔트리의 반복 블록이 프레임을 소모하기 때문에
- * 하나의 표현식이 여러 프레임에 걸쳐 계산되는 것을 방지하기 위함입니다.
- *
- * @param node - 거듭제곱 이항 연산 노드
- * @param ctx - 현재 컴파일 컨텍스트
- * @returns 전개된 거듭제곱 엔트리 블록
- */
+// Expand powers into blocks to avoid consuming frames in an Entry loop.
 function compilePower(node: BinaryNode, ctx: Context): EntryBlock | null {
   const exponent = foldConstant(node.right);
   if (exponent === null) {
@@ -325,18 +235,7 @@ function compilePower(node: BinaryNode, ctx: Context): EntryBlock | null {
   return buildPower(node.left, exponent, node, ctx);
 }
 
-/**
- * 밑(base)과 지수(exponent)를 바탕으로 거듭제곱을 수행하는 블록 트리를 생성합니다.
- * 
- * 지수 계산 과정에서 밑에 해당하는 블록이 여러 번 복제되어 사용되므로,
- * `random()`과 같이 호출할 때마다 값이 달라지는 표현식은 사용할 수 없도록 검증합니다.
- *
- * @param baseNode - 밑에 해당하는 AST 노드
- * @param exponent - 지수 값 (숫자)
- * @param node - 오류 보고용 원본 AST 노드
- * @param ctx - 현재 컴파일 컨텍스트
- * @returns 거듭제곱 처리가 완료된 엔트리 블록
- */
+// Power expansion repeats the base, so reject expressions with changing values.
 export function buildPower(
   baseNode: Expr,
   exponent: number,
@@ -357,7 +256,7 @@ export function buildPower(
     uses += 1;
     const compiled = compileValue(baseNode, ctx);
     if (!compiled) failed = true;
-    // `failed` is what the caller checks; a placeholder keeps the tree building.
+    // A placeholder lets tree building finish; the caller checks failed.
     return compiled ?? ctx.number(1);
   };
   const square = (value: EntryBlock) => ctx.block('calc_operation', [null, value, null, 'square']);
@@ -371,7 +270,7 @@ export function buildPower(
 
   let result = wholePart && fractionPart ? multiply(wholePart, fractionPart) : wholePart ?? fractionPart;
 
-  // 이진 전개가 딱 떨어지지 않았으면 남은 오차를 뉴턴 보정으로 지운다
+  // Apply a Newton correction when the binary expansion leaves a remainder.
   if (result && !exact) {
     const refiner = requirePowerRefiner(ctx);
     result = ctx.block(`func_${refiner.id}`, [result, base(), ctx.number(exponent)]);
@@ -388,7 +287,7 @@ export function buildPower(
   return result ?? ctx.number(1);
 }
 
-/** 정수부를 제곱과 곱셈으로 전개합니다. 지수가 0이면 null(결과적으로 1)을 반환합니다. */
+// A zero exponent returns null, meaning a factor of one.
 function integerPower(
   n: number,
   base: () => EntryBlock,
@@ -402,7 +301,7 @@ function integerPower(
   return n % 2 === 1 ? multiply(squared, base()) : squared;
 }
 
-/** 소수부를 이진 전개하여 제곱근(√) 중첩으로 전개합니다. 남은 자리가 모두 0이면 null(=1)을 반환합니다. */
+// An empty fractional expansion returns null, meaning a factor of one.
 function fractionPower(
   bits: number[],
   index: number,
@@ -417,15 +316,6 @@ function fractionPower(
   return inner ? root(inner) : null;
 }
 
-/**
- * 0 이상 1 미만의 소수값을 이진 소수 배열로 변환합니다. 끝에 남는 0은 제거합니다.
- * 계산 범위 내에서 정확하게 떨어지는 경우(예: 0.5, 0.25) `exact` 플래그가 true가 됩니다.
- * 
- * @param fraction - 변환할 0 이상 1 미만의 실수
- * @returns 이진 전개된 비트 배열과 정확도 여부를 포함하는 객체
- * @example
- * const { bits, exact } = fractionBits(0.625); // bits: [1, 0, 1], exact: true
- */
 function fractionBits(fraction: number): { bits: number[]; exact: boolean } {
   const bits: number[] = [];
   let rest = fraction;
@@ -442,7 +332,6 @@ function fractionBits(fraction: number): { bits: number[]; exact: boolean } {
   return { bits, exact: rest === 0 };
 }
 
-/** 표현식 내부에 평가할 때마다 값이 달라지는 요소(예: random)가 포함되어 있는지 확인합니다. */
 function containsRandom(node: unknown): boolean {
   if (node === null || typeof node !== 'object') return false;
   if (Array.isArray(node)) return node.some(containsRandom);
@@ -454,7 +343,6 @@ function containsRandom(node: unknown): boolean {
 function compileComparison(node: BinaryNode, ctx: Context): EntryBlock | null {
   const operator = COMPARE_OPERATORS[node.operator];
 
-  // type(x) == "number" -> 엔트리의 "~이 숫자인가?" 판단 블록
   const typeCheck = matchTypeCheck(node);
   if (typeCheck) {
     const value = compileValue(typeCheck.value, ctx);
@@ -465,7 +353,6 @@ function compileComparison(node: BinaryNode, ctx: Context): EntryBlock | null {
     return node.operator === '==' ? check : ctx.block('boolean_not', [null, check, null]);
   }
 
-  // device == "mobile" -> "~ 기기인가?" 판단 블록
   const deviceCheck = matchDeviceCheck(node);
   if (deviceCheck) {
     if (!['desktop', 'tablet', 'mobile'].includes(deviceCheck)) {
@@ -504,18 +391,12 @@ function compileUnary(node: UnaryNode, ctx: Context): EntryBlock | null {
     const value = compileBoolean(node.argument, ctx);
     return value && ctx.block('boolean_not', [null, value, null]);
   }
-  // -x : 숫자 리터럴이면 그대로 접어버리고, 아니면 0 - x
   if (node.argument.type === 'Number') return ctx.number(-node.argument.value);
   const value = compileValue(node.argument, ctx);
   return value && ctx.block('calc_basic', [ctx.number(0), 'MINUS', value]);
 }
 
-// ---------------------------------------------------------------------------
-//  인덱스 (리스트 · 문자열)
-// ---------------------------------------------------------------------------
 function compileIndex(node: IndexNode, ctx: Context): EntryBlock | null {
-  // On a table, `표[2, "점수"]` reads one cell by row and column, and
-  // `표["B2"]` reads it by the spreadsheet-style name Entry shows in its editor.
   const table = node.target.type === 'Identifier' && ctx.tableByName.get(node.target.name);
   if (table) {
     const first = compileValue(node.index, ctx);
@@ -539,17 +420,6 @@ function compileIndex(node: IndexNode, ctx: Context): EntryBlock | null {
   return target === null ? null : ctx.block('char_at', [null, target, null, index, null]);
 }
 
-/**
- * 사용자 정의 함수 호출 시 전달할 매개변수 블록들을 컴파일합니다.
- * 
- * `이름?`과 같이 판단 칸으로 선언된 자리는 판단(boolean) 블록만 들어갈 수 있으므로
- * `compileBoolean`을 사용하고, 나머지 자리는 일반 값으로 변환하여 채웁니다.
- *
- * @param fn - 대상 사용자 정의 함수의 메타데이터
- * @param args - 전달할 인자 표현식 목록
- * @param ctx - 현재 컴파일 컨텍스트
- * @returns 컴파일된 매개변수 엔트리 블록들의 배열
- */
 export function compileCallArguments(
   fn: CompiledFunction,
   args: Expr[],
@@ -580,41 +450,29 @@ export function unknownFunctionError(call: CallNode, ctx: Context): null {
   });
 }
 
-/**
- * 소리 이름을 엔트리의 고유 리소스 ID로 변환합니다. (블록이 아니라 드롭다운 필드 값으로 사용됨)
- * `play sound` 블록과 달리 `get_sound_duration` 블록의 값은 필드 형태이므로 ID를 직접 주입합니다.
- * 
- * @param node - 소리 이름이 담긴 문자열 노드
- * @param ctx - 현재 컴파일 컨텍스트
- * @returns 소리의 엔트리 ID, 없으면 원본 이름 또는 null
- */
+// Sound duration uses a dropdown ID rather than a value block.
 function resolveSoundValue(node: Expr, ctx: Context): string | null {
   if (node.type !== 'String') {
     return ctx.error(node, 'sound_duration() 은 소리 이름을 문자열로 적어야 합니다.');
   }
   const sound = ctx.object?.sounds.get(node.value);
   if (sound) return sound.id;
-  // force id 로 고정해 둔 진짜 엔트리 id 면 그대로 흘려보낸다 (resolveSound 와 같은 이유)
+  // Keep explicitly forced Entry resource IDs unchanged.
   if (ctx.forcedResourceIds.has(node.value)) return node.value;
-  // 전역 함수는 기준 오브젝트가 없다 — 이 이름을 가진 오브젝트가 하나뿐이면 그대로 가리킨다.
-  // A global function has no one object to resolve against. Entry reads this
-  // field as id, then name, then index, so leaving the name is what works when
-  // several objects — or none yet — carry a sound by that name.
+  // Global functions resolve shared or missing sound names at runtime.
   if (!ctx.object) {
     const found = ctx.lookupObjectResource('sounds', node.value);
     if (found?.kind === 'found') return found.asset.id;
     if (!found) ctx.notice(node, `'${node.value}' 소리가 어느 오브젝트에도 없습니다. 실행할 때 이름으로 찾습니다.`);
     return node.value;
   }
-  // Entry reads this field as id, then name, then index, so an unknown name is
-  // settled when the block runs — same as the sound slot of a play statement.
+  // Entry resolves sound IDs, names, then indices at runtime.
   ctx.notice(node, `'${node.value}' 소리가 이 오브젝트에 없습니다. 실행할 때 이름으로 찾습니다.`
     + orHint(node.value, ctx.object?.sounds.keys() ?? [],
       `sound ${node.value} "파일명" 으로 먼저 등록하세요.`));
   return node.value;
 }
 
-/** 식별자가 리스트를 가리키고 있을 경우 해당 리스트의 엔트리 변수 항목을 반환합니다. */
 export function resolveList(node: Expr | null | undefined, ctx: Context): EntryVariable | null {
   if (!node || node.type !== 'Identifier') return null;
   const found = ctx.lookupVariable(node.name);
@@ -622,33 +480,18 @@ export function resolveList(node: Expr | null | undefined, ctx: Context): EntryV
   return null;
 }
 
-// ---------------------------------------------------------------------------
-//  내장 함수 호출
-// ---------------------------------------------------------------------------
-/** 엔트리의 "테이블의 () 값" 블록이 계산할 수 있는 테이블 열 요약 연산들의 매핑입니다. */
 const TABLE_CALCULATIONS: Record<string, string> = {
   sum: 'SUM', average: 'AVG', maximum: 'MAX', minimum: 'MIN',
   stdev: 'STDEV', median: 'MEDIAN',
 };
 
-/** 연산 함수가 호출된 대상 테이블을 반환하거나, 테이블이 아닐 경우 오류를 보고합니다. */
 function tableArgument(node: Expr, callee: string, ctx: Context) {
   const table = node.type === 'Identifier' && ctx.tableByName.get(node.name);
   return table || ctx.error(node, `${callee}() 의 첫 번째 인자는 테이블이어야 합니다.`
     + didYouMean(node.type === 'Identifier' ? node.name : '', ctx.tableByName.keys()));
 }
 
-/**
- * 확장 블록 호출을 컴파일합니다.
- * 
- * 드롭다운 슬롯은 고정된 값이 들어가야 하므로 문자열 리터럴로 직접 작성해야 하며,
- * 값 슬롯만 일반 표현식을 받습니다. 사용된 확장 모듈은 `project.expansionBlocks`에
- * 기록되어 런타임에 엔트리가 해당 모듈을 불러오도록 합니다.
- * 
- * @param node - 컴파일할 확장 블록 호출 노드
- * @param ctx - 현재 컴파일 컨텍스트
- * @returns 컴파일된 확장 엔트리 블록
- */
+// Dropdowns require literals; only value slots accept expressions.
 function compileExpansion(node: CallNode, ctx: Context): EntryBlock | null {
   const { callee, arguments: args } = node;
   const { module, slots, ai } = expansionBlock(callee)!;
@@ -678,13 +521,10 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
   };
   const value = (index: number) => compileValue(args[index], ctx);
 
-  // 사용자 정의 함수
   const fn = ctx.functionByName.get(callee);
   if (fn) {
     if (!fn.isValue) {
-      // 엔트리는 블록을 돌리기 전에 값 자리부터 읽으므로, return 이 없는 함수도 값
-      // 자리에서 돕니다 — 한 프레임을 값 자리 안에서 쓰는 치트가 이 모양입니다.
-      // 자리에 남는 값은 없고, 엔트리도 그 자리에 아무것도 넘기지 않습니다.
+      // Entry also executes void functions in value slots, including their frame delays.
       ctx.notice(
         node,
         `함수 '${callee}' 는 값을 돌려주지 않습니다. 값 자리에서도 돌기는 하지만 자리에는 아무 값도 남지 않습니다.`,
@@ -738,7 +578,7 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
     }
 
     case 'log2': {
-      // 엔트리에는 밑이 2인 로그가 없다 -> ln(x) / ln(2)
+      // Entry has no base-2 log block, so use ln(x) / ln(2).
       if (!arity(1)) return null;
       const argument = value(0);
       if (!argument) return null;
@@ -757,7 +597,6 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
     }
 
     case 'root': {
-      // n제곱근 = x ^ (1/n). 지수 규칙은 ** 와 같다.
       if (!arity(2)) return null;
       const degree = foldConstant(args[1]);
       if (degree === null || degree === 0) {
@@ -813,15 +652,12 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
       return target === null ? null : ctx.block('get_block_count', [target]);
     }
 
-    // 이 오브젝트가 가진 소리의 재생 길이(초). 모양·소리 이름을 받는 다른 자리와
-    // 똑같이 이름을 그 소리로 풀어 준다.
     case 'sound_duration': {
       if (!arity(1)) return null;
       const sound = resolveSoundValue(args[0], ctx);
       return sound === null ? null : ctx.block('get_sound_duration', [null, sound, null]);
     }
 
-    // `(<판단>의 값)` — entry's own "TRUE"/"FALSE" text for a judgement.
     case 'boolean_value': {
       if (!arity(1)) return null;
       const argument = compileAnyValue(args[0], ctx);
@@ -845,7 +681,7 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
     }
 
     case 'slice': {
-      // 1부터, 양끝 포함 — 엔트리 substring 그대로다.
+      // Entry substrings are one-based and include both ends.
       if (!arity(3)) return null;
       const string = value(0);
       const start = compileValue(args[1], ctx);
@@ -868,7 +704,7 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
     }
 
     case 'index_of': {
-      // 1부터, 못 찾으면 0 — 엔트리 index_of_string 그대로다.
+      // Entry searches are one-based and return zero when no match exists.
       if (!arity(2)) return null;
       const string = value(0);
       const target = value(1);
@@ -930,7 +766,6 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
     case 'random_color':
       return ctx.error(node, 'random_color() 는 draw_color = random_color() 형태로만 쓸 수 있습니다.');
 
-    // --- 테이블 -----------------------------------------------------------
     case 'row_count':
     case 'column_count': {
       if (!arity(1)) return null;
@@ -980,13 +815,8 @@ function literalKeyCode(node: Expr, ctx: Context, at: Node): string | null {
     + didYouMean(node.value, Object.keys(KEY_CODES)));
 }
 
-/** The name a decompile writes for an object slot the work no longer has. */
 const MISSING_OBJECT = /^_missing_object_(.+)$/;
 
-/**
- * 오브젝트를 가리키는 인자를 엔트리 id 로 바꾼다.
- * "mouse"/"wall" 같은 특수 대상은 옵션으로 허용한다.
- */
 export function resolveTarget(
   node: Expr | null | undefined,
   ctx: Context,
@@ -1004,10 +834,7 @@ export function resolveTarget(
 
   const id = ctx.objectId(name);
   if (id) return id;
-  // `_missing_object_<id>` is what a decompile leaves where a block points at
-  // an object the work no longer has. Entry keeps that slot and finds nothing
-  // when the block runs, so the id goes back in the way it came out — unlike a
-  // name nothing carries, which is a mistake worth stopping for.
+  // Restore missing object IDs so Entry preserves the unresolved target.
   const dangling = MISSING_OBJECT.exec(name);
   if (dangling) {
     ctx.notice(node, `'${dangling[1]}' 오브젝트가 작품에 없습니다. 엔트리처럼 아이디만 남깁니다.`);

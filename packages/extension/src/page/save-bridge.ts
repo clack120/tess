@@ -1,13 +1,6 @@
-/**
- * @fileoverview What the runner saves through, on playentry.
- *
- * The values belong to the extension rather than to the page, so the runner
- * asks the content script and it asks the worker (`background.ts`). Every
- * request carries an id and waits for the answer that comes back with it.
- */
+// Match save requests and replies by ID across the page, content script, and worker.
 import type { SaveHost, StoredValue } from "../../../tessvm/src/runtime/save.ts";
 
-/** How long an answer is waited for before the call gives up, in milliseconds. */
 const TIMEOUT = 5000;
 
 interface Answer {
@@ -44,8 +37,7 @@ function ask(message: Record<string, unknown>): Promise<Answer> {
   listen();
   const id = nextId++;
   return new Promise<Answer>((done) => {
-    // A content script that never answers (the extension was turned off mid-run)
-    // must not leave the work waiting on a save that will not land.
+    // Time out unanswered saves so disabling the extension cannot leave the work waiting forever.
     const timer = window.setTimeout(() => {
       waiting.delete(id);
       done({ error: true });
@@ -58,7 +50,6 @@ function ask(message: Record<string, unknown>): Promise<Answer> {
   });
 }
 
-/** The store for one work, as the runner's `saveStore` option takes it. */
 export function bridgeSaveStore(work: string, title: string): SaveHost {
   return {
     async read() {

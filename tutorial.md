@@ -19,16 +19,16 @@ end
 
 scene "메인화면":
   object "고양이":
-    # 1. 초기 속성 정하기
+    # Initial properties.
     default costume 기본 "cat.png"
     size = 150
     x = 0
     y = -50
 
-    # 2. 전역/지역 변수
+    # Global and object-local variables.
     var 체력 = 100
 
-    # 3. 블록 스크립트
+    # Event scripts.
     when start do
       say "안녕!" for 2
 
@@ -52,12 +52,12 @@ end
 변수와 리스트는 선언한 위치에 따라 **전역**과 **지역**으로 나뉩니다.
 
 ```tess
-# 최상위에 쓰면 '전역 (모든 곳에서 사용 가능)'
+# Top-level declarations are global.
 var 점수 = 0
 list 인벤토리 = ["검", "방패"]
 
 object "플레이어":
-  # 오브젝트 안에 쓰면 '지역 (이 오브젝트 전용)'
+  # Object declarations belong to that object.
   var 속도 = 5
 
   when start do
@@ -91,19 +91,19 @@ end
 
 ```tess
 when start do
-  # 조건문
+  # Conditions.
   if 점수 >= 100:
     say "클리어!"
   else:
     say "진행 중"
   end
 
-  # 반복문
+  # Loops.
   repeat 5:
     forward 10
   end
 
-  # 양 끝을 포함. step을 생략하면 1, 거꾸로 세려면 step -1
+  # Include both ends; step defaults to 1, and step -1 counts backward.
   for i from 1 to 10 step 2:
     say i
   end
@@ -112,7 +112,7 @@ when start do
     wait 1
   end
 
-  # ~할 때까지
+  # Wait until a condition becomes true.
   until touching("도착점"):
     move 5 0
   end
@@ -125,7 +125,7 @@ end
 
 ```tess
 when start do
-  # 이동
+  # Movement.
   x = 100               # x 좌표를 100으로 위치하기
   y += 50               # y 좌표를 50만큼 바꾸기
   move 20 -20           # x, y 만큼 이동하기
@@ -133,12 +133,12 @@ when start do
   forward 10 at 90      # 90도 방향으로 10만큼 움직이기
   bounce                # 화면 끝에 닿으면 튕기기
 
-  # 회전
+  # Rotation.
   angle = 90            # 방향을 90도로 정하기
   turn 45               # 방향을 45도만큼 회전하기
   look "적"             # '적' 오브젝트 쪽 바라보기
 
-  # 생김새
+  # Appearance.
   show                  # 모양 보이기
   hide                  # 모양 숨기기
   costume = "공격"      # '공격' 모양으로 바꾸기
@@ -180,18 +180,18 @@ end
 
 ```tess
 when start do
-  # 객체 정보 읽기
+  # Object state.
   var 내위치 = x
   var 마우스y = y("mouse")
   var 적거리 = distance("적")
   var 지금모양 = costume
 
-  # 상태 판단
+  # Conditions and runtime state.
   if mouse_down: ... end           # 마우스를 클릭했는가?
   if touching("벽"): ... end       # 벽에 닿았는가?
   if timer > 10: ... end           # 초시계 값
 
-  # 수학 및 기타 함수
+  # Math and helper functions.
   var 랜덤 = random(1, 10)         # 1부터 10 사이 무작위 수
   var 작은값 = min(7, 3)          # 3 (max는 큰 값)
   var 이름길이 = length("엔트리")    # 문자열 길이
@@ -213,7 +213,7 @@ end
 일반 `object` 대신 `text` 키워드를 사용하면 글상자를 만들 수 있습니다.
 
 ```tess
-# 글상자
+# Text boxes.
 text "점수판":
   font_color = #ff0000
   bg_color = transparent
@@ -224,7 +224,7 @@ text "점수판":
   end
 end
 
-# 붓과 소리
+# Pen and sound.
 object "펜":
   draw_width = 5
   draw_color = #0000ff
@@ -249,13 +249,13 @@ end
 
 ```tess
 object "플레이어":
-  # 1. 문장으로 쓰는 일반 함수
+  # A function called as a statement.
   function 이동하기(속도):
     forward 속도
     bounce
   end
 
-  # 2. 값으로 쓰는(반환값이 있는) 함수
+  # A function returning a value.
   function 대미지계산(기본공격력):
     if 기본공격력 <= 0:
       return 0

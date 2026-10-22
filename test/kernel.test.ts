@@ -1,11 +1,3 @@
-/**
- * 커널이 블록 실행기와 같은 답을 내는지 검증합니다.
- *
- * 커널은 프레임을 넘기지 않는 숫자 함수만 가져가므로, 확인할 것은 두 가지입니다 —
- * 무엇을 가져가고 무엇을 두고 가는가(`planKernel`), 그리고 가져간 것이 두고 간 것과
- * **똑같은 값**을 내는가. 마지막 하나는 같은 작품을 커널 있이·없이 돌린 뒤 변수와
- * 리스트를 통째로 맞춰 봅니다.
- */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileProject } from '@tess/compiler';
@@ -101,7 +93,6 @@ end`;
   assert.equal(snapshot(optimized), snapshot(plain));
 });
 
-/** Loads one work twice, plain and on the javascript kernel, and starts both. */
 function pair(source: string): [Vm, Vm] {
   const work = project(source);
   const plain = new Vm({ renderer: null, audio: null });
@@ -193,14 +184,12 @@ end`);
   assert.equal(snapshot(optimized), snapshot(plain));
 });
 
-/** Compiles Tess source into the shape `Vm.load` takes. */
 function project(source: string): never {
   const result = compileProject(source, { path: 'kernel.tess' });
   assert.ok(result.project, result.errors[0]?.message ?? '컴파일 실패');
   return result.project as unknown as never;
 }
 
-/** The plan a work would get, without building anything. */
 function planOf(source: string): KernelPlan {
   const vm = new Vm({ renderer: null, audio: null, kernel: true });
   vm.load(project(source));
@@ -208,7 +197,6 @@ function planOf(source: string): KernelPlan {
   return vm.kernelPlan;
 }
 
-/** Runs a work for `ticks` frames, with the kernel or without it. */
 function runWork(source: string, ticks: number, withKernel: boolean): Vm {
   const built = project(source);
   const vm = new Vm({ renderer: null, audio: null, kernel: withKernel });
@@ -223,7 +211,7 @@ function runWork(source: string, ticks: number, withKernel: boolean): Vm {
   return vm;
 }
 
-/** Compare stored values and types, including numeric-looking strings. */
+// Compare stored values and types, including numeric-looking strings.
 function snapshot(vm: Vm): string {
   return JSON.stringify(vm.variables.map((variable) => ({ name: variable.name,
     value: variable.isList ? variable.array.map((item) => item.data) : variable.getValue(),
@@ -231,7 +219,6 @@ function snapshot(vm: Vm): string {
     ? { number: Object.is(value, -0) ? '-0' : String(value) } : value);
 }
 
-/** Both runs of one work agree, value for value. */
 function assertSameAsJavascript(source: string, ticks: number): Vm {
   const withKernel = runWork(source, ticks, true);
   const without = runWork(source, ticks, false);
@@ -239,9 +226,6 @@ function assertSameAsJavascript(source: string, ticks: number): Vm {
   return withKernel;
 }
 
-// ---------------------------------------------------------------------------
-//  무엇을 가져가는가
-// ---------------------------------------------------------------------------
 const NUMERIC = `
 var ret = 0
 var total = 0
@@ -274,7 +258,6 @@ end`;
 test('프레임을 넘기지 않는 숫자 함수는 커널이 가져간다', () => {
   const plan = planOf(NUMERIC);
   assert.ok(plan, '계획이 없습니다');
-  // `four` 만 바깥에서 부르므로 진입점은 하나다. `step` 은 커널 안에서 불린다.
   assert.equal(plan.roots.size, 1);
   assert.equal(plan.rejected.size, 0);
 });
@@ -398,9 +381,6 @@ end`);
   assert.equal(plan.roots.size, 0);
 });
 
-// ---------------------------------------------------------------------------
-//  같은 답을 내는가
-// ---------------------------------------------------------------------------
 test('커널이 낸 값은 자바스크립트가 낸 값과 같다 (10진 산술)', () => {
   assertSameAsJavascript(`
 var ret = 0
@@ -538,7 +518,7 @@ scene "s":
     end
   end
 end`, 3);
-  // `변수 바꾸기` 는 `toFixed` 가 쓴 글자를 담으므로 0.02 가 아니라 "0.020" 이다.
+  // Variable changes retain toFixed text, so 0.02 can be stored as "0.020".
   const clock = vm.variables.find((variable) => variable.name === 'clock');
   assert.equal(clock?.getValue(), '0.020');
 });
@@ -588,9 +568,6 @@ end`;
   assert.equal(vm.errors.length, 0);
 });
 
-// ---------------------------------------------------------------------------
-//  판단을 담는 리스트
-// ---------------------------------------------------------------------------
 const JUDGED = `
 var ret = 0
 var i = 0
@@ -637,12 +614,7 @@ test('판단 리스트는 엔트리처럼 불리언으로 남는다', () => {
   assert.deepEqual(inside.array.map((item) => item.data), [true, true, false, false]);
 });
 
-/**
- * 길이가 0인 리스트는 자리를 차지하지 않으므로 다음 리스트가 같은 번지에서
- * 시작합니다. 넘길 것이 없는지 보는 표시를 번지로 걸어 두면 빈 리스트가 뒤에 오는
- * 표를 대신 답해 버려, 그 표가 영영 건너오지 않고 0 으로 읽힙니다 — `3D portal.ent`
- * 의 화면이 검게만 나오던 까닭입니다.
- */
+// Empty lists share offsets with later slots, so cache synchronization by variable rather than address.
 test('빈 리스트 뒤에 오는 표도 제대로 건너온다', () => {
   const source = `
 var ret = 0
@@ -677,6 +649,5 @@ scene "s":
 end`;
   const vm = assertSameAsJavascript(source, 4);
   assert.deepEqual(vm.errors, []);
-  // 표가 건너오지 않았다면 0 + 0 + 0 이 된다.
   assert.equal(Number(vm.variables.find((v) => v.name === 'total')!.getValue()), 14);
 });
