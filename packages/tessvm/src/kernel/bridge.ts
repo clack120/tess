@@ -210,9 +210,14 @@ function marshal(
     // places come across with the value.
     const source = String(raw);
     const dot = source.indexOf('.');
-    cells[slot.places] = typeof raw === 'number' || dot === -1 && !/^-?\d+$/.test(source)
+    const places = typeof raw === 'number' || dot === -1 && !/^-?\d+$/.test(source)
       ? -1
       : Math.min(dot === -1 ? 0 : source.length - dot - 1, 20);
+    // A branch may leave this variable untouched; copying it out must preserve its text.
+    if (typeof raw === 'string' && (places >= 0 ? value.toFixed(places) : String(value)) !== raw) {
+      return 'skip';
+    }
+    cells[slot.places] = places;
     stamp.set(slot.variable, variable.revision);
     return 'ok';
   }
