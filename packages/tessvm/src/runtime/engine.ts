@@ -33,7 +33,7 @@ import { Table } from './table.ts';
 import { ThreadStop, createOps, type Ops } from './ops.ts';
 import { SaveStore, functionName } from './save.ts';
 import { Extras } from './extras.ts';
-import { blockOfError, RuntimeBlockError, type GeneratedTrace, type RuntimeValue } from './diagnostics.ts';
+import { blockOfError, snapshotVm, RuntimeBlockError, type GeneratedTrace, type RuntimeValue, type VmSnapshot } from './diagnostics.ts';
 
 /**
  * Tick rate used when the project does not declare one. Entry drives its loop
@@ -197,6 +197,8 @@ export interface VmError {
   stack?: string;
   blockType?: string;
   inputs?: Record<string, RuntimeValue>;
+  /** Captured before the host stops or resets the work. */
+  snapshot?: VmSnapshot;
   context?: {
     frame: number;
     clock: number;
@@ -264,6 +266,8 @@ export class Vm implements Project {
   private shownTable: Table | null = null;
   private tableCloseAt: number | null = null;
   errors: VmError[] = [];
+  /** Kept through stop/reset so the failed run can still be inspected. */
+  lastError: VmError | null = null;
   /** Called right after an error is recorded, for the debug panel to report it. */
   onError: ((error: VmError) => void) | null = null;
 
@@ -340,6 +344,7 @@ export class Vm implements Project {
   //  Loading
   // -------------------------------------------------------------------------
   load(project: EntryProjectLike): void {
+    this.lastError = null;
     // `Entry.FPS = project.speed ? project.speed : 60` — a work can ask for a
     // slower loop, and every timed block counts frames at that rate.
     this.frameRate = this.requestedFps ?? (Number(project.speed) || DEFAULT_FPS);
@@ -612,6 +617,7 @@ export class Vm implements Project {
       if (!(error instanceof ThreadStop)) {
         const record = this.errorRecord(error, thread);
         this.errors.push(record);
+        this.lastError = record;
         this.onError?.(record);
       }
       throw error;
@@ -954,6 +960,7 @@ export class Vm implements Project {
   fail(error: unknown, blockId: string | null = null, targetId: string | null = null): void {
     const record = this.errorRecord(error, null, blockId, targetId);
     this.errors.push(record);
+    this.lastError = record;
     this.stop();
     // The message alone rarely says where a frame-level throw came from, and the
     // host only gets the message; the console keeps the stack.
@@ -1009,6 +1016,7 @@ export class Vm implements Project {
       }
       const record = this.errorRecord(error, thread);
       this.errors.push(record);
+      this.lastError = record;
       this.onError?.(record);
     }
   }
@@ -1037,6 +1045,7 @@ export class Vm implements Project {
       targetId: target?.id ?? targetId,
       ...(thread ? { where: this.whereOf(thread, calls) } : {}),
       ...(error instanceof RuntimeBlockError ? { inputs: error.inputs } : {}),
+      snapshot: snapshotVm(this),
       context: {
         frame: this.frame, clock: this.clock, sceneId,
         sceneName: this.sceneOf(sceneId)?.name ?? sceneId,

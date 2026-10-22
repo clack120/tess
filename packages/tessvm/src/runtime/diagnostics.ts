@@ -1,4 +1,5 @@
-import type { VmError } from './engine.ts';
+import type { Vm, VmError } from './engine.ts';
+import type { Variable } from './model.ts';
 
 export interface BlockSite {
   line: number;
@@ -43,6 +44,53 @@ export class RuntimeBlockError extends Error {
     this.inputs = Object.fromEntries(Object.entries(inputs).map(([name, value]) => [name, runtimeValue(value)]));
   }
 }
+
+/** Small, detached previews: inspecting a large work must not duplicate its heap. */
+export function snapshotVm(vm: Vm) {
+  let budget = 512;
+  const variables = (items: readonly (Variable | undefined)[]) => items.filter((item): item is Variable => !!item).slice(0, 200).map((item) => {
+    const values = item.isList ? item.array.slice(0, Math.min(20, budget)).map((cell) => runtimeValue(cell.data))
+      : budget > 0 ? [runtimeValue(item.value)] : [];
+    budget -= values.length;
+    return { id: item.id, name: item.name, objectId: item.objectId, isList: item.isList,
+      length: item.isList ? item.array.length : 1, values };
+  });
+  let clones = 0, threads = 0, listItems = 0;
+  for (const target of vm.targets) { clones += target.clones.length; threads += target.threads.length; }
+  for (const variable of vm.variables) if (variable.isList) listItems += variable.array.length;
+  const globalVariables = variables(vm.variables);
+  const entities = [];
+  const threadPreview = [];
+  for (const target of vm.targets) {
+    for (const thread of target.threads) {
+      threadPreview.push({ targetId: target.id, entityId: thread.entity.id, event: thread.script.event,
+        eventFilter: thread.script.filter, eventBlockId: thread.script.blockId, depth: thread.depth, done: thread.done });
+      if (threadPreview.length >= 200) break;
+    }
+    if (threadPreview.length >= 200) break;
+  }
+  for (const target of vm.targets) {
+    for (let index = -1; index < target.clones.length && entities.length < 100; index++) {
+      const entity = index < 0 ? target.entity : target.clones[index]!;
+      entities.push({ id: entity.id, targetId: target.id, name: target.name, isClone: entity.isClone,
+        x: entity.x, y: entity.y, visible: entity.visible, pictureId: entity.picture?.id ?? null,
+        text: runtimeValue(entity.text), variables: variables(entity.localVars ?? []) });
+    }
+    if (entities.length >= 100) break;
+  }
+  return {
+    state: vm.state, frame: vm.frame, clock: vm.clock, frameRate: vm.frameRate,
+    scene: { id: vm.currentSceneId, name: vm.sceneOf(vm.currentSceneId)?.name ?? vm.currentSceneId },
+    counts: { objects: vm.targets.length, clones, threads, variables: vm.variables.length, listItems },
+    input: { keys: [...vm.pressedKeys], mouseX: vm.mouseX, mouseY: vm.mouseY, mouseDown: vm.mouseDown,
+      clickedEntityId: vm.clickedEntityId, question: runtimeValue(vm.question), answer: runtimeValue(vm.answer), pendingAnswer: runtimeValue(vm.pendingAnswer) },
+    kernel: vm.kernel ? { roots: vm.kernel.roots.size, ...vm.kernel.stats } : null,
+    variables: globalVariables, entities, threads: threadPreview,
+    limits: { variablesPerOwner: 200, listPreview: 20, values: 512, entities: 100, threads: 200, stringLength: 1024 },
+  };
+}
+
+export type VmSnapshot = ReturnType<typeof snapshotVm>;
 
 /** Resolve an engine stack location to a block without instrumenting executed blocks. */
 export function blockOfError(stack: string | undefined, trace: GeneratedTrace | undefined): BlockSite | null {
