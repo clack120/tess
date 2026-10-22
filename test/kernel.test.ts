@@ -16,6 +16,49 @@ import type { KernelPlan } from '@tess/vm';
 
 const hasMoon = moonPath() !== null;
 
+test('the JS kernel preserves untouched scalar text and falls back without partial writes', () => {
+  const source = `
+var text_value = "000123"
+var flag = 0
+var ret = 0
+var calls = 0
+function f():
+  calls += 1
+  if (flag == 1):
+    text_value += 1
+  end
+  return 0
+end
+object "o":
+  when start do
+    forever:
+      ret = f()
+    end
+  end
+end`;
+  for (const initial of ['000123', '9007199254740993', '-0', '123', '0.50']) {
+    const work = project(source);
+    const plain = new Vm({ renderer: null, audio: null });
+    const optimized = new Vm({ renderer: null, audio: null, kernel: () => null });
+    for (const vm of [plain, optimized]) {
+      vm.load(structuredClone(work));
+      vm.start();
+      vm.variables.find((v) => v.name === 'text_value')!.setValue(initial);
+      vm.tick();
+    }
+    assert.equal(optimized.kernel!.where, 'javascript');
+    assert.equal(snapshot(optimized), snapshot(plain), initial);
+    if (['123', '0.50'].includes(initial)) assert.ok(optimized.kernel!.stats.runs > 0);
+    else assert.ok(optimized.kernel!.stats.fallbacks > 0);
+    for (const vm of [plain, optimized]) {
+      vm.variables.find((v) => v.name === 'text_value')!.setValue('0.50');
+      vm.variables.find((v) => v.name === 'flag')!.setValue(1);
+      vm.tick();
+    }
+    assert.equal(snapshot(optimized), snapshot(plain), `${initial}: next call`);
+  }
+});
+
 /** Compiles Tess source into the shape `Vm.load` takes. */
 function project(source: string): never {
   const result = compileProject(source, { path: 'kernel.tess' });
