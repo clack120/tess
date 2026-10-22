@@ -666,6 +666,15 @@ export class Variable {
    * itself, and whatever reaches into `array` calls `touch`.
    */
   revision = 0;
+  /**
+   * The items written one at a time since the kernel last matched this list,
+   * so it can copy those instead of the whole list. Any other write — a
+   * push, a removal, a new array — counts as the whole list.
+   */
+  private spanFrom = Infinity;
+  private spanTo = -1;
+  private spanAll = true;
+  private syncedAt = -1;
   visible = false;
   x = 0;
   y = 0;
@@ -698,7 +707,7 @@ export class Variable {
   }
 
   setValue(value: string | number): void {
-    this.revision += 1;
+    this.touch();
     if (this.isSlide) {
       const n = num(value);
       this.value = clamp(n, this.minValue, this.maxValue);
@@ -712,6 +721,30 @@ export class Variable {
   /** Says the list behind `array` was written to. */
   touch(): void {
     this.revision += 1;
+    this.spanAll = true;
+  }
+
+  /** Says one item, 0-based, was written in place. */
+  touchItem(at: number): void {
+    this.revision += 1;
+    if (at < this.spanFrom) this.spanFrom = at;
+    if (at > this.spanTo) this.spanTo = at;
+  }
+
+  /** The kernel now holds what this list holds. */
+  synced(): void {
+    this.syncedAt = this.revision;
+    this.spanAll = false;
+    this.spanFrom = Infinity;
+    this.spanTo = -1;
+  }
+
+  /**
+   * Items written in place since `revision`, when that is the revision the
+   * kernel last matched; null when the whole list has to cross again.
+   */
+  changedSince(revision: number): [number, number] | null {
+    return this.syncedAt === revision && !this.spanAll ? [this.spanFrom, this.spanTo] : null;
   }
 
   /** `Entry.Variable.isNumber` — decides whether `change_variable` adds or joins. */
@@ -739,7 +772,7 @@ export class Variable {
     if (!this.isStored) {
       this.value = this.snapshotValue;
       this.array = this.snapshotArray.map((item) => ({ data: item.data }));
-      this.revision += 1;
+      this.touch();
     }
     this.visible = this.snapshotVisible;
   }
