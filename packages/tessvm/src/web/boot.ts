@@ -570,6 +570,21 @@ function bindInput(
   // Focus may move between a press and release, while keydown stays scoped to the player.
   if (keyTarget !== window) {
     on(window, 'keyup', (raw) => vm.pressedKeys.delete(keyCodeOf(raw as KeyboardEvent)), true);
+    const player = keyTarget as HTMLElement;
+    let playerFocused = document.activeElement === player;
+    let restoreFocus = false;
+    on(window, 'focusin', (event) => { playerFocused = event.target === player; });
+    on(window, 'blur', () => { restoreFocus = playerFocused; });
+    on(window, 'focus', () => {
+      if (!restoreFocus) return;
+      restoreFocus = false;
+      const active = document.activeElement;
+      // A return from another app can leave focus on the document instead.
+      if (vm.state === 'run' && player.isConnected &&
+        (!active || active === document.body || active === document.documentElement || active === player)) {
+        player.focus({ preventScroll: true });
+      }
+    });
   }
   // A window that loses focus never sees the key come back up, whatever the keys
   // are read from.
