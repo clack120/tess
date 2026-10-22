@@ -1,10 +1,11 @@
 /**
  * 엔트리 스타일의 식별자(ID) 생성기 모듈입니다.
  * 
- * 엔트리의 모든 ID는 영소문자와 숫자로 이루어진 4자리 문자열입니다.
+ * 자동 생성 ID는 영소문자로 시작하는 4자리 영숫자 문자열입니다.
  * 컴파일 결과의 일관성을 위해 시드 기반의 난수 생성을 사용합니다.
  */
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
 /**
  * 주어진 문자열에서 FNV-1a 32비트 해시 알고리즘을 사용하여 시드(seed) 값을 생성합니다.
@@ -67,8 +68,9 @@ export function createIdFactory(seed = 0): IdFactory {
 
   const next = (() => {
     for (;;) {
-      let id = '';
-      for (let i = 0; i < 4; i += 1) id += ALPHABET[Math.floor(random() * ALPHABET.length)];
+      // Entry finds assets by ID before index, so a numeric ID would steal that position.
+      let id = LETTERS[Math.floor(random() * LETTERS.length)]!;
+      for (let i = 1; i < 4; i += 1) id += ALPHABET[Math.floor(random() * ALPHABET.length)];
       if (!used.has(id)) {
         used.add(id);
         return id;
