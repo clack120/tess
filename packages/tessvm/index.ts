@@ -6,6 +6,8 @@
  * 브라우저 쪽 모듈은 `src/web/boot.ts` 가 진입점입니다.
  */
 export { Vm, DEFAULT_FPS, MAX_CLONES, GUEST } from './src/runtime/engine.ts';
+export { formatVmError } from './src/runtime/diagnostics.ts';
+export type { RuntimeValue } from './src/runtime/diagnostics.ts';
 export type {
   AudioEngine,
   EntryProjectLike,

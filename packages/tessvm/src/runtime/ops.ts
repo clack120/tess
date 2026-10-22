@@ -20,6 +20,7 @@ import {
 import { cellToRowCol, columnIndex } from './table.ts';
 import { GUEST } from './engine.ts';
 import type { Vm } from './engine.ts';
+import { RuntimeBlockError } from './diagnostics.ts';
 
 export type Ops = ReturnType<typeof createOps>;
 
@@ -1459,7 +1460,7 @@ export function createOps(vm: Vm) {
     charAt(text: string, index: number): string {
       // The same comparisons as entry, so NaN or a fraction passes as it does there.
       if (index - 1 < 0 || index - 1 > text.length - 1) {
-        throw new Error(`글자 위치 ${index} 이(가) 범위를 벗어났습니다 (글자 수 ${text.length})`);
+        throw new RuntimeBlockError(`글자 위치 ${index} 이(가) 범위를 벗어났습니다 (글자 수 ${text.length})`, 'char_at', { text, index });
       }
       return text[index - 1] ?? '';
     },
@@ -1469,7 +1470,7 @@ export function createOps(vm: Vm) {
       const to = end - 1;
       const last = text.length - 1;
       if (from < 0 || to < 0 || from > last || to > last) {
-        throw new Error(`글자 범위 ${start}~${end} 이(가) 범위를 벗어났습니다 (글자 수 ${text.length})`);
+        throw new RuntimeBlockError(`글자 범위 ${start}~${end} 이(가) 범위를 벗어났습니다 (글자 수 ${text.length})`, 'substring', { text, start, end });
       }
       return text.substring(Math.min(from, to), Math.max(from, to) + 1);
     },

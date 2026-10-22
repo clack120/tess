@@ -8,6 +8,7 @@
  * along the bottom.
  */
 import { boot, type TessVmHandle } from "../../../tessvm/src/web/boot.ts";
+import { formatVmError } from "../../../tessvm/src/runtime/diagnostics.ts";
 import { ASK_FIELD_STYLE } from "../../../tessvm/src/web/ask-style.ts";
 import { CHART_WINDOW_STYLE } from "../../../tessvm/src/web/chart-view.ts";
 import { EXTRAS_DIALOG_STYLE } from "../../../tessvm/src/web/extras.ts";
@@ -471,9 +472,7 @@ export function mountPlayer(
       const key = `${error.blockId}:${error.message}`;
       if (!seen.has(key)) {
         seen.add(key);
-        const target = error.targetId ? live.vm.targetOf(error.targetId) : null;
-        const where = error.where ?? target?.name;
-        showError(`오류로 멈췄습니다 — ${error.message}${where ? `\n${where}` : ""}`);
+        showError(`오류로 멈췄습니다 — ${formatVmError(error)}`);
       }
       if (live.vm.state !== "stop") {
         stop();
