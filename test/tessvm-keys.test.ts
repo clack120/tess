@@ -91,6 +91,7 @@ function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 })
   };
   return { press, pointer, stage, fired,
     focus: (id: string) => (document_.getElementById(id) as HTMLElement).focus(),
+    blurFocused: () => (document_.activeElement as HTMLElement).blur(),
     focused: () => document_.activeElement?.id,
   };
 }
@@ -149,6 +150,35 @@ test('key release outside the focused player cannot leave a work key stuck down'
   focus('outside');
   press('outside', { code: 'Enter' }, 'keyup');
   assert.equal(stage.pressedKeys.has(13), false);
+});
+
+test('returning from another window restores a player that owned focus, repeatedly', (t) => {
+  const { focus, focused, blurFocused, pointer, press, stage } = mountInput(t);
+  focus('root');
+  for (let index = 0; index < 2; index++) {
+    press('root', { code: 'AltLeft' });
+    pointer('window', 'blur', 0, 0);
+    blurFocused();
+    assert.equal(focused(), '');
+    pointer('window', 'focus', 0, 0);
+    assert.equal(focused(), 'root');
+    assert.equal(stage.pressedKeys.size, 0);
+  }
+});
+
+test('returning to the window preserves answer fields and unrelated page focus', (t) => {
+  const { focus, focused, pointer } = mountInput(t);
+  for (const id of ['ask', 'outside', 'stop']) {
+    focus(id);
+    pointer('window', 'blur', 0, 0);
+    pointer('window', 'focus', 0, 0);
+    assert.equal(focused(), id);
+  }
+  focus('root');
+  pointer('window', 'blur', 0, 0);
+  focus('outside');
+  pointer('window', 'focus', 0, 0);
+  assert.equal(focused(), 'outside', 'a page moving focus while away must not be overridden');
 });
 
 test('losing focus clears a held stage press and raises its release', (t) => {
