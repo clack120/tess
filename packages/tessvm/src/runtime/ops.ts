@@ -110,7 +110,7 @@ function* settle(answer: Promise<string>, fallback: string): Generator<number, s
     () => { done = true; },
   );
   while (!done) {
-    yield 0;
+    yield 1;
   }
   return value || fallback;
 }
@@ -572,7 +572,7 @@ export function createOps(vm: Vm) {
         done = true;
       });
       while (!done) {
-        yield 0;
+        yield 1;
       }
     },
 
@@ -1264,7 +1264,7 @@ export function createOps(vm: Vm) {
         finished = true;
       });
       while (!finished) {
-        yield 0;
+        yield 1;
       }
     },
 

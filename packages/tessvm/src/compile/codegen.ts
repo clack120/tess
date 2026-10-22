@@ -365,22 +365,27 @@ export class Codegen {
 
     // Past the depth limit the call runs nothing and gives no value, which is
     // what the caller sees from entry once its stack has run out.
+    const returnsValue = define.type === 'function_create_value';
+    const result = returnsValue ? this.value(define.params[3]).code : '';
     let source =
       `function* (e, th, P) {\n` +
       `  if (th.depth >= ${CALL_DEPTH_LIMIT}) return;\n` +
       `  th.depth += 1;\n` +
       `  try {\n` +
-      `  const L = {${locals}};\n  fn: {\n${body}  }\n`;
-    if (define.type === 'function_create_value') {
-      const result = this.value(define.params[3]);
-      source += `  return ${result.code};\n`;
+      `  const L = {${locals}};\n` +
+      (returnsValue ? `  frame.onPause = function* () { return ${result}; };\n` : '') +
+      `  fn: {\n${body}  }\n`;
+    if (returnsValue) {
+      source += `  frame.onPause = undefined;\n  return ${result};\n`;
     }
     source += '  } finally { th.depth -= 1; }\n}';
 
     this.paramSlots = null;
     this.funcLocals = null;
     this.loopDepth = previousLoopDepth;
-    return source;
+    return returnsValue
+      ? `function (e, th, P) { const frame = (${source})(e, th, P); return frame; }`
+      : source;
   }
 
   /**
