@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 
@@ -26,10 +26,7 @@ function readerFor(payload: string | null) {
       ? '<!doctype html><body></body>'
       : `<!doctype html><body><script id="__NEXT_DATA__" type="application/json">${payload}</script></body>`,
   );
-  const source = stripTypeScriptTypes(
-    fs.readFileSync(path.join(root, 'packages/extension/src/page/signed-in.ts'), 'utf-8'),
-    { mode: 'strip' },
-  );
+  const source = stripTypes(fs.readFileSync(path.join(root, 'packages/extension/src/page/signed-in.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = { document: dom.window.document };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);

@@ -16,8 +16,8 @@ import {
   ringsToPathData,
   strokeCenterline,
   strokeOutline,
-} from '@tess/painter';
-import type { InputPoint, Matrix, Ring } from '@tess/painter';
+} from 'painter';
+import type { InputPoint, Matrix, Ring } from 'painter';
 
 test('painter strokes produce finite smoothed geometry without mutating samples', () => {
   const points: InputPoint[] = [

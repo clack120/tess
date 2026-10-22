@@ -17,7 +17,7 @@
 ## 설치
 
 ```bash
-pnpm add painter
+bun add painter
 # peer 의존성이 아니라 일반 의존성입니다. 별도 설치 불필요.
 ```
 
@@ -332,10 +332,10 @@ vector.setTool('stamp' as never);
 ## 개발
 
 ```bash
-pnpm install
-pnpm dev         # 데모 (vite)
-pnpm typecheck
-pnpm build       # dist/ (esm + cjs + d.ts + painter.css)
+bun install
+bun run dev         # 데모 (vite)
+bun run typecheck
+bun run build       # dist/ (esm + cjs + d.ts + painter.css)
 ```
 
 ## 라이선스

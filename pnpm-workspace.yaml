@@ -1,7 +1,0 @@
-packages:
-  - packages/*
-  - editors/*
-
-allowBuilds:
-  core-js: true
-  tree-sitter-cli: true

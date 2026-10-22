@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { compileProject } from '@tess/compiler';
 import { Vm } from '@tess/vm';
@@ -99,10 +99,7 @@ function fakeAudio() {
 
 /** 타입만 지운 재생기 원본을 가짜 브라우저 위에 올립니다. */
 function loadEngine(context: unknown) {
-  const source = stripTypeScriptTypes(
-    fs.readFileSync(path.join(root, 'packages/tessvm/src/audio/sound.ts'), 'utf-8'),
-    { mode: 'strip' },
-  );
+  const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/audio/sound.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = {
     AudioContext: function AudioContext() { return context; },
     fetch: () => Promise.resolve({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) }),
@@ -409,10 +406,7 @@ function fakeSpeaker(how: 'end' | 'error' | 'blocked' | 'hold') {
 
 /** 읽어주기를 가짜 브라우저 위에 올립니다. */
 function loadTts(how: 'end' | 'error' | 'blocked' | 'hold', origin = 'https://example.test') {
-  const source = stripTypeScriptTypes(
-    fs.readFileSync(path.join(root, 'packages/tessvm/src/audio/sound.ts'), 'utf-8'),
-    { mode: 'strip' },
-  );
+  const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/audio/sound.ts'), 'utf-8'));
   const { FakeAudio, made } = fakeSpeaker(how);
   const spoken: Array<{ text: string; rate: number; pitch: number }> = [];
   const sandbox: Record<string, unknown> = {

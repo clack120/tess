@@ -1,7 +1,7 @@
 /** 16px stroke icons. One shape each, no fills. */
-import type { JSX } from 'preact';
+import type { SVGAttributes } from 'preact';
 
-type IconProps = { size?: number } & JSX.SVGAttributes<SVGSVGElement>;
+type IconProps = { size?: number } & SVGAttributes<SVGSVGElement>;
 
 function Icon({ size = 16, children, ...rest }: IconProps & { children: preact.ComponentChildren }) {
   return (

@@ -253,7 +253,7 @@ ${fontStyles}
   <h2>엔트리 실행기를 불러오지 못했습니다</h2>
   <p>작품은 정상적으로 컴파일됐습니다. 실행기(entryjs)만 못 가져왔습니다.</p>
   <ol>
-    <li>인터넷이 막혀 있다면 <code>pnpm add -D @entrylabs/entry</code> 로 설치한 뒤 다시 <code>run</code> 하세요.
+    <li>인터넷이 막혀 있다면 <code>bun add -d @entrylabs/entry</code> 로 설치한 뒤 다시 <code>run</code> 하세요.
         entryjs 본체는 설치돼 있으면 그 파일을 쓰지만, 서드파티 라이브러리(createjs 등)는
         여전히 인터넷에서 받아야 한다.</li>
     <li>또는 위의 <b>작품 파일(.ent) 내려받기</b> 를 눌러 받은 뒤,

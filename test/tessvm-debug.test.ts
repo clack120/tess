@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 import { compileProject } from '@tess/compiler';
@@ -117,10 +117,7 @@ async function mountPanelOnVm(t: any) {
   for (const key of globals) scope[key] = window[key];
   t.after(() => { for (const [key, value] of saved) scope[key] = value; });
 
-  const source = stripTypeScriptTypes(
-    fs.readFileSync(path.join(root, 'packages/player/src/debug-ui.ts'), 'utf-8'),
-    { mode: 'strip' },
-  );
+  const source = stripTypes(fs.readFileSync(path.join(root, 'packages/player/src/debug-ui.ts'), 'utf-8'));
   const preactFile = source.match(/from ["']\/preact\/([^"']+)["']/)![1];
   const preact = await import(path.join(findPreactDir()!, preactFile));
   window.h = preact.h;

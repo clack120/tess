@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { icon } from './icons.ts';
 import { crxIdText, packCrx, publicKeyOf, signingKey, zipDirectory } from './pack.ts';
@@ -70,7 +70,7 @@ const BARE_IMPORT = /^import\s*['"][^'"]*['"];?[^\S\n]*$/gm;
 const EXPORT_KEYWORD = /^export\s+(?=(?:const|let|var|function|class|async)\b)/gm;
 const LEFTOVER_MODULE = /^\s*(?:import|export)\b/m;
 
-const read = (file: string) => stripTypeScriptTypes(fs.readFileSync(file, 'utf-8'), { mode: 'strip' });
+const read = (file: string) => stripTypes(fs.readFileSync(file, 'utf-8'));
 
 /** Where one source file lands in the build, by the tree it came from. */
 function outputFor(file: string): string {

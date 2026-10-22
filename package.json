@@ -5,40 +5,42 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "packageManager": "bun@1.3.10",
+  "workspaces": [
+    "packages/*",
+    "editors/*"
+  ],
   "scripts": {
     "test": "node --test test/*.test.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/player/tsconfig.browser.json && tsc --noEmit -p packages/tessvm/tsconfig.browser.json && tsc --noEmit -p packages/extension/tsconfig.browser.json && tsc --noEmit -p packages/tessblock/tsconfig.browser.json",
-    "tess": "node packages/cli/index.ts",
-    "build:grammar": "node editors/vscode/build-grammar.ts",
-    "tessvm": "node packages/tessvm/src/node/cli.ts",
-    "build:extension": "node packages/extension/build.ts",
-    "painter": "pnpm --filter painter dev",
-    "tessblock": "pnpm --filter @tess/tessblock dev"
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json && bunx tsc --noEmit -p packages/player/tsconfig.browser.json && bunx tsc --noEmit -p packages/tessvm/tsconfig.browser.json && bunx tsc --noEmit -p packages/extension/tsconfig.browser.json && bunx tsc --noEmit -p packages/tessblock/tsconfig.browser.json",
+    "tess": "bun packages/cli/index.ts",
+    "build:grammar": "bun editors/vscode/build-grammar.ts",
+    "tessvm": "bun packages/tessvm/src/node/cli.ts",
+    "build:extension": "bun packages/extension/build.ts",
+    "painter": "bun --filter painter dev",
+    "tessblock": "bun --filter @tess/tessblock dev"
   },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.22.0",
-      "onFail": "download"
-    }
-  },
+  "trustedDependencies": [
+    "core-js",
+    "tree-sitter-cli",
+    "esbuild"
+  ],
   "devDependencies": {
-    "@entrylabs/entry": "^4.0.22",
+    "@entrylabs/entry": "^4.0.23",
     "@tess/compiler": "workspace:*",
     "@tess/core": "workspace:*",
     "@tess/decompiler": "workspace:*",
-    "@tess/painter": "workspace:painter@*",
     "@tess/parser": "workspace:*",
     "@tess/player": "workspace:*",
     "@tess/tessblock": "workspace:*",
     "@tess/vm": "workspace:*",
     "@types/babel__code-frame": "^7.27.0",
     "@types/jsdom": "^30.0.0",
-    "@types/node": "^26.4.0",
-    "jsdom": "^30.0.1",
+    "@types/node": "^26.6.5",
+    "jsdom": "^30.1.3",
     "painter": "workspace:*",
     "tess": "workspace:*",
-    "tree-sitter-cli": "0.27.0",
+    "tree-sitter-cli": "0.27.1",
     "typescript": "^7.0.2",
     "vscode-oniguruma": "^2.0.1",
     "vscode-textmate": "^9.3.2"

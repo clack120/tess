@@ -18,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import vmModule from 'node:vm';
 import zlib from 'node:zlib';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { compileProject } from '@tess/compiler';
 import { Codegen, serveVm } from '@tess/vm';
@@ -457,10 +457,7 @@ const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** `thumbUrl` 을 playentry 페이지인 척하는 사본 위에 올려 돌려준다. */
 function thumbReader(): (thumb: unknown) => string | null {
-  const source = stripTypeScriptTypes(
-    fs.readFileSync(path.join(repoRoot, 'packages/extension/src/page/entry-project.ts'), 'utf-8'),
-    { mode: 'strip' },
-  );
+  const source = stripTypes(fs.readFileSync(path.join(repoRoot, 'packages/extension/src/page/entry-project.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = {
     location: { origin: 'https://playentry.org' },
     URL,

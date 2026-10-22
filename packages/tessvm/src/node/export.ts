@@ -13,7 +13,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { ENTRY_FONT_STYLES, withServedAssets } from '@tess/player';
 import type { AssetFile, EntryProject } from '@tess/compiler';
@@ -90,7 +90,7 @@ function collectModules(entries: string[]): Map<string, string> {
     }
     const source = fs.readFileSync(file, 'utf-8');
     const code = relative.endsWith('.ts')
-      ? stripTypeScriptTypes(source, { mode: 'strip' })
+      ? stripTypes(source)
       : source;
     found.set(relative, code);
     for (const specifier of relativeSpecifiers(code)) {

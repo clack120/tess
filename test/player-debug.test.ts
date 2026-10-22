@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 import { playerPage, findPreactDir } from '@tess/player';
 import { compileProject } from '@tess/compiler';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 /**
@@ -156,10 +156,7 @@ async function mountDebugPanel(t: any) {
    * 패키지 기본 진입점을 사용하면 서버가 제공하는 파일과 달라질 수 있으므로 정확한 파일을 사용합니다.
    * 패널 코드는 TypeScript로 작성되었으며 타입이 제거된 상태로 제공되므로, 테스트에서도 동일하게 타입을 제거하여 브라우저가 수신하는 코드와 일치시킵니다.
    */
-  const source = stripTypeScriptTypes(
-    fs.readFileSync(path.join(root, 'packages/player/src/debug-ui.ts'), 'utf-8'),
-    { mode: 'strip' },
-  );
+  const source = stripTypes(fs.readFileSync(path.join(root, 'packages/player/src/debug-ui.ts'), 'utf-8'));
   const preactFile = source.match(/from ["']\/preact\/([^"']+)["']/)![1];
   const preact = await import(path.join(preactDist()!, preactFile));
   window.h = preact.h;

@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 
@@ -39,10 +39,7 @@ function mountInput(t: any) {
   );
   t.after(() => dom.window.close());
 
-  const source = stripTypeScriptTypes(
-    fs.readFileSync(path.join(root, 'packages/tessvm/src/web/boot.ts'), 'utf-8'),
-    { mode: 'strip' },
-  );
+  const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/web/boot.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = { window: dom.window, document: dom.window.document };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
