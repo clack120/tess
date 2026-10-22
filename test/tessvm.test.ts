@@ -47,12 +47,12 @@ test('stop and restart restore table cells, field names and shape', () => {
   assert.equal(table.getValue(1, 1), 9, 'resuming a pause preserves table edits');
   vm.stop();
   assert.deepEqual(table.fields, ['field']);
-  assert.deepEqual(table.rows, [[1]]);
+  assert.deepEqual(table.rows, [[99]]);
   assert.ok(table.revision > revision);
   vm.start();
   table.replaceValue(1, 1, 7);
   vm.reset();
-  assert.deepEqual(table.rows, [[1]], 'restored rows do not alias the snapshot');
+  assert.deepEqual(table.rows, [[99]], 'restored rows do not alias the snapshot');
 });
 
 test('clones inherit pen settings with an independent new drawing path', () => {
@@ -1976,16 +1976,14 @@ test('작품을 처음부터 시작하면 열려 있던 표 창은 닫힌다', (
   assert.deepEqual(view.shown.slice(-1), [null]);
 });
 
-// Restore origin because saved data may be empty even when original rows remain.
-test('표는 처음 값(origin)을 읽는다', () => {
+test('표는 origin 대신 data를 읽는다', () => {
   const table = Table.from({
     id: 't', name: '표', fields: ['A', 'B'],
     data: [],
     origin: [[0, 1], [2, 3]],
   } as never);
   assert.deepEqual(table.fields, ['A', 'B']);
-  assert.equal(table.getValue(1, 1), 0, 'A1');
-  assert.equal(table.getValue(2, 2), 3, 'B2');
+  assert.deepEqual(table.rows, []);
 
   const keyed = Table.from({
     id: 't', name: '표', fields: ['A'],

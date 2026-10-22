@@ -32,6 +32,7 @@ export interface BootOptions {
   svg?: boolean;
   // Without a viewer, both identity blocks return a space.
   user?: EntryUser | null;
+  tableColumnName?: string;
   kernel?: boolean;
   onProgress?(loaded: number, total: number): void;
   // Omitted uses browser storage; null keeps shared values in VM memory only.
@@ -216,6 +217,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     touch,
     deviceType,
     user: options.user,
+    tableColumnName: options.tableColumnName,
     store: options.store === null ? null : (options.store ?? localVariableStore(storeKey(project))),
     kernel: options.kernel !== false,
   });

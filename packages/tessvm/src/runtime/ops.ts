@@ -15,6 +15,8 @@ import { GUEST } from './engine.ts';
 import type { Vm } from './engine.ts';
 import { RuntimeBlockError } from './diagnostics.ts';
 
+type TableRef = number | string;
+
 export type Ops = ReturnType<typeof createOps>;
 
 // Unwind immediately when a block stops the script so no following function statements run.
@@ -158,6 +160,33 @@ export function createOps(vm: Vm) {
   function listError(blockType: string, list: Variable, inputs: Record<string, unknown>): never {
     throw new RuntimeBlockError(`리스트 항목 위치가 올바르지 않습니다 (항목 수 ${list.array.length})`,
       blockType, { list: list.name, length: list.array.length, ...inputs });
+  }
+
+  function tableAt(index: TableRef) {
+    return typeof index === 'number' ? vm.tables[index] : undefined;
+  }
+
+  function tableError(index: TableRef, blockType: string, inputs: Record<string, unknown>): never {
+    throw new RuntimeBlockError('표를 찾을 수 없습니다', blockType, { table: index, ...inputs });
+  }
+
+  function tableColumnPosition(index: TableRef, column: unknown, blockType: string, input = 'column') {
+    try {
+      return columnIndex(column);
+    } catch {
+      throw new RuntimeBlockError('표의 열 지정값을 읽을 수 없습니다 (예: A 또는 1)', blockType,
+        { table: tableAt(index)?.id ?? index, [input]: column });
+    }
+  }
+
+  function tableCellPosition(index: TableRef, cell: unknown, blockType: string, value?: unknown) {
+    const address = cell || '';
+    const upper = (address as string).toUpperCase;
+    if (typeof upper !== 'function') {
+      throw new RuntimeBlockError('셀 주소를 글자로 읽을 수 없습니다 (예: A2)', blockType,
+        { table: tableAt(index)?.id ?? index, cell, ...(blockType === 'set_value_from_cell' ? { value } : {}) });
+    }
+    return cellToRowCol(upper.call(address));
   }
 
   // Resolve the three list index keywords before numeric index conversion.
@@ -1035,121 +1064,87 @@ export function createOps(vm: Vm) {
       vm.renderer?.stamp?.(entity);
     },
 
-    tableAppend(index: number, property: string): void {
-      const table = vm.tables[index];
-      if (!table) {
-        return;
-      }
-      if (property === 'ROW') {
-        table.appendRow();
-      } else {
-        table.appendCol();
+    *tableAppend(index: TableRef, property: string): Generator<number, void> {
+      yield* settle((async () => {
+        const target = tableAt(index) ?? tableError(index, 'append_row_to_table', { property });
+        if (property === 'ROW') await target.appendRow();
+        else await target.appendCol(vm.tableColumnName);
+      })());
+    },
+
+    *tableInsert(index: TableRef, at: number, property: string): Generator<number, void> {
+      yield* settle((async () => {
+        const target = tableAt(index) ?? tableError(index, 'insert_row_to_table', { position: at, property });
+        if (property === 'ROW') await target.insertRow(at - 1);
+        else await target.insertCol(at, vm.tableColumnName);
+      })());
+    },
+
+    tableDelete(index: TableRef, at: number, property: string): void {
+      const target = tableAt(index) ?? tableError(index, 'delete_row_from_table', { position: at, property });
+      if (property === 'ROW') target.deleteRow(at - 1);
+      else target.deleteCol(at);
+    },
+
+    tableSet(index: TableRef, row: number, col: unknown, value: unknown): void {
+      const column = tableColumnPosition(index, col, 'set_value_from_table');
+      const target = tableAt(index) ?? tableError(index, 'set_value_from_table', { row, column: col, value });
+      if (target.isExist(row - 1, column)) {
+        target.replaceValue(row - 1, column, value);
       }
     },
 
-    tableInsert(index: number, at: number, property: string): void {
-      const table = vm.tables[index];
-      if (!table) {
-        return;
-      }
-      if (property === 'ROW') {
-        table.insertRow(at - 1);
-      } else {
-        table.insertCol(at);
-      }
+    tableSetCell(index: TableRef, cell: unknown, value: unknown): void {
+      const { row, col } = tableCellPosition(index, cell, 'set_value_from_cell', value);
+      const target = tableAt(index) ?? tableError(index, 'set_value_from_cell', { cell, value });
+      if (target.isExist(row, col)) target.replaceValue(row, col, value);
     },
 
-    tableDelete(index: number, at: number, property: string): void {
-      const table = vm.tables[index];
-      if (!table) {
-        return;
-      }
-      if (property === 'ROW') {
-        table.deleteRow(at - 1);
-      } else {
-        table.deleteCol(at);
-      }
-    },
-
-    tableSet(index: number, row: number, col: unknown, value: unknown): void {
-      const table = vm.tables[index];
-      const column = columnIndex(col);
-      if (table && table.isExist(row - 1, column)) {
-        table.replaceValue(row - 1, column, value as string | number);
-      }
-    },
-
-    tableSetCell(index: number, cell: unknown, value: unknown): void {
-      const table = vm.tables[index];
-      if (!table) {
-        return;
-      }
-      const { row, col } = cellToRowCol(String(cell ?? '').toUpperCase());
-      if (table.isExist(row, col)) {
-        table.replaceValue(row, col, value as string | number);
-      }
-    },
-
-    tableCount(index: number, property: string): number {
-      const table = vm.tables[index];
-      if (!table) {
-        return 0;
-      }
-      if (property === 'ROW') {
-        return table.rows.length + 1;
-      }
-      if (property === 'COL') {
-        return table.fields.length;
-      }
+    tableCount(index: TableRef, property: string): number {
+      const target = tableAt(index) ?? tableError(index, 'get_table_count', { property });
+      if (property === 'ROW') return target.rows.length + 1;
+      if (property === 'COL') return target.fields.length;
       return 0;
     },
 
-    tableValue(index: number, row: number, col: unknown): string | number | null {
-      return vm.tables[index]?.getValue(row - 1, columnIndex(col)) ?? null;
+    tableValue(index: TableRef, row: number, col: unknown): unknown {
+      const column = tableColumnPosition(index, col, 'get_value_from_table');
+      return (tableAt(index) ?? tableError(index, 'get_value_from_table', { row, column: col })).readValue(row - 1, column);
     },
 
-    tableLastValue(index: number, col: unknown): string | number | null {
-      const table = vm.tables[index];
-      if (!table) {
-        return null;
-      }
-      return table.getValue(table.rows.length, columnIndex(col));
+    tableLastValue(index: TableRef, col: unknown): unknown {
+      const column = tableColumnPosition(index, col, 'get_value_from_last_row');
+      const target = tableAt(index) ?? tableError(index, 'get_value_from_last_row', { column: col });
+      return target.readValue(target.rows.length, column);
     },
 
-    tableCellValue(index: number, cell: unknown): string | number | null {
-      const table = vm.tables[index];
-      if (!table) {
-        return null;
-      }
-      const { row, col } = cellToRowCol(String(cell ?? '').toUpperCase());
-      return table.getValue(row, col);
+    tableCellValue(index: TableRef, cell: unknown): unknown {
+      const { row, col } = tableCellPosition(index, cell, 'get_value_from_cell');
+      return (tableAt(index) ?? tableError(index, 'get_value_from_cell', { cell })).readValue(row, col);
     },
 
     // Opening a table window does not hold the running script.
-    showTable(index: number, seconds?: number): void {
-      vm.openTable(vm.tables[index] ?? null, seconds);
+    showTable(index: TableRef, seconds?: number): void {
+      vm.openTable(tableAt(index) ?? null, seconds);
     },
 
     // Entry chart indices start at zero.
-    showChart(index: number, chart: unknown): void {
-      vm.openTable(vm.tables[index] ?? null, undefined, Math.max(0, Math.floor(Number(chart) || 0)));
+    showChart(index: TableRef, chart: unknown): void {
+      vm.openTable(tableAt(index) ?? null, undefined, Math.max(0, Math.floor(Number(chart) || 0)));
     },
 
     closeTable(): void {
       vm.openTable(null);
     },
 
-    tableCalc(index: number, col: unknown, calc: string): number {
-      const table = vm.tables[index];
-      if (!table) {
-        return 0;
-      }
-      const values = table.column(columnIndex(col));
+    tableCalc(index: TableRef, col: unknown, calc: string): number {
+      const column = tableColumnPosition(index, col, 'calc_values_from_table');
+      const values = (tableAt(index) ?? tableError(index, 'calc_values_from_table', { column: col, calculation: calc })).column(column);
       const total = values.length;
       if (!total) {
         return 0;
       }
-      const sum = values.reduce((a, b) => a + b, 0);
+      const sum = values.reduce((a, b) => a + b);
       switch (calc) {
         case 'SUM':
           return sum;
@@ -1161,33 +1156,32 @@ export function createOps(vm: Vm) {
           return sum / total;
         case 'STDEV': {
           const mean = sum / total;
-          const variance = values.reduce((acc, x) => acc + (x - mean) ** 2, 0) / total;
+          const variance = values.reduce((acc, x) => acc + (x - mean) ** 2, 0) / (total - 1);
           return Math.sqrt(variance);
+        }
+        case 'MEDIAN': {
+          values.sort((left, right) => left - right);
+          return (values[Math.floor(total / 2)]! + values[total - 1 - Math.floor(total / 2)]!) / 2;
         }
         default:
           return 0;
       }
     },
 
-    tableCoefficient(index: number, x: unknown, y: unknown): number {
-      const table = vm.tables[index];
-      if (!table) {
-        return 0;
-      }
-      return table.coefficient(columnIndex(x) - 1, columnIndex(y) - 1);
+    tableCoefficient(index: TableRef, x: unknown, y: unknown): string | number {
+      const left = tableColumnPosition(index, x, 'get_coefficient', 'x') - 1;
+      const right = tableColumnPosition(index, y, 'get_coefficient', 'y') - 1;
+      return (tableAt(index) ?? tableError(index, 'get_coefficient', { x, y })).coefficient(left, right);
     },
 
-    tableLookup(index: number, field: unknown, value: unknown, returnField: unknown): string | number | null {
-      const table = vm.tables[index];
-      if (!table) {
-        return null;
-      }
-      const col = columnIndex(field);
-      const returnCol = columnIndex(returnField);
-      for (let row = 0; row <= table.rows.length; row += 1) {
+    tableLookup(index: TableRef, field: unknown, value: unknown, returnField: unknown): unknown {
+      const col = tableColumnPosition(index, field, 'get_value_v_lookup');
+      const returnCol = tableColumnPosition(index, returnField, 'get_value_v_lookup', 'returnColumn');
+      const target = tableAt(index) ?? tableError(index, 'get_value_v_lookup', { column: field, value, returnColumn: returnField });
+      for (let row = 0; row <= target.rows.length; row += 1) {
         // eslint-disable-next-line eqeqeq
-        if (table.getValue(row, col) == value) {
-          return table.getValue(row, returnCol);
+        if (target.getValue(row, col) == value) {
+          return target.readValue(row, returnCol);
         }
       }
       return null;

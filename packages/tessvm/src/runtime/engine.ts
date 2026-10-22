@@ -111,6 +111,8 @@ export interface VmOptions {
   speech?: SpeechEngine | null;
   // Without a translation host, return Entry's offline result.
   translator?: Translator | null;
+  // Use the host Entry label when naming new table columns.
+  tableColumnName?: string;
   // Leave unset to use the project's speed.
   fps?: number;
   stageWidth?: number;
@@ -165,6 +167,7 @@ export class Vm implements Project {
   variables: Variable[] = [];
   messages: Array<{ id: string; name: string }> = [];
   tables: Table[] = [];
+  readonly tableColumnName: string;
   speech: SpeechEngine | null;
   translator: Translator | null;
   renderer: Renderer | null;
@@ -244,6 +247,7 @@ export class Vm implements Project {
     this.audio = options.audio ?? null;
     this.speech = options.speech ?? null;
     this.translator = options.translator ?? null;
+    this.tableColumnName = options.tableColumnName ?? '새로운 열';
     this.requestedFps = options.fps;
     this.frameRate = options.fps ?? DEFAULT_FPS;
     if (options.stageWidth && options.stageHeight) {
@@ -713,7 +717,7 @@ export class Vm implements Project {
       this.speech?.resume?.();
       return;
     }
-    this.reset();
+    this.resetExecution();
     this.state = 'run';
     this.clock = 0;
     this.lastStoreFlush = 0;
@@ -766,6 +770,13 @@ export class Vm implements Project {
   }
 
   reset(): void {
+    for (const table of this.tables) {
+      table.reset();
+    }
+    this.resetExecution();
+  }
+
+  private resetExecution(): void {
     for (const target of this.targets) {
       for (const clone of target.clones.slice()) {
         this.renderer?.removeEntity(clone);
@@ -776,9 +787,6 @@ export class Vm implements Project {
     }
     for (const variable of this.variables) {
       variable.loadSnapshot();
-    }
-    for (const table of this.tables) {
-      table.reset();
     }
     this.answer = '';
     this.errors = [];

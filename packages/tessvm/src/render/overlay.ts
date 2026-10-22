@@ -93,8 +93,8 @@ interface RowView {
 
 export interface TableLike {
   name: string;
-  fields: string[];
-  rows: Array<Array<string | number>>;
+  fields: unknown[];
+  rows: unknown[][];
   charts?: ChartLike[];
   // Increment after table changes so open views can refresh.
   revision?: number;
