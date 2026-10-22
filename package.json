@@ -16,7 +16,8 @@
     "tess": "bun packages/cli/index.ts",
     "build:grammar": "bun editors/vscode/build-grammar.ts",
     "tessvm": "bun packages/tessvm/src/node/cli.ts",
-    "build:extension": "bun packages/extension/build.ts"
+    "build:extension": "bun packages/extension/build.ts",
+    "watch:extension": "bun packages/extension/watch.ts"
   },
   "trustedDependencies": [
     "core-js",

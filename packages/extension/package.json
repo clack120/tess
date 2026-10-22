@@ -6,7 +6,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.ts"
+    "build": "bun build.ts",
+    "watch": "bun watch.ts"
   },
   "dependencies": {
     "@tess/vm": "workspace:*",
