@@ -81,7 +81,7 @@ export interface Renderer extends RendererLike, Partial<TextMeasurer> {
 }
 
 export interface AudioEngine {
-  play(sound: Sound, entityId: string, startMs?: number, durationMs?: number): void;
+  play(sound: Sound, entityId: string, startMs?: number, durationMs?: number): (() => void) | void;
   playBgm(sound: Sound): void;
   stopBgm(): void;
   stopAll(): void;
@@ -218,6 +218,7 @@ export class Vm implements Project {
 
   // Deliver ordinary messages after the current frame.
   private pendingMessages: string[] = [];
+  private timeouts: Array<{ at: number; callback: () => void }> = [];
 
   private scripts: CompiledScript[] = [];
   private readonly traces = new WeakMap<CompiledScript['body'], GeneratedTrace>();
@@ -736,6 +737,7 @@ export class Vm implements Project {
   stop(): void {
     this.state = 'stop';
     this.pendingMessages = [];
+    this.timeouts = [];
     this.flushStore();
     for (const target of this.targets) {
       for (const thread of target.threads) {
@@ -777,6 +779,7 @@ export class Vm implements Project {
   }
 
   private resetExecution(): void {
+    this.timeouts = [];
     for (const target of this.targets) {
       for (const clone of target.clones.slice()) {
         this.renderer?.removeEntity(clone);
@@ -871,6 +874,17 @@ export class Vm implements Project {
     }
     this.extras.frame();
     this.flushMessages();
+    // Entry runs engine timeouts after scripts, including timers from cancelled scripts.
+    let remaining = 0;
+    for (const timeout of this.timeouts) {
+      if (timeout.at <= this.clock) timeout.callback();
+      else this.timeouts[remaining++] = timeout;
+    }
+    this.timeouts.length = remaining;
+  }
+
+  setTimeout(callback: () => void, delay: number): void {
+    this.timeouts.push({ at: this.clock + Math.max(Number(delay) || 0, 0), callback });
   }
 
   private runThread(thread: Thread, finishingValues = false): void {

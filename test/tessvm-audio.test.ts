@@ -21,7 +21,7 @@ interface FakeSource {
   onended: (() => void) | null;
   connect(node: unknown): void;
   start(...args: unknown[]): void;
-  stop(): void;
+  stop(when?: number): void;
 }
 
 interface FakeGain {
@@ -50,7 +50,8 @@ function fakeSource(): FakeSource {
     onended: null,
     connect(to) { node.target = to; },
     start(...args) { node.started = args; },
-    stop() {
+    stop(when) {
+      if (when !== undefined) return;
       node.stopped = true;
       node.onended?.();
     },
@@ -63,6 +64,7 @@ function fakeAudio() {
   const resumed = { count: 0 };
   const context = {
     state: 'running',
+    currentTime: 0,
     destination: { name: 'destination' },
     resume: () => {
       resumed.count += 1;
@@ -70,7 +72,7 @@ function fakeAudio() {
     },
     suspend: () => Promise.resolve(),
     close: () => Promise.resolve(),
-    decodeAudioData: (bytes: unknown) => Promise.resolve({ bytes }),
+    decodeAudioData: (bytes: unknown) => Promise.resolve({ bytes, duration: 1 }),
     createGain: fakeGain,
     createBufferSource() {
       const source = fakeSource();
@@ -85,7 +87,7 @@ function loadEngine(context: unknown) {
   const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/audio/sound.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = {
     AudioContext: function AudioContext() { return context; },
-    fetch: () => Promise.resolve({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) }),
+    fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) }),
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
