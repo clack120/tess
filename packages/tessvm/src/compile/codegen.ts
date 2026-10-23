@@ -569,7 +569,7 @@ export class Codegen {
       case 'sound_something_wait_with_block':
         return line(`yield* O.playSoundWait(e, ${this.str(p[0])});`);
       case 'sound_something_second_wait_with_block':
-        return line(`yield* O.playSoundWait(e, ${this.strOf(p[0])}, 0, ${this.numOf(p[1])});`);
+        return line(`yield* O.playSoundWait(e, ${this.str(p[0])}, 0, ${this.num(p[1])});`);
       case 'sound_from_to_and_wait':
         return line(
           `yield* O.playSoundRangeWait(e, ${this.strOf(p[0])}, ${this.numOf(p[1])}, ${this.numOf(p[2])});`,

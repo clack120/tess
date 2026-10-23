@@ -57,57 +57,64 @@ export class WebAudioEngine implements AudioEngine {
   }
 
   private buffer(sound: Sound): Promise<AudioBuffer | null> {
-    const cached = this.buffers.get(sound.id);
+    const url = sound.fileurl;
+    const cached = this.buffers.get(url);
     if (cached) {
       return Promise.resolve(cached);
     }
-    const inFlight = this.loading.get(sound.id);
+    const inFlight = this.loading.get(url);
     if (inFlight) {
       return inFlight;
     }
+    const context = this.ensure();
+    if (!context) return Promise.resolve(null);
     const job = (async () => {
-      const context = this.ensure();
-      if (!context) {
-        return null;
-      }
       try {
-        const response = await fetch(sound.fileurl);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Sound request failed: HTTP ${response.status}`);
         const bytes = await response.arrayBuffer();
         const decoded = await context.decodeAudioData(bytes);
-        this.buffers.set(sound.id, decoded);
+        if (this.context !== context) return null;
+        this.buffers.set(url, decoded);
         return decoded;
       } catch {
         return null;
-      } finally {
-        this.loading.delete(sound.id);
       }
-    })();
-    this.loading.set(sound.id, job);
+    })().finally(() => {
+      // A finished old load must not remove a newer request after close.
+      if (this.loading.get(url) === job) this.loading.delete(url);
+    });
+    this.loading.set(url, job);
     return job;
   }
 
-  play(sound: Sound, entityId: string, startMs = 0, durationMs?: number): void {
+  play(sound: Sound, entityId: string, startMs = 0, durationMs?: number): (() => void) | void {
     const context = this.ensure();
     if (!context) {
       return;
     }
-    const buffer = this.buffers.get(sound.id);
+    const buffer = this.buffers.get(sound.fileurl);
     if (!buffer) {
       const ticket = this.ticket(entityId, false);
+      let entry: Playing | undefined;
       void this.buffer(sound).then((loaded) => {
         if (this.claim(ticket) && loaded) {
-          this.start(loaded, entityId, startMs, durationMs, false);
+          entry = this.start(loaded, entityId, startMs, durationMs, false);
         }
       });
-      return;
+      return () => {
+        ticket.live = false;
+        if (entry) this.stopEntry(entry);
+      };
     }
-    this.start(buffer, entityId, startMs, durationMs, false);
+    const entry = this.start(buffer, entityId, startMs, durationMs, false);
+    return () => { if (entry) this.stopEntry(entry); };
   }
 
   playBgm(sound: Sound): void {
     // Cancel earlier background music requests so overlapping loads cannot start duplicate tracks.
     this.stopBgm();
-    const buffer = this.buffers.get(sound.id);
+    const buffer = this.buffers.get(sound.fileurl);
     if (!buffer) {
       const ticket = this.ticket('', true);
       void this.buffer(sound).then((loaded) => {
@@ -146,24 +153,24 @@ export class WebAudioEngine implements AudioEngine {
     startMs: number,
     durationMs: number | undefined,
     bgm: boolean,
-  ): void {
+  ): Playing | undefined {
     const context = this.ensure();
     if (!context || !this.master) {
       return;
     }
+    const duration = durationMs === undefined ? buffer.duration : Math.max(0, durationMs || 0) / 1000;
+    if (!duration) return;
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.playbackRate.value = bgm ? 1 : this.speed;
     const gain = context.createGain();
     source.connect(gain);
     gain.connect(bgm ? context.destination : this.master);
-    const offset = Math.max(0, startMs / 1000);
+    const offset = Math.max(0, startMs || 0) / 1000;
     const entry: Playing = { source, gain, entityId };
-    if (durationMs !== undefined) {
-      source.start(0, offset, durationMs / 1000);
-    } else {
-      source.start(0, offset);
-    }
+    source.start(0, offset, duration);
+    // Entry ends the instance after the original duration even when playback slows down.
+    source.stop(context.currentTime + duration);
     source.onended = () => {
       this.playing.delete(entry);
       if (this.bgm === entry) {
@@ -175,6 +182,7 @@ export class WebAudioEngine implements AudioEngine {
     } else {
       this.playing.add(entry);
     }
+    return entry;
   }
 
   // Stopping sounds leaves background music playing, matching Entry.

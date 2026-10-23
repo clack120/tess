@@ -843,14 +843,14 @@ export function createOps(vm: Vm) {
       entity.touch();
     },
 
-    playSound(entity: Entity, id: string, startSeconds = 0, durationSeconds = 0): void {
+    playSound(entity: Entity, id: string, startSeconds = 0, durationSeconds?: number): void {
       const sound = entity.target.getSound(id);
       if (sound) {
         vm.audio?.play(
           sound,
           entity.id,
           startSeconds * 1000,
-          durationSeconds ? durationSeconds * 1000 : undefined,
+          durationSeconds === undefined ? undefined : durationSeconds * 1000,
         );
       }
     },
@@ -865,19 +865,24 @@ export function createOps(vm: Vm) {
       vm.audio?.play(sound, entity.id, from, to - from);
     },
 
-    *playSoundWait(entity: Entity, id: string, startSeconds = 0, durationSeconds = 0) {
+    *playSoundWait(entity: Entity, id: string, startSeconds = 0, durationSeconds?: number) {
       const sound = entity.target.getSound(id);
       if (!sound) {
+        yield 0;
         return;
       }
-      ops.playSound(entity, id, startSeconds, durationSeconds);
+      const stop = vm.audio?.play(sound, entity.id, startSeconds * 1000);
       const speed = vm.audio?.getSpeed() ?? 1;
-      const ms = durationSeconds
+      const ms = durationSeconds !== undefined
         ? durationSeconds * 1000
         : Math.floor((sound.duration * 1000) / speed);
-      const until = vm.clock + ms;
+      let playing = true;
+      vm.setTimeout(() => {
+        if (durationSeconds !== undefined) stop?.();
+        playing = false;
+      }, ms);
       yield 0;
-      while (vm.clock < until) {
+      while (playing) {
         yield 0;
       }
     },
@@ -885,13 +890,15 @@ export function createOps(vm: Vm) {
     *playSoundRangeWait(entity: Entity, id: string, start: number, end: number) {
       const sound = entity.target.getSound(id);
       if (!sound) {
+        yield 0;
         return;
       }
       ops.playSoundRange(entity, id, start, end);
       const ms = Math.abs(end - start) * 1000;
-      const until = vm.clock + ms;
+      let playing = true;
+      vm.setTimeout(() => { playing = false; }, ms);
       yield 0;
-      while (vm.clock < until) {
+      while (playing) {
         yield 0;
       }
     },
@@ -945,8 +952,8 @@ export function createOps(vm: Vm) {
       vm.audio?.stopBgm();
     },
 
-    soundDuration(entity: Entity, id: string): number {
-      return entity.target.getSound(id)?.duration ?? 0;
+    soundDuration(entity: Entity, id: string): number | undefined {
+      return entity.target.sounds.find(sound => sound.id === id)?.duration;
     },
 
     startDrawing(entity: Entity): void {
