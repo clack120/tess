@@ -232,6 +232,13 @@ export function planKernel(
   functions.forEach((fn, index) => {
     funcIndex.set(fn.id, index);
   });
+  // Calls look up their target's definition, so parse each function body once per plan.
+  const parsedContents = new Map<number, RawBlock[][]>();
+  const contentOf = (index: number): RawBlock[][] => {
+    let content = parsedContents.get(index);
+    if (!content) parsedContents.set(index, content = parseScript(functions[index]!.content));
+    return content;
+  };
 
   const rejected = new Map<string, string>();
   const scans: Scan[] = [];
@@ -490,7 +497,7 @@ export function planKernel(
       default: {
         if (block.type.startsWith('func_')) {
           const target = funcIndex.get(block.type.slice('func_'.length));
-          const define = target === undefined ? undefined : findFunctionDefine(parseScript(functions[target]!.content))?.[0];
+          const define = target === undefined ? undefined : findFunctionDefine(contentOf(target))?.[0];
           return { code: call(block, true), kind: 'raw', constant: define ? literalValue(define.params[3]) : undefined };
         }
         const at = params.get(block.type);
@@ -573,7 +580,7 @@ export function planKernel(
     if (target === undefined) {
       fail(block.type);
     }
-    const define = findFunctionDefine(parseScript(functions[target]!.content))?.[0];
+    const define = findFunctionDefine(contentOf(target))?.[0];
     if (asValue && define?.type !== 'function_create_value') {
       fail(`${block.type} has no value`);
     }
@@ -708,7 +715,7 @@ export function planKernel(
   }
 
   function emit(fn: FunctionEntry, index: number): { scan: Scan; body: string | null } {
-    const content = parseScript(fn.content);
+    const content = contentOf(index);
     const stackBlocks = findFunctionDefine(content);
     const define = stackBlocks?.[0];
     const scan: Scan = { ok: false, reason: '', calls: new Set(), valued: false };
@@ -907,7 +914,7 @@ export function planKernel(
   }
   functions.forEach((fn, index) => {
     if (!keep[index]) {
-      noteCalls(parseScript(fn.content));
+      noteCalls(contentOf(index));
     }
   });
 
@@ -916,7 +923,7 @@ export function planKernel(
     if (!ok || !outside.has(index)) {
       return;
     }
-    const define = findFunctionDefine(parseScript(functions[index]!.content))![0]!;
+    const define = findFunctionDefine(contentOf(index))![0]!;
     roots.set(index, { name: `run${index}`, arity: collectParams(define.params[0]).length });
   });
 

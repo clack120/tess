@@ -1,4 +1,4 @@
-import { Codegen, type CompileInput, type FunctionEntry, type RawBlock, type ScriptPlan } from '../compile/codegen.ts';
+import { Codegen, parseScript, type CompileInput, type FunctionEntry, type RawBlock, type ScriptPlan } from '../compile/codegen.ts';
 import { attachJsKernel, CALL_DEPTH_LIMIT, type KernelHandle } from '../kernel/bridge.ts';
 import { planKernel, type KernelPlan } from '../kernel/plan.ts';
 import { CollisionSystem } from '../collision/detect.ts';
@@ -419,7 +419,7 @@ export class Vm implements Project {
       objects: project.objects.map((raw) => ({
         id: String(raw.id),
         scene: String(raw.scene ?? this.targetOf(String(raw.id))?.sceneId ?? this.currentSceneId),
-        script: raw.script as string | RawBlock[][],
+        script: parseScript(raw.script as string | RawBlock[][]),
       })),
       variables: this.variables.map((variable) => ({ id: variable.id })),
       functions: project.functions.map((fn) => ({
@@ -427,7 +427,8 @@ export class Vm implements Project {
         type: String(fn.type ?? 'normal'),
         localVariables:
           (fn.localVariables as Array<{ id: string; name: string; value: string | number }>) ?? [],
-        content: fn.content as string | RawBlock[][],
+        // Parse once here; codegen, the kernel planner and name lookups all read the same body.
+        content: parseScript(fn.content as string | RawBlock[][]),
       })),
       scenes: this.scenes,
       messages: this.messages,
@@ -586,7 +587,7 @@ export class Vm implements Project {
       objects: project.objects.map((raw) => ({
         id: String(raw.id),
         scene: String(raw.scene ?? this.targetOf(String(raw.id))?.sceneId ?? this.currentSceneId),
-        script: raw.script as string | RawBlock[][],
+        script: parseScript(raw.script as string | RawBlock[][]),
       })),
       variables: this.variables.map((variable) => ({ id: variable.id })),
       functions: project.functions.map((fn) => ({
@@ -594,7 +595,8 @@ export class Vm implements Project {
         type: String(fn.type ?? 'normal'),
         localVariables:
           (fn.localVariables as Array<{ id: string; name: string; value: string | number }>) ?? [],
-        content: fn.content as string | RawBlock[][],
+        // Parse once here; codegen, the kernel planner and name lookups all read the same body.
+        content: parseScript(fn.content as string | RawBlock[][]),
       })),
       scenes: this.scenes,
       messages: this.messages,
@@ -906,9 +908,16 @@ export class Vm implements Project {
 
   private functionOf = new WeakMap<object, string>();
 
+  // Reading a name parses the whole function body, so keep it per entry across compiles and probes.
+  private readonly functionNames = new WeakMap<FunctionEntry, string>();
+
   private rememberFunctions(functions: CompiledFunction[], entries: FunctionEntry[]): void {
     functions.forEach((fn, index) => {
-      if (fn?.prototype) this.functionOf.set(fn.prototype as object, functionName(entries[index]!.content) || entries[index]!.id);
+      if (!fn?.prototype) return;
+      const entry = entries[index]!;
+      let name = this.functionNames.get(entry);
+      if (name === undefined) this.functionNames.set(entry, name = functionName(entry.content) || entry.id);
+      this.functionOf.set(fn.prototype as object, name);
     });
   }
 
