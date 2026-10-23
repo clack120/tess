@@ -17,6 +17,7 @@ import type { Renderer } from '../runtime/engine.ts';
 import { buildMask } from '../collision/mask-image.ts';
 import type { AlphaMask } from '../collision/mask.ts';
 import { Overlay, type TableLike } from './overlay.ts';
+import { entityBounds, type Rect } from '../collision/detect.ts';
 import { fillParts } from './fill.ts';
 import { isSegment, SegmentBatch, SEGMENT_FLOOR } from './segments.ts';
 import {
@@ -211,6 +212,8 @@ export class PixiRenderer implements Renderer {
   private readonly sceneLayers = new Map<string, Container>();
   private readonly sceneTargets = new Map<string, Target[]>();
   private readonly views = new Map<Entity, EntityView>();
+  private inspection: { entity: Entity | null; bounds: Graphics; highlight: Graphics; all: boolean; at: number } | null = null;
+  private readonly inspectionRect: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private readonly penDirty = new Set<Entity>();
   private readonly textures = new Map<string, Texture>();
   private readonly images = new Map<string, CanvasImageSource>();
@@ -467,6 +470,57 @@ export class PixiRenderer implements Renderer {
     }
   }
 
+  setInspection(entity: Entity | null, all = false): void {
+    if (this.inspection?.entity === entity && this.inspection.all === all) return;
+    if (!entity && !all) {
+      this.inspection?.bounds.destroy();
+      this.inspection?.highlight.destroy();
+      this.inspection = null;
+      return;
+    }
+    if (!this.inspection) {
+      const bounds = new Graphics();
+      const highlight = new Graphics();
+      bounds.eventMode = highlight.eventMode = 'none';
+      this.app.stage.addChild(bounds, highlight);
+      this.inspection = { entity, bounds, highlight, all, at: -Infinity };
+    } else {
+      this.inspection.entity = entity;
+      this.inspection.all = all;
+      this.inspection.at = -Infinity;
+    }
+  }
+
+  private drawInspection(): void {
+    const inspect = this.inspection;
+    if (!inspect) return;
+    const draw = (entity: Entity, graphics: Graphics, selected: boolean) => {
+      if (entity.removed || !this.sceneLayers.get(entity.target.sceneId)?.visible) return;
+      const rect = entityBounds(entity, this.inspectionRect);
+      if (!Number.isFinite(rect.x) || !Number.isFinite(rect.y)
+        || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) return;
+      if (rect.x > stage.worldWidth || rect.y > stage.worldHeight
+        || rect.x + rect.width < 0 || rect.y + rect.height < 0) return;
+      graphics.rect(rect.x, rect.y, Math.max(1, rect.width), Math.max(1, rect.height));
+      if (selected) {
+        graphics.fill({ color: 0xff4fa3, alpha: 0.2 });
+        graphics.stroke({ color: 0xff4fa3, width: 2, alpha: entity.visible ? 0.9 : 0.35 });
+      }
+    };
+    const now = performance.now();
+    // Whole-scene boxes update at 10 Hz; one hovered target follows each rendered frame.
+    if (now - inspect.at >= 100) {
+      inspect.at = now;
+      inspect.bounds.clear();
+      if (inspect.all) {
+        for (const entity of this.views.keys()) draw(entity, inspect.bounds, false);
+        inspect.bounds.stroke({ color: 0x3488cf, width: 1, alpha: 0.7 });
+      }
+    }
+    inspect.highlight.clear();
+    if (inspect.entity && this.views.has(inspect.entity)) draw(inspect.entity, inspect.highlight, true);
+  }
+
   // Keep a flat display list because clones, strokes, and stamps can sit between other objects.
   attach(targets: Target[], scenes: Array<{ id: string }>): void {
     this.reset();
@@ -559,6 +613,7 @@ export class PixiRenderer implements Renderer {
   }
 
   reset(): void {
+    this.setInspection(null);
     for (const view of this.views.values()) {
       // Release stamp texture references separately because other runners may still use them.
       for (const stamp of view.stamps) {
@@ -913,6 +968,7 @@ export class PixiRenderer implements Renderer {
       void this.rebakeVectors();
     }
     this.overlay?.flush();
+    this.drawInspection();
     this.app.renderer.render(this.app.stage);
   }
 

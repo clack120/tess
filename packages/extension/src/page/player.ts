@@ -6,6 +6,7 @@ import { EXTRAS_DIALOG_STYLE } from "../../../tessvm/src/web/extras.ts";
 import { fetchWork, thumbUrl } from "./entry-project.ts";
 import { bridgeSaveStore } from "./save-bridge.ts";
 import { CloudClient } from "./cloud.ts";
+import { mountInspector } from "./inspector.ts";
 
 import { signedInUser } from "./signed-in.ts";
 
@@ -208,6 +209,7 @@ export function mountPlayer(
   let disposed = false;
   let onTick: (() => void) | null = null;
   let menu: { close(): void; dispose(): void } | null = null;
+  let inspector: ReturnType<typeof mountInspector> | null = null;
 
   const showError = (text: string) => {
     errorBox.classList.remove("is-notice");
@@ -241,6 +243,7 @@ export function mountPlayer(
     disposed = true;
     clearInterval(timer);
     menu?.dispose();
+    inspector?.dispose();
     onTick = null;
     document.removeEventListener("fullscreenchange", onFullscreen);
     handle?.dispose();
@@ -391,6 +394,7 @@ export function mountPlayer(
   }
 
   function ready(live: TessVmHandle): void {
+    inspector = mountInspector(root, live);
     const seen = new Set<string>();
     let shown = "";
 
@@ -464,6 +468,7 @@ export function mountPlayer(
         { label: "정지", run: stop, disabled: still },
         null,
         { label: "현재 상태 보기", run: () => live.inspect() },
+        { label: "오브젝트·클론 보기", run: () => inspector?.open() },
         { label: "진단 파일 저장", run: () => live.downloadDiagnostics() },
         null,
         { label: "이전 장면", run: () => sceneStep("prev"), disabled: still || !sceneAt(-1) },
@@ -477,7 +482,7 @@ export function mountPlayer(
     });
 
     // Read player state from the VM because works can stop themselves.
-    onTick = showState;
+    onTick = () => { showState(); inspector?.syncHost(); };
     showState();
   }
 
