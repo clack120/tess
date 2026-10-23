@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { stripTypes } from '@tess/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { icon } from './icons.ts';
@@ -23,7 +24,7 @@ const CRX = path.join(ROOT, 'tessvm-extension.crx');
 // The signing key determines the extension ID, so keep it stable.
 const CRX_KEY = path.join(ROOT, 'crx-key.pem');
 
-const MODULE_ENTRIES = ['page/main.ts', 'popup/popup.ts', 'background.ts'];
+const MODULE_ENTRIES = ['page/main.ts', 'popup/popup.ts'];
 const CLASSIC_ENTRIES = ['content.ts'];
 const ICON_SIZES = [16, 32, 48, 128];
 
@@ -220,12 +221,14 @@ function copyVendor(from: string, name: string, inside: string, out: string): vo
 const rel = (file: string) => path.relative(process.cwd(), file);
 
 // Remove Firefox-only manifest keys from Chrome builds.
-function writeManifest(target: 'chrome' | 'firefox'): void {
+function writeManifest(target: 'chrome' | 'firefox' | 'shared'): void {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf-8'));
   if (target === 'chrome') {
     delete manifest.browser_specific_settings;
     // Chrome uses a service worker; Firefox uses an event page.
-    manifest.background = { service_worker: 'background.js', type: 'module' };
+    manifest.background = { service_worker: 'background.js' };
+  } else if (target === 'firefox') {
+    delete manifest.background.service_worker;
   }
   fs.writeFileSync(path.join(DIST, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 }
@@ -249,6 +252,8 @@ let flattened = 0;
 for (const entry of CLASSIC_ENTRIES) {
   flattened += emitClassic(path.join(SRC, entry));
 }
+execFileSync(process.execPath, ['build', path.join(SRC, 'background.ts'), '--target=browser',
+  '--format=iife', '--minify', `--outfile=${path.join(DIST, 'background.js')}`]);
 copyVendor(path.join(ROOT, '../tessvm/package.json'), 'pixi.js', 'dist/pixi.min.mjs', PIXI_OUT);
 copyVendor(
   path.join(ROOT, '../tessvm/package.json'),
@@ -272,10 +277,12 @@ checkLinks();
 writeManifest('firefox');
 checkManifest();
 zipDirectory(DIST, ZIP);
-// Leave the Chrome manifest in dist for unpacked loading.
 writeManifest('chrome');
 checkManifest();
 zipDirectory(DIST, CHROME_ZIP);
+// Unpacked loading uses either browser's supported background environment.
+writeManifest('shared');
+checkManifest();
 
 const lines = [
   `확장을 만들었습니다: ${rel(DIST)} (모듈 ${modules.size}개 · 내용 스크립트 ${flattened}개)`,
