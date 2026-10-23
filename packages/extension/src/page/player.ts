@@ -181,7 +181,7 @@ export function mountPlayer(
   startButton.setAttribute("aria-label", "시작하기");
   startButton.innerHTML = ICONS.play;
   const status = el("div", "entropy-status", cover);
-  status.textContent = "작품을 읽어들이는 중…";
+  status.textContent = "작품을 읽어들이는 중";
 
   const bar = el("div", "entropy-bar", root);
   const left = el("div", "entropy-bar-side", bar);
@@ -287,7 +287,7 @@ export function mountPlayer(
       void root
         .requestFullscreen()
         .catch(() => showError("전체화면으로 바꾸지 못했습니다"));
-      // Lock within the same click so Chromium keeps Escape for the work; a pending lock taken first can hold fullscreen back.
+      // Lock Escape in the fullscreen click; locking first can delay fullscreen.
       const keyboard = (navigator as Navigator & { keyboard?: { lock?(keys: string[]): Promise<void> } }).keyboard;
       if (grabEscape && keyboard?.lock) {
         keyboard.lock(["Escape"]).catch((error) => console.warn("[entropy] 전체화면에서 Esc 를 잡지 못했습니다", error));
@@ -323,7 +323,7 @@ export function mountPlayer(
     }
 
     // Execute original blocks directly to preserve Entry IDs.
-    status.textContent = "실행기를 준비하는 중…";
+    status.textContent = "실행기를 준비하는 중";
     await nextFrame();
     if (disposed) {
       return;
@@ -366,7 +366,7 @@ export function mountPlayer(
         onProgress: (done, all) => {
           status.textContent = all
             ? `읽어들이는 중: ${((done / all) * 100).toFixed(2)}%`
-            : "읽어들이는 중…";
+            : "읽어들이는 중";
         },
       });
       cloud.setChangeListener(() => {
@@ -449,7 +449,7 @@ export function mountPlayer(
       const key = `${error.blockId}:${error.message}`;
       if (!seen.has(key)) {
         seen.add(key);
-        showError(`오류로 멈췄습니다 — ${formatVmError(error)}`);
+        showError(`오류로 멈췄습니다: ${formatVmError(error)}`);
       }
       if (live.vm.state !== "stop") {
         stop();

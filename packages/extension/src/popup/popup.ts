@@ -66,7 +66,7 @@ cache.addEventListener('change', () => {
 function paintCacheSize(value: unknown): void {
   const size = value as { count?: number; bytes?: number } | null;
   cacheSize.hidden = !size?.count;
-  if (size?.count) cacheSize.textContent = `저장한 파일 ${size.count.toLocaleString('ko-KR')}개 · ${byteText(size.bytes ?? 0)}`;
+  if (size?.count) cacheSize.textContent = `저장한 파일 ${size.count.toLocaleString('ko-KR')}개, ${byteText(size.bytes ?? 0)}`;
 }
 
 function byteText(bytes: number): string {
@@ -129,8 +129,8 @@ function saveRow(saved: SavedSummary, again: () => void): HTMLLIElement {
   title.title = saved.work;
   const meta = document.createElement('span');
   meta.className = 'save-meta';
-  meta.textContent = `${saved.names}개 · ${sizeText(saved.bytes)}`
-    + (saved.updated ? ` · ${when.format(saved.updated)}` : '');
+  meta.textContent = `${saved.names}개, ${sizeText(saved.bytes)}`
+    + (saved.updated ? `, ${when.format(saved.updated)}` : '');
   text.append(title, meta);
 
   const drop = confirmingButton('삭제', '정말 삭제', () => {
