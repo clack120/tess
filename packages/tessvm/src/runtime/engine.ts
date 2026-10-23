@@ -229,7 +229,7 @@ export class Vm implements Project {
   private targetById = new Map<string, Target>();
   private variableById = new Map<string, number>();
   private sceneById = new Map<string, Scene>();
-  private lastTime = 0;
+  private lastTime: number | null = null;
   private accumulator = 0;
   private readonly maxCatchUp: number;
   private readonly requestedFps: number | undefined;
@@ -713,7 +713,7 @@ export class Vm implements Project {
     }
     if (this.state === 'pause') {
       this.state = 'run';
-      this.lastTime = 0;
+      this.lastTime = null;
       this.audio?.resume?.();
       this.speech?.resume?.();
       return;
@@ -723,7 +723,7 @@ export class Vm implements Project {
     this.clock = 0;
     this.lastStoreFlush = 0;
     this.frame = 0;
-    this.lastTime = 0;
+    this.lastTime = null;
     this.accumulator = 0;
     this.clearTimer();
     this.extras.started();
@@ -809,17 +809,17 @@ export class Vm implements Project {
       return;
     }
     const step = 1000 / this.frameRate;
-    if (!this.lastTime) {
-      this.lastTime = timestamp - step;
-    }
-    this.accumulator += Math.min(timestamp - this.lastTime, step * this.maxCatchUp);
+    const elapsed = this.lastTime === null ? step : timestamp - this.lastTime;
+    // Limit catch-up work without discarding elapsed time from timers and deadlines.
+    this.clock += elapsed;
+    this.accumulator += Math.min(elapsed, step * this.maxCatchUp);
     this.lastTime = timestamp;
     let ticks = 0;
     // Catch frame failures so the driver cannot repeat the same throw over a frozen canvas.
     try {
       while (this.accumulator >= step && ticks < this.maxCatchUp) {
         this.accumulator -= step;
-        this.tick(step);
+        this.tick(0);
         ticks += 1;
         if (this.state !== 'run') {
           break;
