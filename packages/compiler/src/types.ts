@@ -260,8 +260,6 @@ export interface CompileOptions {
   onPhase?: (phase: PhaseTiming) => void;
   // No file access is available unless a host is supplied.
   host?: CompilerHost;
-  // Treat paths as loadable URLs; source must provide dimensions and duration.
-  assetUrls?: boolean;
 }
 
 export interface CompileCache {

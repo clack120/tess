@@ -115,9 +115,6 @@ export function makeAsset(
   if (isImage && !IMAGE_TYPES[ext]) ctx.warn(node, `'${file}' 은(는) 엔트리가 아는 이미지 형식이 아닙니다.`);
   if (!isImage && !SOUND_TYPES.has(ext)) ctx.warn(node, `'${file}' 은(는) 엔트리가 아는 소리 형식이 아닙니다.`);
 
-  // Asset URLs are already loadable, so skip lookup and packing.
-  if (ctx.options.assetUrls) return urlAsset(kind, { id, file, name, width, height, duration }, ext);
-
   const resolved = findAsset(file, ctx);
   const declared = isImage ? Boolean(width && height) : duration !== null && duration !== undefined;
   let size = width && height ? { width, height } : null;
@@ -181,27 +178,3 @@ function host(ctx: Context) {
   return ctx.options.host ?? EMPTY_HOST;
 }
 
-// URL assets need declared dimensions and duration because there is no local file.
-function urlAsset(
-  kind: 'image' | 'sound',
-  { id, file, name, width, height, duration }: AssetDecl,
-  ext: string,
-): EntryAsset {
-  const asset: EntryAsset = {
-    id,
-    name: name ?? basename(file),
-    filename: assetFilename(`${kind}:${file}:0`),
-    fileurl: file,
-    ext,
-  };
-  if (kind === 'image') {
-    asset.imageType = IMAGE_TYPES[ext] ?? 'png';
-    asset.dimension = { width: width || 100, height: height || 100 };
-    delete asset.ext;
-    // Keep the raster copy beside its vector costume for the player.
-    if (ext === '.svg') asset.pngurl = `${file.slice(0, -4)}.png`;
-  } else {
-    asset.duration = duration ?? 1;
-  }
-  return asset;
-}
