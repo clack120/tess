@@ -276,6 +276,24 @@ test('브라우저 단축키 조합은 그대로 둔다', (t) => {
   assert.equal(press('root', { code: 'ControlLeft', ctrlKey: true }).prevented, true);
 });
 
+test('function keys keep browser actions and never enter the work, including computed key reads', t => {
+  const { press, stage, fired } = mountInput(t);
+  for (const keys of [new Set<number>(), new Set(Array.from({ length: 12 }, (_, i) => 112 + i)), null]) {
+    stage.usedKeys = keys;
+    for (let i = 1; i <= 12; i++) {
+      for (const modifiers of [{}, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
+        for (const type of ['keydown', 'keyup']) {
+          assert.deepEqual(press('root', { code: `F${i}`, keyCode: 111 + i, ...modifiers }, type),
+            { prevented: false, reachedPage: true }, `F${i} ${type}`);
+        }
+      }
+      assert.deepEqual(press('root', { keyCode: 111 + i }), { prevented: false, reachedPage: true });
+    }
+  }
+  assert.equal(stage.pressedKeys.size, 0);
+  assert.deepEqual(fired, []);
+});
+
 test('a shortcut on a key the work uses is the work\'s', (t) => {
   const { press, stage } = mountInput(t);
   stage.usedKeys = new Set([189]);

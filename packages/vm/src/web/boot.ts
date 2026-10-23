@@ -82,18 +82,14 @@ const KEY_CODES: Record<string, number> = {
   KeyY: 89, KeyZ: 90,
   Numpad0: 96, Numpad1: 97, Numpad2: 98, Numpad3: 99, Numpad4: 100, Numpad5: 101,
   Numpad6: 102, Numpad7: 103, Numpad8: 104, Numpad9: 105,
-  F1: 112, F2: 113, F3: 114, F4: 115, F5: 116, F6: 117, F7: 118, F8: 119,
-  F9: 120, F10: 121, F11: 122, F12: 123,
   Semicolon: 186, Equal: 187, Comma: 188, Minus: 189, Period: 190, Slash: 191,
   Backquote: 192, BracketLeft: 219, Backslash: 220, BracketRight: 221, Quote: 222,
 };
 
 function keyCodeOf(event: KeyboardEvent): number {
-  const mapped = KEY_CODES[event.code];
-  if (mapped !== undefined) {
-    return mapped;
-  }
-  return event.keyCode || 0;
+  const code = KEY_CODES[event.code] ?? event.keyCode ?? 0;
+  // Entry's input map excludes function keys; preserve their browser actions.
+  return code >= 112 && code <= 123 ? 0 : code;
 }
 
 // Use a worker timer because hidden-page timers can be heavily throttled.
@@ -522,6 +518,7 @@ function bindInput(
   on(keyTarget, 'keydown', (raw) => {
     const event = raw as KeyboardEvent;
     const code = keyCodeOf(event);
+    if (!code) return;
     vm.pressedKeys.add(code);
     // Forward repeated keydowns too because Entry runs key scripts at the browser's repeat rate.
     vm.fireEvent('keyPress', String(code));
@@ -530,6 +527,7 @@ function bindInput(
   on(keyTarget, 'keyup', (raw) => {
     const event = raw as KeyboardEvent;
     const code = keyCodeOf(event);
+    if (!code) return;
     vm.pressedKeys.delete(code);
     claim(event, code);
   });
