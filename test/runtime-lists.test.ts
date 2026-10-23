@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { stub } from './stub.ts';
 import { compileProject } from '@tess/compiler';
 import { Vm } from '@tess/vm';
 import { RuntimeBlockError } from '../packages/tessvm/src/runtime/diagnostics.ts';
+import { Codegen } from '../packages/tessvm/src/compile/codegen.ts';
 
 const entity = { localVars: null } as never;
 function listVm(values: unknown[] = ['A', 'B', 'C']) {
@@ -32,9 +34,10 @@ test('list reads retain Entry numeric syntax and stop at invalid or missing item
 });
 
 test('a random list index is resolved once', (t) => {
-  const random = t.mock.method(Math, 'random', () => 0.5);
+  let calls = 0;
+  stub(t, Math, 'random', () => (calls += 1, 0.5));
   assert.equal(listVm().ops.listValue(entity, 0, 'RANDOM'), 'B');
-  assert.equal(random.mock.callCount(), 1);
+  assert.equal(calls, 1);
 });
 
 test('list removal and insertion preserve Entry splice rules for zero, negatives and fractions', () => {
@@ -247,4 +250,43 @@ end`);
     assert.equal(vm.errors.length, 1, index);
     assert.equal(vm.errors[0]!.blockType, 'value_of_index_from_list');
   }
+});
+
+test('typed numbers and shared lists compile to direct reads without changing results', () => {
+  const num = (value: string) => ({ type: 'number', params: [value] });
+  const item = (list: string, index: string) => ({ type: 'value_of_index_from_list', params: [null, list, null, num(index)] });
+  const plus = (left: unknown, right: unknown) => ({ type: 'calc_basic', params: [left, 'PLUS', right] });
+  const set = (id: string, value: unknown) => ({ type: 'set_variable', params: [id, value] });
+  const vm = new Vm({ renderer: null, audio: null });
+  vm.load({
+    scenes: [{ id: 's', name: 's' }], functions: [], messages: [],
+    variables: [
+      { id: 'shared', name: 'shared', variableType: 'list', array: [{ data: 'A' }, { data: 'B' }, { data: 'C' }] },
+      { id: 'own', name: 'own', variableType: 'list', object: 'o', array: [{ data: 'x' }, { data: 'y' }] },
+      { id: 'joined', name: 'joined', variableType: 'variable', value: 0 },
+      { id: 'sum', name: 'sum', variableType: 'variable', value: 0 },
+      { id: 'kept', name: 'kept', variableType: 'variable', value: 0 },
+      { id: 'local', name: 'local', variableType: 'variable', value: 0 },
+    ],
+    objects: [{
+      id: 'o', name: 'o', scene: 's', objectType: 'sprite', entity: { x: 0, y: 0 }, sprite: { pictures: [], sounds: [] },
+      script: JSON.stringify([[{ type: 'when_run_button_click' },
+        { type: 'change_value_list_index', params: ['shared', num('2'), { type: 'text', params: ['Z'] }] },
+        set('joined', plus(item('shared', '2'), num('1'))),
+        set('sum', plus(num('1'), num('2'))),
+        set('kept', plus(num('007'), { type: 'text', params: ['a'] })),
+        set('local', item('own', '2'))]]),
+    }],
+  } as never);
+  const source = new Codegen((vm as never as { compileInput: never }).compileInput).compile().source;
+  assert.match(source, /O\.listSet\(V\[0\], 2, "Z"\)/);
+  assert.match(source, /O\.listItem\(V\[0\], 2\)/);
+  assert.match(source, /C\.calcPlus\(1, 2\)/);
+  assert.match(source, /C\.calcPlus\("007", "a"\)/, 'text that does not read back unchanged stays text');
+  assert.match(source, /O\.listValue\(e, 1, 2\)/, 'object lists still resolve per entity');
+  vm.start();
+  vm.tick();
+  assert.deepEqual(vm.errors, []);
+  const value = (name: string) => vm.variables.find((variable) => variable.name === name)!.getValue();
+  assert.deepEqual([value('joined'), value('sum'), value('kept'), value('local')], ['Z1', 3, '7a', 'y']);
 });

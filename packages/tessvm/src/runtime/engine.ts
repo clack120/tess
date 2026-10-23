@@ -421,7 +421,7 @@ export class Vm implements Project {
         scene: String(raw.scene ?? this.targetOf(String(raw.id))?.sceneId ?? this.currentSceneId),
         script: parseScript(raw.script as string | RawBlock[][]),
       })),
-      variables: this.variables.map((variable) => ({ id: variable.id })),
+      variables: this.variables.map((variable) => ({ id: variable.id, sharedList: variable.isList && !variable.objectId })),
       functions: project.functions.map((fn) => ({
         id: String(fn.id),
         type: String(fn.type ?? 'normal'),
@@ -589,7 +589,7 @@ export class Vm implements Project {
         scene: String(raw.scene ?? this.targetOf(String(raw.id))?.sceneId ?? this.currentSceneId),
         script: parseScript(raw.script as string | RawBlock[][]),
       })),
-      variables: this.variables.map((variable) => ({ id: variable.id })),
+      variables: this.variables.map((variable) => ({ id: variable.id, sharedList: variable.isList && !variable.objectId })),
       functions: project.functions.map((fn) => ({
         id: String(fn.id),
         type: String(fn.type ?? 'normal'),

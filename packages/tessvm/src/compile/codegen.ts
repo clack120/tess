@@ -2,6 +2,7 @@
 import { SAVE_FUNCTIONS, functionLabel } from '../runtime/save.ts';
 import { isBlock, parseScript, findFunctionDefine, functionBody, collectParams, type RawBlock, type FunctionEntry } from './blocks.ts';
 import { blockCounts } from './block-count.ts';
+import { isNumber } from '../runtime/cast.ts';
 export type { RawBlock, FunctionEntry } from './blocks.ts';
 import type { GeneratedTrace } from '../runtime/diagnostics.ts';
 
@@ -9,7 +10,8 @@ let nextSourceId = 0;
 
 export interface CompileInput {
   objects: Array<{ id: string; scene?: string; script: string | RawBlock[][] }>;
-  variables: Array<{ id: string; variableType?: string }>;
+  // sharedList marks lists no object owns; generated code then reads them without an entity lookup.
+  variables: Array<{ id: string; variableType?: string; sharedList?: boolean }>;
   functions: FunctionEntry[];
   scenes: Array<{ id: string }>;
   messages: Array<{ id: string }>;
@@ -526,12 +528,15 @@ export class Codegen {
       case 'add_value_to_list':
         return line(`O.listAppend(e, ${this.varRef(p[1])}, ${this.raw(p[0])});`);
       case 'remove_value_from_list':
-        return line(`O.listRemove(e, ${this.varRef(p[1])}, ${this.raw(p[0])});`);
+        return line(`O.listRemove(e, ${this.varRef(p[1])}, ${this.numeral(p[0])});`);
       case 'insert_value_to_list':
         // Entry evaluates DATA before INDEX, including calls that yield or fail.
-        return line(`{ const data = ${this.raw(p[0])}; const index = ${this.raw(p[2])}; ${this.marker(block)}O.listInsert(e, ${this.varRef(p[1])}, index, data); }`);
-      case 'change_value_list_index':
-        return line(`O.listReplace(e, ${this.varRef(p[0])}, ${this.raw(p[1])}, ${this.raw(p[2])});`);
+        return line(`{ const data = ${this.raw(p[0])}; const index = ${this.numeral(p[2])}; ${this.marker(block)}O.listInsert(e, ${this.varRef(p[1])}, index, data); }`);
+      case 'change_value_list_index': {
+        const list = this.sharedList(p[0]);
+        return line(list ? `O.listSet(${list}, ${this.numeral(p[1])}, ${this.raw(p[2])});`
+          : `O.listReplace(e, ${this.varRef(p[0])}, ${this.numeral(p[1])}, ${this.raw(p[2])});`);
+      }
       case 'show_list':
         return line(`O.showVariable(e, ${this.varRef(p[0])}, true);`);
       case 'hide_list':
@@ -795,6 +800,13 @@ export class Codegen {
     return value.code;
   }
 
+  // Typed numbers arrive as text; parse the ones that read back unchanged once, where only their number matters.
+  private numeral(param: unknown): string {
+    const value = this.value(param);
+    const constant = value.constant;
+    return typeof constant === 'string' && isNumber(constant) && String(Number(constant)) === constant ? constant : value.code;
+  }
+
   private field(param: unknown): string {
     if (isBlock(param)) {
       return this.value(param).code;
@@ -810,6 +822,11 @@ export class Codegen {
       return 'null';
     }
     return `${index}`;
+  }
+
+  private sharedList(param: unknown): string | null {
+    const index = this.varIndex.get(text(param));
+    return index !== undefined && this.input.variables[index]!.sharedList ? `V[${index}]` : null;
   }
 
   private tableRef(param: unknown): string {
@@ -886,7 +903,7 @@ export class Codegen {
         return { code: `Math.floor(${this.num(p[0])} / ${this.num(p[2])})`, kind: 'num' };
       // Legacy arithmetic stores operands at indices 0 and 2.
       case 'calc_plus':
-        return { code: `C.calcPlus(${this.raw(p[0])}, ${this.raw(p[2])})`, kind: 'any' };
+        return { code: `C.calcPlus(${this.numeral(p[0])}, ${this.numeral(p[2])})`, kind: 'any' };
       case 'calc_minus':
         return { code: `C.subNum(${this.num(p[0])}, ${this.num(p[2])})`, kind: 'num' };
       case 'calc_times':
@@ -983,11 +1000,11 @@ export class Codegen {
       case 'boolean_or':
         return { code: `C.orOf(${this.raw(p[0])}, ${this.raw(p[2])})`, kind: 'bool' };
       case 'boolean_equal':
-        return { code: `C.cmpEqual(${this.raw(p[0])}, ${this.raw(p[2])})`, kind: 'bool' };
+        return { code: `C.cmpEqual(${this.numeral(p[0])}, ${this.numeral(p[2])})`, kind: 'bool' };
       case 'boolean_bigger':
-        return { code: `C.cmpGreater(${this.raw(p[0])}, ${this.raw(p[2])})`, kind: 'bool' };
+        return { code: `C.cmpGreater(${this.numeral(p[0])}, ${this.numeral(p[2])})`, kind: 'bool' };
       case 'boolean_smaller':
-        return { code: `C.cmpLess(${this.raw(p[0])}, ${this.raw(p[2])})`, kind: 'bool' };
+        return { code: `C.cmpLess(${this.numeral(p[0])}, ${this.numeral(p[2])})`, kind: 'bool' };
       case 'boolean_not':
         return { code: `(!${this.bool(p[1])})`, kind: 'bool' };
       case 'is_boost_mode':
@@ -999,8 +1016,10 @@ export class Codegen {
 
       case 'get_variable':
         return { code: `O.getVariable(e, ${this.varRef(p[0])})`, kind: 'any' };
-      case 'value_of_index_from_list':
-        return { code: `O.listValue(e, ${this.varRef(p[1])}, ${this.raw(p[3])})`, kind: 'any' };
+      case 'value_of_index_from_list': {
+        const list = this.sharedList(p[1]);
+        return { code: list ? `O.listItem(${list}, ${this.numeral(p[3])})` : `O.listValue(e, ${this.varRef(p[1])}, ${this.numeral(p[3])})`, kind: 'any' };
+      }
       case 'length_of_list':
         return { code: `O.listLength(e, ${this.varRef(p[1])})`, kind: 'num' };
       case 'is_included_in_list':
@@ -1069,7 +1088,7 @@ export class Codegen {
     const left = block.params[0];
     const right = block.params[2];
     if (operator === 'PLUS') {
-      return { code: `C.calcPlus(${this.raw(left)}, ${this.raw(right)})`, kind: 'any' };
+      return { code: `C.calcPlus(${this.numeral(left)}, ${this.numeral(right)})`, kind: 'any' };
     }
     const l = this.num(left);
     const r = this.num(right);
@@ -1084,8 +1103,8 @@ export class Codegen {
   }
 
   private compare(block: RawBlock): Value {
-    const left = this.raw(block.params[0]);
-    const right = this.raw(block.params[2]);
+    const left = this.numeral(block.params[0]);
+    const right = this.numeral(block.params[2]);
     const table: Record<string, string> = {
       EQUAL: 'cmpEqual',
       NOT_EQUAL: 'cmpNotEqual',

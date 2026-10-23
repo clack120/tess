@@ -724,7 +724,10 @@ export function createOps(vm: Vm) {
     },
 
     listValue(entity: Entity, index: number, raw: unknown): string | number | boolean {
-      const list = listVariable(entity, index, 'value_of_index_from_list');
+      return ops.listItem(listVariable(entity, index, 'value_of_index_from_list'), raw);
+    },
+
+    listItem(list: Variable, raw: unknown): string | number | boolean {
       const at = listIndex(raw, list);
       if (!Number.isInteger(at) || at < 1 || at > list.array.length || !list.array[at - 1]) {
         listError('value_of_index_from_list', list, { index: raw, resolvedIndex: at });
@@ -775,7 +778,10 @@ export function createOps(vm: Vm) {
     },
 
     listReplace(entity: Entity, index: number, raw: unknown, value: unknown): void {
-      const list = listVariable(entity, index, 'change_value_list_index');
+      ops.listSet(listVariable(entity, index, 'change_value_list_index'), raw, value);
+    },
+
+    listSet(list: Variable, raw: unknown, value: unknown): void {
       const at = cast.isNumber(raw) ? Number(raw) : NaN;
       if (!Number.isInteger(at) || at < 1 || at > list.array.length || !list.array[at - 1]) {
         listError('change_value_list_index', list, { index: raw, value });
