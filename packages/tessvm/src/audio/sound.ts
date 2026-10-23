@@ -80,7 +80,8 @@ export class WebAudioEngine implements AudioEngine {
         if (this.context !== context) return null;
         this.buffers.set(url, decoded);
         return decoded;
-      } catch {
+      } catch (error) {
+        if (!this.controller.signal.aborted) console.warn('[tessvm] 소리를 불러오지 못했습니다', sound.name, url, error);
         return null;
       }
     })().finally(() => {

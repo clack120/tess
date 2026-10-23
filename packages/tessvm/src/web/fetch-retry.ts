@@ -57,7 +57,7 @@ export function fetchAsset(url: string, signal?: AbortSignal): Promise<Response>
 
 async function fetchCached(url: string, signal?: AbortSignal): Promise<Response> {
   const store = await openCache();
-  const stored = await store?.match(url).catch(() => undefined);
+  const stored = await store?.match(url).catch((error) => console.warn('[tessvm] 에셋 캐시를 읽지 못했습니다', url, error));
   if (stored) return stored;
   const response = await fetchRetry(url, signal);
   if (store) void store.put(url, response.clone()).catch((error) => console.warn('[tessvm] 에셋을 캐시에 넣지 못했습니다', url, error));

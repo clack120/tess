@@ -465,8 +465,9 @@ export class PixiRenderer implements Renderer {
       }
       // Release unused rasterizations so each resize does not leak another texture.
       this.dropBaked(previous);
-    } catch {
+    } catch (error) {
       if (this.destroyed) return;
+      console.warn('[tessvm] 벡터 모양을 새 해상도로 다시 그리지 못했습니다', id, error);
       // Keep the currently visible texture if replacing it fails.
       const failed = this.svgBaked.get(id);
       if (failed && failed !== previous) {
@@ -876,8 +877,9 @@ export class PixiRenderer implements Renderer {
         size.height <= PAINT_CANVAS.height &&
         !/<image[\s>]/i.test(svg) &&
         !/<text[\s>]/i.test(svg);
-    } catch {
+    } catch (error) {
       // Keep the raster copy when the SVG cannot be read.
+      if (!this.destroyed) console.warn('[tessvm] SVG 원본을 읽지 못해 그림 사본을 씁니다', url, error);
     }
     if (!this.destroyed) this.svgPicks.set(url, better);
     return better;
@@ -904,7 +906,9 @@ export class PixiRenderer implements Renderer {
     if (sized !== url) {
       try {
         return { texture: await this.loadTexture(sized, data), src: sized };
-      } catch {
+      } catch (error) {
+        if (this.destroyed) throw error;
+        console.warn('[tessvm] 크기를 맞춘 SVG 를 불러오지 못해 원본을 씁니다', url, error);
       }
     }
     return { texture: await this.loadTexture(url, data), src: url };
@@ -939,7 +943,8 @@ export class PixiRenderer implements Renderer {
         picture.dimension.height * resolution,
       );
       return sized || url;
-    } catch {
+    } catch (error) {
+      console.warn('[tessvm] SVG 크기를 맞추지 못해 원본을 씁니다', url, error);
       return url;
     }
   }
@@ -982,8 +987,10 @@ export class PixiRenderer implements Renderer {
         if (resource) {
           this.images.set(picture.id, resource);
         }
-      } catch {
-        if (!this.destroyed) this.textures.set(picture.id, Texture.EMPTY);
+      } catch (error) {
+        if (this.destroyed) return;
+        console.warn('[tessvm] 모양을 불러오지 못했습니다', picture.name, picture.fileurl, error);
+        this.textures.set(picture.id, Texture.EMPTY);
       } finally {
         this.loading.delete(picture.id);
       }

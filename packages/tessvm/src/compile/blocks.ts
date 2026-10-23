@@ -35,7 +35,8 @@ export function parseScript(script: string | RawBlock[][] | undefined): RawBlock
     }
     try {
       return JSON.parse(script, withParams) as RawBlock[][];
-    } catch {
+    } catch (error) {
+      console.warn('[tessvm] 스크립트를 읽지 못해 이 오브젝트의 블록을 건너뜁니다', error);
       return [];
     }
   }

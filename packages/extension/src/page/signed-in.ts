@@ -24,7 +24,8 @@ export function signedInUser(): EntryUser | null {
   let data: NextPayload;
   try {
     data = JSON.parse(payload) as NextPayload;
-  } catch {
+  } catch (error) {
+    console.warn('[tessvm] 로그인 정보를 읽지 못해 비로그인으로 실행합니다', error);
     return null;
   }
   const user = data.props?.pageProps?.initialState?.common?.user;
