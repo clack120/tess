@@ -152,7 +152,7 @@ test('에셋 저장 스위치는 기본으로 꺼져 있고, 마지막으로 알
   assert.deepEqual(popup.written, [['assetCache', true]]);
   popup.reportSize({ count: 1234, bytes: 5 * 1024 * 1024 });
   assert.equal(popup.find('cache-size').hidden, false);
-  assert.equal(popup.find('cache-size').textContent, '저장한 파일 1,234개 · 5.0 MB');
+  assert.equal(popup.find('cache-size').textContent, '저장한 파일 1,234개, 5.0 MB');
   popup.reportSize({ count: 0, bytes: 0 });
   assert.equal(popup.find('cache-size').hidden, true);
 });
@@ -160,7 +160,7 @@ test('에셋 저장 스위치는 기본으로 꺼져 있고, 마지막으로 알
 test('열 때 이미 알려진 용량이 있으면 바로 보여 준다', async (t) => {
   const popup = await mountPopup(t, { cache: true }, [], { count: 3, bytes: 2048 });
   assert.equal((popup.find('cache') as HTMLInputElement).checked, true);
-  assert.equal(popup.find('cache-size').textContent, '저장한 파일 3개 · 2.0 KB');
+  assert.equal(popup.find('cache-size').textContent, '저장한 파일 3개, 2.0 KB');
 });
 
 const WORKS = [
@@ -172,8 +172,8 @@ test('저장한 작품이 있으면 목록으로 보여 준다', async (t) => {
   const popup = await mountPopup(t, {}, WORKS);
   const rows = popup.saves();
   assert.deepEqual(rows.map((row) => row.title), ['마법사 키우기', '농장']);
-  assert.match(rows[0]!.meta, /3개 · 2\.0 KB/);
-  assert.match(rows[1]!.meta, /1개 · 120 B/);
+  assert.match(rows[0]!.meta, /3개, 2\.0 KB/);
+  assert.match(rows[1]!.meta, /1개, 120 B/);
   assert.equal(popup.find('saves-empty').hidden, true);
   assert.equal(popup.find('clear').hidden, false);
 });

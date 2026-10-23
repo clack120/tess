@@ -59,37 +59,22 @@ export interface KernelSlot {
   base: number;
   length: number;
   list: boolean;
-  /**
-   * A list the work fills with judgements rather than numbers. Entry stores the
-   * `true`/`false` a judgement block hands over, and `String(true)` is not
-   * `String(1)`, so those cross back as booleans.
-   */
+  // Preserve booleans when copying back: Entry distinguishes true from 1.
   judgement: boolean;
   /** Slot holding how many decimals the stored text carries, or -1 for none. */
   places: number;
-  /**
-   * Where the tails of a table the kernel only reads are kept, or -1. Counting
-   * them again on every pass through a loop is what the decimal rules cost
-   * most, and a table that is only read can be counted once on the way in.
-   */
+  // Cache decimal counts for read-only lists to avoid recounting inside loops; -1 means none.
   tails: number;
   read: boolean;
   written: boolean;
 }
 
 export interface KernelPlan {
-  /**
-   * The functions in javascript over one shared array of numbers, free of the
-   * boxing and the name lookups the block runner pays for.
-   */
   javascript: string;
   slots: KernelSlot[];
-  /** Function table index → the module export that takes it, and its arity. */
+  // Map each function index to its exported name and argument count.
   roots: Map<number, { name: string; arity: number }>;
-  /**
-   * Root → positions in `slots` its call tree reads or writes, and the ones it
-   * writes. A call copies only those, not every number the kernel holds.
-   */
+  // Copy only the slots each root's call tree touches or writes.
   access: Map<number, { touched: number[]; written: number[] }>;
   /** Deepest chain of kernel calls, for the caller's stack budget. */
   depth: number;
@@ -108,19 +93,9 @@ interface KValue {
   constant?: string | number | boolean;
   /** Expression giving the value's tail, when one is at hand. */
   tailCode?: string;
-  /**
-   * Whether the value is already what `Entry.Scope.getNumberValue` would make
-   * of it — no `NaN`, no `-0`. A literal is, and so is anything read straight
-   * out of the shared region, which only ever holds numbers the work checked
-   * on the way in. Everything else goes through `to_num`, the way every number
-   * slot of a block does.
-   */
+  // Skip to_num only for values already normalized like an Entry number slot: no NaN or -0.
   clean?: boolean;
-  /**
-   * Digits after the point in the value's shortest form, when the compiler
-   * already knows them — a literal's. The kernel would otherwise search for
-   * them again on every pass through the loop.
-   */
+  // Cache known decimal counts so loops do not recalculate them.
   tail?: number;
 }
 
