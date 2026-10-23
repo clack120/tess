@@ -276,14 +276,11 @@ test('브라우저 단축키 조합은 그대로 둔다', (t) => {
   assert.equal(press('root', { code: 'ControlLeft', ctrlKey: true }).prevented, true);
 });
 
-test('a shortcut on a key the work uses is the work\'s, and Escape never is', (t) => {
+test('a shortcut on a key the work uses is the work\'s', (t) => {
   const { press, stage } = mountInput(t);
-  stage.usedKeys = new Set([189, 27]);
+  stage.usedKeys = new Set([189]);
   assert.equal(press('root', { code: 'Minus', ctrlKey: true }).prevented, true);
   assert.equal(press('root', { code: 'Equal', ctrlKey: true }).prevented, false);
-  for (const init of [{ code: 'Escape' }, { code: 'Escape', ctrlKey: true }, { code: 'Escape', shiftKey: true }]) {
-    assert.equal(press('root', init).prevented, false, JSON.stringify(init));
-  }
   // Computed key reads may request any key.
   stage.usedKeys = null;
   assert.equal(press('root', { code: 'Equal', ctrlKey: true }).prevented, true);
@@ -305,6 +302,10 @@ test('grabbed Escape stays with a running work and locks during element fullscre
   fullscreen(false);
   dispose();
   assert.deepEqual(locks, ['unlock', 'lock Escape', 'unlock', 'unlock']);
+  // Turning the setting off leaves Escape to the browser and page.
+  const off = mountInput(t, undefined, false);
+  assert.deepEqual(off.press('root', { code: 'Escape' }), { prevented: false, reachedPage: true });
+  assert.deepEqual(off.locks, []);
 });
 
 test('answering a question gives typing focus back to the player', (t) => {
