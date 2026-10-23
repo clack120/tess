@@ -83,7 +83,7 @@ const decode = (_key: string, value: any) =>
 
 export async function exportAll(): Promise<Blob> {
   const works = await open().works.toArray();
-  return new Blob([JSON.stringify({ format: FORMAT, works }, encode, 2)], { type: 'application/json' });
+  return new Blob([JSON.stringify({ format: FORMAT, version: 1, works }, encode, 2)], { type: 'application/json' });
 }
 
 export function exportName(now = new Date()): string {
@@ -101,7 +101,7 @@ export async function importAll(file: Blob): Promise<number> {
   } catch {
     throw new Error('tessvm 이 내보낸 파일이 아닙니다.');
   }
-  if (parsed?.format !== FORMAT || !Array.isArray(parsed.works)) {
+  if (parsed?.format !== FORMAT || parsed.version !== 1 || !Array.isArray(parsed.works)) {
     throw new Error('tessvm 이 내보낸 파일이 아닙니다.');
   }
   const works = parsed.works as SavedWork[];

@@ -44,8 +44,8 @@ test('exports round-trip NaN and Infinity and merge into existing saves', async 
 
 test('other files are refused', async () => {
   const { api } = load();
-  for (const bad of ['not json', { format: 'other', works: [] }, { format: 'tessvm-saves' }, {}]) {
+  for (const bad of ['not json', { format: 'other', version: 1, works: [] }, { format: 'tessvm-saves', version: 2, works: [] }, {}]) {
     await assert.rejects(api.importAll(blob(bad)), /tessvm 이 내보낸 파일이 아닙니다/);
   }
-  await assert.rejects(api.importAll(blob({ format: 'tessvm-saves', works: [{ title: 'x' }] })), /작품 항목이 올바르지 않습니다/);
+  await assert.rejects(api.importAll(blob({ format: 'tessvm-saves', version: 1, works: [{ title: 'x' }] })), /작품 항목이 올바르지 않습니다/);
 });
