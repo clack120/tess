@@ -1,5 +1,6 @@
 import type { AudioEngine, SpeechEngine } from '../runtime/engine.ts';
 import type { Sound, VoiceProps } from '../runtime/model.ts';
+import { fetchAsset } from '../web/fetch-retry.ts';
 
 interface Playing {
   source: AudioBufferSourceNode;
@@ -43,7 +44,7 @@ export class WebAudioEngine implements AudioEngine {
   }
 
   // Limit parallel sound loads so they do not starve costume downloads.
-  async preload(sounds: Sound[], limit = 6, onLoaded?: () => void): Promise<void> {
+  async preload(sounds: Sound[], limit = 6, onLoaded?: (ok: boolean) => void): Promise<void> {
     const signal = this.controller.signal;
     let next = 0;
     const runners = new Array(Math.min(limit, sounds.length)).fill(0).map(async () => {
@@ -51,8 +52,8 @@ export class WebAudioEngine implements AudioEngine {
         const sound = sounds[next];
         next += 1;
         if (sound) {
-          await this.buffer(sound);
-          onLoaded?.();
+          const loaded = await this.buffer(sound);
+          onLoaded?.(loaded !== null);
         }
       }
     });
@@ -73,8 +74,7 @@ export class WebAudioEngine implements AudioEngine {
     if (!context) return Promise.resolve(null);
     const job = (async () => {
       try {
-        const response = await fetch(url, { signal: this.controller.signal });
-        if (!response.ok) throw new Error(`Sound request failed: HTTP ${response.status}`);
+        const response = await fetchAsset(url, this.controller.signal);
         const bytes = await response.arrayBuffer();
         const decoded = await context.decodeAudioData(bytes);
         if (this.context !== context) return null;

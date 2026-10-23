@@ -38,20 +38,25 @@ export const api = (globals.browser ?? globals.chrome) as ExtensionApi;
 
 export const ENABLED_KEY = 'enabled';
 export const SVG_KEY = 'svg';
+export const CACHE_KEY = 'assetCache';
+export const CACHE_SIZE_KEY = 'assetCacheSize';
 
 export interface Settings {
   enabled: boolean;
   svg: boolean;
+  cache: boolean;
 }
 
 export async function readSettings(): Promise<Settings> {
   const stored = await api.storage.local.get({
     [ENABLED_KEY]: true,
     [SVG_KEY]: true,
+    [CACHE_KEY]: false,
   });
   return {
     enabled: stored[ENABLED_KEY] !== false,
     svg: stored[SVG_KEY] !== false,
+    cache: stored[CACHE_KEY] === true,
   };
 }
 

@@ -60,11 +60,20 @@ test('audio shares downloads and decoded buffers by URL while keeping playback i
 test('audio rejects failed HTTP responses before decoding and allows a later retry', async t => {
   let requests = 0;
   const { engine, decodes } = setup(t, () => ++requests === 1
-    ? Promise.resolve(new Response('not audio', { status: 429 })) : bytes());
+    ? Promise.resolve(new Response('not audio', { status: 404 })) : bytes());
   await engine.preload([sound('a', '/sound.wav')]);
   assert.equal(decodes.length, 0);
   await engine.preload([sound('b', '/sound.wav')]);
   assert.equal(requests, 2); assert.equal(decodes.length, 1);
+});
+
+test('audio waits out a rate limit within the same load', async t => {
+  let requests = 0;
+  const { engine, decodes } = setup(t, () => ++requests === 1
+    ? Promise.resolve(new Response('slow down', { status: 429, headers: { 'retry-after': '0.01' } })) : bytes());
+  let ok: boolean | undefined;
+  await engine.preload([sound('a', '/sound.wav')], 6, loaded => { ok = loaded; });
+  assert.equal(requests, 2); assert.equal(decodes.length, 1); assert.equal(ok, true);
 });
 
 test('closing audio discards old decodes without replacing or deleting a new in-flight load', async t => {

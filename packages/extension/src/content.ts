@@ -1,5 +1,5 @@
 // Blank the original iframe before loading, but keep its layout box for the replacement player.
-import { api, readSettings, ENABLED_KEY, SVG_KEY } from './browser.ts';
+import { api, readSettings, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY } from './browser.ts';
 
 const IFRAME_MARK = '/iframe/';
 
@@ -15,6 +15,7 @@ interface Held {
 
 let enabled: boolean | null = null;
 let svg = true;
+let cache = false;
 let injected = false;
 const held: Held[] = [];
 
@@ -73,6 +74,7 @@ function mount(item: Held): void {
     host.dataset.tessvmGroup = group;
   }
   host.dataset.tessvmSvg = svg ? '1' : '0';
+  host.dataset.tessvmCache = cache ? '1' : '0';
   item.frame.after(host);
   inject();
   window.postMessage({ __tessvm: 'scan' }, location.origin);
@@ -193,8 +195,9 @@ api.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') {
     return;
   }
-  if (SVG_KEY in changes) {
-    svg = changes[SVG_KEY]?.newValue !== false;
+  if (SVG_KEY in changes || CACHE_KEY in changes) {
+    if (SVG_KEY in changes) svg = changes[SVG_KEY]?.newValue !== false;
+    if (CACHE_KEY in changes) cache = changes[CACHE_KEY]?.newValue === true;
     // Rebuild players because they read this setting only when mounted.
     window.postMessage({ __tessvm: 'unmount' }, location.origin);
     for (const item of held) {
@@ -213,6 +216,7 @@ api.storage.onChanged.addListener((changes, area) => {
 void readSettings().then((settings) => {
   enabled = settings.enabled;
   svg = settings.svg;
+  cache = settings.cache;
   applyAll();
 });
 
@@ -221,7 +225,12 @@ window.addEventListener('message', (event) => {
   if (event.source !== window) {
     return;
   }
-  const data = event.data as { __tessvm?: string; id?: number } | null;
+  const data = event.data as { __tessvm?: string; id?: number; count?: unknown; bytes?: unknown } | null;
+  if (data && typeof data === 'object' && data.__tessvm === 'cache-size') {
+    const size = { count: Number(data.count) || 0, bytes: Number(data.bytes) || 0 };
+    void api.storage.local.set({ [CACHE_SIZE_KEY]: size }).catch((error) => console.warn('[tessvm] 캐시 용량을 기록하지 못했습니다', error));
+    return;
+  }
   if (!data || typeof data !== 'object' || !String(data.__tessvm).startsWith('store-')) {
     return;
   }
