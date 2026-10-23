@@ -52,6 +52,11 @@ export class WebAudioEngine implements AudioEngine {
         const sound = sounds[next];
         next += 1;
         if (sound) {
+          // Entry does not register sounds with a missing or zero duration.
+          if (!sound.duration) {
+            onLoaded?.(true);
+            continue;
+          }
           const loaded = await this.buffer(sound);
           onLoaded?.(loaded !== null);
         }
@@ -95,6 +100,7 @@ export class WebAudioEngine implements AudioEngine {
   }
 
   play(sound: Sound, entityId: string, startMs = 0, durationMs?: number): (() => void) | void {
+    if (!sound.duration) return;
     const context = this.ensure();
     if (!context) {
       return;
@@ -121,6 +127,7 @@ export class WebAudioEngine implements AudioEngine {
   playBgm(sound: Sound): void {
     // Cancel earlier background music requests so overlapping loads cannot start duplicate tracks.
     this.stopBgm();
+    if (!sound.duration) return;
     const buffer = this.buffers.get(sound.fileurl);
     if (!buffer) {
       const ticket = this.ticket('', true);

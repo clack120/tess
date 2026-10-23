@@ -58,6 +58,32 @@ test('audio shares downloads and decoded buffers by URL while keeping playback i
   assert.equal(requests, 2);
 });
 
+test('zero-duration sounds are skipped without requests or playback, even when their URL is cached', async t => {
+  let requests = 0;
+  const { engine, contexts, sources } = setup(t, () => { requests++; return bytes(); });
+  const placeholder = { ...sound('placeholder', '/tone.wav'), duration: 0 };
+  const progress: boolean[] = [];
+  await engine.preload([placeholder, { ...placeholder, fileurl: '/uploads///.mp3' }], 6, ok => progress.push(ok));
+  assert.equal(requests, 0);
+  assert.equal(contexts.length, 0);
+  assert.deepEqual(progress, [true, true]);
+  engine.play(placeholder, 'actor');
+  engine.playBgm(placeholder);
+  assert.equal(contexts.length, 0);
+
+  const valid = sound('valid', '/tone.wav');
+  await engine.preload([valid]);
+  engine.play(valid, 'actor');
+  engine.playBgm(valid);
+  assert.equal(sources.length, 2);
+  engine.play(placeholder, 'actor');
+  engine.playBgm(placeholder);
+  assert.equal(sources.length, 2);
+  assert.equal(sources[0].stopped, false);
+  assert.equal(sources[1].stopped, true, 'an unregistered BGM still stops the previous track in Entry');
+  assert.equal(requests, 1);
+});
+
 test('audio rejects failed HTTP responses before decoding and allows a later retry', async t => {
   let requests = 0;
   const { engine, decodes } = setup(t, () => ++requests === 1

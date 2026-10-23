@@ -282,11 +282,18 @@ end`, { path: 'test.etp' });
     object.script = JSON.stringify(script);
   }
   assert.match(project.objects[0].script, /"type":"func_[^"]+"(?!,"params")/);
-  const vm = new Vm({ renderer: null, audio: null });
-  vm.load(project as never);
-  vm.start();
-  vm.tick();
-  assert.equal(valueOf(vm, 'out'), 7);
+  for (const arrays of [false, true]) {
+    const input = structuredClone(project);
+    if (arrays) {
+      for (const object of input.objects) object.script = JSON.parse(object.script);
+      for (const fn of input.functions) fn.content = JSON.parse(fn.content);
+    }
+    const vm = new Vm({ renderer: null, audio: null });
+    vm.load(input as never);
+    vm.start();
+    vm.tick();
+    assert.equal(valueOf(vm, 'out'), 7);
+  }
 });
 
 test('function labels inherited from Object.prototype execute their own bodies', () => {

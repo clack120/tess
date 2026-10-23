@@ -16,15 +16,6 @@ export function isBlock(value: unknown): value is RawBlock {
   return Boolean(value) && typeof value === 'object' && typeof (value as RawBlock).type === 'string';
 }
 
-// Fill omitted params arrays because playentry leaves them out of argument-free blocks.
-function withParams(_key: string, value: unknown): unknown {
-  if (value && typeof value === 'object' && !Array.isArray(value) &&
-    typeof (value as RawBlock).type === 'string' && !Array.isArray((value as RawBlock).params)) {
-    (value as RawBlock).params = [];
-  }
-  return value;
-}
-
 export function parseScript(script: string | RawBlock[][] | undefined): RawBlock[][] {
   if (!script) {
     return [];
@@ -34,10 +25,21 @@ export function parseScript(script: string | RawBlock[][] | undefined): RawBlock
       return [];
     }
     try {
-      return JSON.parse(script, withParams) as RawBlock[][];
+      script = JSON.parse(script) as RawBlock[][];
     } catch (error) {
       console.warn('[entropy] 스크립트를 읽지 못해 이 오브젝트의 블록을 건너뜁니다', error);
       return [];
+    }
+  }
+  // Visit containers only; a JSON reviver also calls back for every scalar field.
+  const pending: object[] = [script];
+  while (pending.length) {
+    const value = pending.pop()!;
+    if (!Array.isArray(value) && isBlock(value) && !Array.isArray(value.params)) {
+      value.params = [];
+    }
+    for (const child of Array.isArray(value) ? value : Object.values(value)) {
+      if (child && typeof child === 'object') pending.push(child);
     }
   }
   return script;
