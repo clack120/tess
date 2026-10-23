@@ -15,7 +15,7 @@ const stubRenderer = () => ({
   flush() {},
 });
 
-function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 }) {
+function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 }, grabEscape = false) {
   const dom = new JSDOM(
     '<!doctype html><body><div id="root" tabindex="0" draggable="true">'
       + '<div id="view"><input id="ask" type="text"></div><button id="stop"></button>'
@@ -29,6 +29,11 @@ function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 })
     window: dom.window, document: dom.window.document,
     stage: { width: 480, height: 270, scale: 4 / 3, worldWidth: 640, worldHeight: 360 },
   };
+  const locks: string[] = [];
+  sandbox.navigator = { keyboard: {
+    lock: (keys: string[]) => { locks.push(`lock ${keys.join()}`); return Promise.resolve(); },
+    unlock: () => { locks.push('unlock'); },
+  } };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(
@@ -64,7 +69,8 @@ function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 })
   });
   const view = document_.getElementById('view')!;
   const player = document_.getElementById('root')!;
-  const frame = (sandbox.bind as any)(stage, { ...stubRenderer(), canvasRect: () => rect }, view, player, [], () => '');
+  const cleanups: Array<() => void> = [];
+  const frame = (sandbox.bind as any)(stage, { ...stubRenderer(), canvasRect: () => rect }, view, player, cleanups, () => '', grabEscape);
 
   const press = (on: string, init: Record<string, unknown>, type = 'keydown') => {
     let sawIt = false;
@@ -83,7 +89,8 @@ function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 })
     target.dispatchEvent(event);
     return event;
   };
-  return { press, pointer, stage, fired, frame,
+  return { press, pointer, stage, fired, frame, locks, sandbox, document: document_,
+    dispose: () => { for (const undo of cleanups.splice(0).reverse()) undo(); },
     fullscreen: (enabled: boolean) => {
       fullscreen = enabled ? player : null;
       document_.dispatchEvent(new dom.window.Event('fullscreenchange'));
@@ -280,6 +287,40 @@ test('a shortcut on a key the work uses is the work\'s, and Escape never is', (t
   // Computed key reads may request any key.
   stage.usedKeys = null;
   assert.equal(press('root', { code: 'Equal', ctrlKey: true }).prevented, true);
+});
+
+test('grabbed Escape stays with a running work and locks during element fullscreen', (t) => {
+  const { press, stage, locks, fullscreen, focus, dispose } = mountInput(t, undefined, true);
+  assert.deepEqual(press('root', { code: 'Escape' }), { prevented: true, reachedPage: false });
+  // Modified Escape follows the shortcut rule: it is the work's only when the work reads Escape.
+  assert.equal(press('root', { code: 'Escape', ctrlKey: true }).prevented, false);
+  stage.usedKeys = new Set([27]);
+  assert.equal(press('root', { code: 'Escape', ctrlKey: true }).prevented, true);
+  stage.state = 'pause';
+  assert.deepEqual(press('root', { code: 'Escape' }), { prevented: false, reachedPage: true });
+  stage.state = 'run';
+  focus('ask');
+  assert.equal(press('ask', { code: 'Escape' }).prevented, false, 'text fields keep Escape');
+  fullscreen(true);
+  fullscreen(false);
+  dispose();
+  assert.deepEqual(locks, ['unlock', 'lock Escape', 'unlock', 'unlock']);
+});
+
+test('answering a question gives typing focus back to the player', (t) => {
+  const { sandbox, document, focused } = mountInput(t);
+  const view = document.getElementById('view')!;
+  const player = document.getElementById('root')!;
+  const field = (sandbox.makeQuestionField as any)(view, () => {}, () => player.focus());
+  field.show();
+  assert.equal(document.activeElement?.tagName, 'INPUT');
+  field.hide();
+  assert.equal(focused(), 'root');
+  // A field that lost focus elsewhere does not pull focus back.
+  field.show();
+  (document.getElementById('outside') as HTMLElement).focus();
+  field.hide();
+  assert.equal(focused(), 'outside');
 });
 
 test('작품이 돌지 않는 동안에는 페이지가 키를 그대로 쓴다', (t) => {

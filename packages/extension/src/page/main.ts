@@ -4,7 +4,7 @@ const HOST_SELECTOR = '[data-tessvm-project]';
 const players = new Map<HTMLElement, { player: MountedPlayer; key: string }>();
 
 function keyOf(host: HTMLElement): string {
-  return JSON.stringify([host.dataset.tessvmProject, host.dataset.tessvmGroup, host.dataset.tessvmSvg, host.dataset.tessvmCache]);
+  return JSON.stringify([host.dataset.tessvmProject, host.dataset.tessvmGroup, host.dataset.tessvmSvg, host.dataset.tessvmCache, host.dataset.tessvmEscape]);
 }
 
 function scan(): void {
@@ -27,6 +27,7 @@ function scan(): void {
         host.dataset.tessvmGroup ?? null,
         host.dataset.tessvmSvg !== '0',
         host.dataset.tessvmCache === '1',
+        host.dataset.tessvmEscape !== '0',
       ) },
     );
   }
