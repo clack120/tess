@@ -37,10 +37,16 @@ result.warnings; // [{ line, column, message }]
 ```
 
 ```js
-import { parse, compileProject, makeEntryBundle } from "@tess/compiler";
+import { compileProject, makeEntryBundle } from "@tess/compiler";
 
 const result = compileProject(source, { path: "main.tess" });
 if (result.ok) {
-  fs.writeFileSync("game.ent", makeEntryBundle(result.project, result.assets));
+  // .ent is a gzip-compressed tar, the same format Entry saves.
+  fs.writeFileSync("game.ent", await makeEntryBundle(result.project, result.assets));
 }
 ```
+
+## 실행기와 확장
+
+- `bun run tessvm run <작품.ent|작품.tess>` 는 엔트리 대신 tessvm 실행기로 작품을 띄웁니다. `check`·`bench`·`emit`·`export` 도 있습니다.
+- [`packages/extension`](./packages/extension/README.md) 은 playentry.org 작품 페이지의 실행기를 tessvm 으로 바꾸는 브라우저 확장입니다. 작품의 원래 블록을 그대로 실행합니다.

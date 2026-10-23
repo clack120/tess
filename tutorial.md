@@ -3,7 +3,7 @@
 Tess는 엔트리(playentry.org)의 블록 코드를 텍스트로 작성하기 위한 프로그래밍 언어입니다.
 이 문서는 Tess로 작품을 만드는 방법을 다룹니다.
 
-_(설치 및 실행 방법은 [README.md](./README.md)를, 컴파일러 내부의 특수 규칙은 [SPEC-ADDENDUM.md](./SPEC-ADDENDUM.md)를 참고하세요.)_
+_(설치 및 실행 방법은 [README.md](./README.md)를 참고하세요.)_
 
 ---
 

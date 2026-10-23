@@ -41,7 +41,8 @@ code --install-extension tess-lang-1.0.0.vsix
 
 ## 문법 파일 다시 만들기
 
-키워드 목록은 `src/tess.ohm` 과 `src/builtins.js` 에서 뽑아 씁니다.
+키워드 목록은 파서의 `KEYWORDS`(`packages/parser/src/parser/tokens.ts`)와
+`@tess/core` 의 내장 함수·상태 값·색 이름에서 뽑아 씁니다.
 언어에 키워드를 더했다면 다시 만들어 주세요.
 
 ```bash
