@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { stub } from './stub.ts';
 import { WebAudioEngine } from '../packages/tessvm/src/audio/sound.ts';
 
 async function setup(t: any) {
@@ -22,7 +23,7 @@ async function setup(t: any) {
     if (original) Object.defineProperty(globalThis, 'AudioContext', original);
     else delete (globalThis as any).AudioContext;
   });
-  t.mock.method(globalThis, 'fetch', () => Promise.resolve(new Response(new Uint8Array([1]))));
+  stub(t, globalThis, 'fetch', () => Promise.resolve(new Response(new Uint8Array([1]))));
   const engine = new WebAudioEngine();
   const sound = { id: 'tone', name: 'tone', fileurl: '/tone.wav', duration: 10 };
   t.after(() => engine.close());

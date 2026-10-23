@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { stub } from './stub.ts';
 import { Vm } from '@tess/vm';
 import { RuntimeDiagnostics } from '../packages/tessvm/src/web/diagnostics.ts';
 
@@ -11,7 +12,7 @@ test('recent activity counts actual ticks, bounds history and retains partial fa
     if (previous) Object.defineProperty(globalThis, 'document', previous);
     else Reflect.deleteProperty(globalThis, 'document');
   });
-  t.mock.method(console, 'error', () => {});
+  stub(t, console, 'error', () => {});
   const vm = new Vm({ renderer: null, audio: null });
   vm.load({ scenes: [{ id: 's', name: 'scene' }], objects: [], variables: [], functions: [], messages: [] } as never);
   vm.start();

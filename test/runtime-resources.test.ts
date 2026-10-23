@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { stub } from './stub.ts';
 import { CloudClient } from '../packages/extension/src/page/cloud.ts';
 import { SpeechSynthesisEngine, EntryTtsEngine } from '../packages/tessvm/src/audio/sound.ts';
 
@@ -13,7 +14,7 @@ const cloud = () => new CloudClient('work', '', [], new Map(), new Map(), new Ma
 test('disposed cloud clients abort requests and cannot open sockets after a late response', async t => {
   let reply: (value: Response) => void = () => {};
   let signal: AbortSignal | undefined; let sockets = 0;
-  t.mock.method(globalThis, 'fetch', (_: unknown, options?: RequestInit) => { signal = options?.signal as AbortSignal; return new Promise<Response>(resolve => { reply = resolve; }); });
+  stub(t, globalThis, 'fetch', (_: unknown, options?: RequestInit) => { signal = options?.signal as AbortSignal; return new Promise<Response>(resolve => { reply = resolve; }); });
   global(t, 'WebSocket', class { constructor() { sockets++; } });
   const client = cloud(), pending = client.connect();
   client.dispose(); assert.equal(signal?.aborted, true);
@@ -25,8 +26,8 @@ test('disposed cloud clients abort requests and cannot open sockets after a late
 test('repeated cloud handshakes leave one heartbeat and disposal removes socket callbacks', async t => {
   const timers = new Set<number>(); let next = 0; let socket: any;
   global(t, 'window', { setInterval: () => { timers.add(++next); return next; } });
-  t.mock.method(globalThis, 'clearInterval', ((id: number) => timers.delete(id)) as never);
-  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ data: { cloudServerInfo: { url: 'https://example.test', query: 'test' } } })));
+  stub(t, globalThis, 'clearInterval', ((id: number) => timers.delete(id)) as never);
+  stub(t, globalThis, 'fetch', async () => new Response(JSON.stringify({ data: { cloudServerInfo: { url: 'https://example.test', query: 'test' } } })));
   global(t, 'WebSocket', class { onmessage: any; onclose: any; onerror: any; closed = false;
     constructor() { socket = this; } send() {} close() { this.closed = true; } });
   const client = cloud(); await client.connect();
@@ -42,8 +43,8 @@ test('speech fallback cancellation resolves all waits and removes the voice-load
   let listeners = 0; const utterances: any[] = [];
   const add = synth.addEventListener.bind(synth), remove = synth.removeEventListener.bind(synth);
   Object.assign(synth, { getVoices: () => [], speak: (u: any) => utterances.push(u), cancel() {} });
-  t.mock.method(synth, 'addEventListener', ((...args: any[]) => { listeners++; add(...args as [string, EventListener]); }) as never);
-  t.mock.method(synth, 'removeEventListener', ((...args: any[]) => { listeners--; remove(...args as [string, EventListener]); }) as never);
+  stub(t, synth, 'addEventListener', ((...args: any[]) => { listeners++; add(...args as [string, EventListener]); }) as never);
+  stub(t, synth, 'removeEventListener', ((...args: any[]) => { listeners--; remove(...args as [string, EventListener]); }) as never);
   global(t, 'speechSynthesis', synth); global(t, 'SpeechSynthesisUtterance', class {});
   for (let run = 0; run < 30; run++) {
     const engine = new SpeechSynthesisEngine();

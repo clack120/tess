@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { stub } from './stub.ts';
 import { fetchRetry } from '../packages/tessvm/src/web/fetch-retry.ts';
 
 function serve(t: any, statuses: number[]) {
   const seen: number[] = [];
-  t.mock.method(globalThis, 'fetch', async () => {
+  stub(t, globalThis, 'fetch', async () => {
     const status = statuses[seen.length] ?? 200;
     seen.push(status);
     return new Response(status === 200 ? 'ok' : 'no', { status, headers: { 'retry-after': '0.01' } });
@@ -41,7 +42,7 @@ test('aborting stops a pending retry', async t => {
 test('the asset cache answers repeat requests without the network and is dropped when turned off', async t => {
   const { fetchAsset, setAssetCache, assetCacheSize } = await import('../packages/tessvm/src/web/fetch-retry.ts');
   const stores = new Map<string, Map<string, Response>>();
-  (globalThis as any).caches = {
+  stub(t, globalThis, 'caches', {
     open: async (name: string) => {
       const entries = stores.get(name) ?? new Map<string, Response>();
       stores.set(name, entries);
@@ -52,8 +53,7 @@ test('the asset cache answers repeat requests without the network and is dropped
       };
     },
     delete: async (name: string) => stores.delete(name),
-  };
-  t.after(() => { delete (globalThis as any).caches; });
+  });
   const seen = serve(t, []);
   setAssetCache(true);
   t.after(() => setAssetCache(false));
