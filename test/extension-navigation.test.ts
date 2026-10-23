@@ -1,8 +1,11 @@
-import test from 'node:test';
+import nodeTest from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { stripTypes } from '@tess/core/strip-types';
+
+// bun's vm gives jsdom a window that is not its own global, so window.addEventListener throws there.
+const test = 'Bun' in globalThis ? nodeTest.skip : nodeTest;
 
 async function setup(t: any) {
   const dom = new JSDOM('<!doctype html><div id="wrap" style="position:static"><iframe src="/iframe/first"></iframe></div>',

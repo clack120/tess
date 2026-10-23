@@ -64,8 +64,8 @@ test('zip 으로 내보내면 페이지·작품·모듈·에셋이 모두 들어
     assert.ok(!name.endsWith('.ts'), name);
   }
   const boot = files.get('vm/web/boot.js')!.toString('utf-8');
-  assert.match(boot, /from '\.\.\/runtime\/engine\.js'/);
-  assert.doesNotMatch(boot, /from '[^']*\.ts'/);
+  assert.match(boot, /from ['"]\.\.\/runtime\/engine\.js['"]/);
+  assert.doesNotMatch(boot, /from ['"][^'"]*\.ts['"]/);
 
   const served = JSON.parse(files.get('project.json')!.toString('utf-8'));
   const fileurl = served.objects[0].sprite.pictures[0].fileurl;

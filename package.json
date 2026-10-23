@@ -12,6 +12,8 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.ts",
+    "test:bun": "bun test ./test",
+    "test:deno": "deno test -A --no-check test/",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json && bunx tsc --noEmit -p packages/player/tsconfig.browser.json && bunx tsc --noEmit -p packages/tessvm/tsconfig.browser.json && bunx tsc --noEmit -p packages/extension/tsconfig.browser.json",
     "tess": "bun packages/cli/index.ts",
     "build:grammar": "bun editors/vscode/build-grammar.ts",

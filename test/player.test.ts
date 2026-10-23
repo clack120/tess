@@ -197,7 +197,7 @@ test('캔버스 그리기 해상도는 처음 한 번만 정하고, 그 뒤에�
     const ui = await (await fetch(`${server.url}debug-ui.js`)).text();
 
     assert.match(ui, /const setCanvasResolution = \(\) => \{/);
-    assert.match(ui, /if \(resolutionFixed\) return;/);
+    assert.match(ui, /if \(resolutionFixed\)\s*return;/);
     assert.match(ui, /resolutionFixed = true;/);
 
     const layout = ui.slice(ui.indexOf('function layoutCanvas()'), ui.indexOf('window.tessLayoutCanvas ='));

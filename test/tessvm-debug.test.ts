@@ -1,4 +1,4 @@
-import test from 'node:test';
+import nodeTest from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,6 +8,9 @@ import { JSDOM } from 'jsdom';
 import { compileProject } from '@tess/compiler';
 import { findPreactDir } from '@tess/player';
 import { Vm, makeVmRuntime, serveVm, stage } from '@tess/vm';
+
+// bun's vm gives jsdom a window that is not its own global, so window.addEventListener throws there.
+const test = 'Bun' in globalThis ? nodeTest.skip : nodeTest;
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
