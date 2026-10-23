@@ -71,8 +71,10 @@ interface Value {
 const NULL_VALUE: Value = { code: 'undefined', kind: 'any' };
 
 function literal(value: unknown): string {
-  // Escape work text so it cannot impersonate generated block markers.
-  return JSON.stringify(value === undefined ? null : value).replaceAll('/*@tessvm:', '/\\u002a@tessvm:');
+  // Escape work text so it cannot impersonate generated block markers, and escape line separators,
+  // which engines disagree on counting as lines when they report error positions.
+  return JSON.stringify(value === undefined ? null : value).replaceAll('/*@tessvm:', '/\\u002a@tessvm:')
+    .replaceAll('\u2028', '\\u2028').replaceAll('\u2029', '\\u2029');
 }
 
 // Treat values that cannot convert to strings as empty so malformed data cannot abort compilation.
