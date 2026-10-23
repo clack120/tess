@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WebAudioEngine } from '../packages/tessvm/src/audio/sound.ts';
 
-function setup(t: any, fetchFile: () => Promise<Response>) {
+function setup(t: any, fetchFile: (input?: unknown, options?: RequestInit) => Promise<Response>) {
   const contexts: any[] = [];
   const decodes: Array<{ bytes: ArrayBuffer; resolve: (value: AudioBuffer) => void }> = [];
   const sources: any[] = [];
@@ -101,4 +101,17 @@ test('individual playback stops cancel pending loads and stop only the requested
   active?.();
   assert.equal(sources[0].stopped, true);
   assert.equal(sources[1].stopped, false);
+});
+
+test('closing during preload aborts requests without restarting audio for the remaining queue', async t => {
+  let requests = 0;
+  const { engine, contexts } = setup(t, (_, options) => {
+    requests++;
+    return new Promise<Response>((_, reject) => options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), { once: true }));
+  });
+  const loading = engine.preload(Array.from({ length: 40 }, (_, i) => sound(String(i), `/${i}.wav`)), 2);
+  assert.equal(requests, 2);
+  engine.close(); await loading;
+  assert.equal(requests, 2); assert.equal(contexts.length, 1);
+  assert.equal(contexts[0].state, 'closed');
 });

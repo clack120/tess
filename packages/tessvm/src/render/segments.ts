@@ -63,6 +63,8 @@ export class SegmentBatch {
       geometry: new MeshGeometry({ positions, uvs, indices }),
       texture: Texture.WHITE,
     });
+    // These buffers belong to this batch; Mesh.destroy leaves shared geometry alone.
+    mesh.once('destroyed', () => mesh.geometry.destroy(true));
     this.mesh?.destroy({ children: true });
     this.parent.addChild(mesh);
     this.mesh = mesh;

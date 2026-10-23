@@ -5,10 +5,12 @@ interface Playing {
   source: AudioBufferSourceNode;
   gain: GainNode;
   entityId: string;
+  finish(): void;
 }
 
 export class WebAudioEngine implements AudioEngine {
   private context: AudioContext | null = null;
+  private controller = new AbortController();
   // Entry keeps background music separate from sounds, so volume, speed, and stop affect sounds only.
   private master: GainNode | null = null;
   private readonly buffers = new Map<string, AudioBuffer>();
@@ -42,9 +44,10 @@ export class WebAudioEngine implements AudioEngine {
 
   // Limit parallel sound loads so they do not starve costume downloads.
   async preload(sounds: Sound[], limit = 6, onLoaded?: () => void): Promise<void> {
+    const signal = this.controller.signal;
     let next = 0;
     const runners = new Array(Math.min(limit, sounds.length)).fill(0).map(async () => {
-      while (next < sounds.length) {
+      while (!signal.aborted && next < sounds.length) {
         const sound = sounds[next];
         next += 1;
         if (sound) {
@@ -70,7 +73,7 @@ export class WebAudioEngine implements AudioEngine {
     if (!context) return Promise.resolve(null);
     const job = (async () => {
       try {
-        const response = await fetch(url);
+        const response = await fetch(url, { signal: this.controller.signal });
         if (!response.ok) throw new Error(`Sound request failed: HTTP ${response.status}`);
         const bytes = await response.arrayBuffer();
         const decoded = await context.decodeAudioData(bytes);
@@ -104,6 +107,7 @@ export class WebAudioEngine implements AudioEngine {
       });
       return () => {
         ticket.live = false;
+        this.pending.delete(ticket);
         if (entry) this.stopEntry(entry);
       };
     }
@@ -142,6 +146,7 @@ export class WebAudioEngine implements AudioEngine {
     for (const item of this.pending) {
       if (matches(item)) {
         item.live = false;
+        this.pending.delete(item);
       }
     }
   }
@@ -167,16 +172,17 @@ export class WebAudioEngine implements AudioEngine {
     source.connect(gain);
     gain.connect(bgm ? context.destination : this.master);
     const offset = Math.max(0, startMs || 0) / 1000;
-    const entry: Playing = { source, gain, entityId };
+    const entry: Playing = { source, gain, entityId, finish: () => {
+      source.onended = null;
+      source.disconnect?.();
+      gain.disconnect?.();
+      this.playing.delete(entry);
+      if (this.bgm === entry) this.bgm = null;
+    } };
     source.start(0, offset, duration);
     // Entry ends the instance after the original duration even when playback slows down.
     source.stop(context.currentTime + duration);
-    source.onended = () => {
-      this.playing.delete(entry);
-      if (this.bgm === entry) {
-        this.bgm = null;
-      }
-    };
+    source.onended = entry.finish;
     if (bgm) {
       this.bgm = entry;
     } else {
@@ -206,6 +212,8 @@ export class WebAudioEngine implements AudioEngine {
 
   // Release the audio context because browsers limit the number per page.
   close(): void {
+    this.controller.abort();
+    this.controller = new AbortController();
     this.stopAll();
     this.stopBgm();
     this.buffers.clear();
@@ -246,6 +254,8 @@ export class WebAudioEngine implements AudioEngine {
       entry.source.stop();
     } catch {
     }
+    // A suspended context may delay ended events until the next resume.
+    entry.finish();
     this.playing.delete(entry);
   }
 
@@ -290,6 +300,8 @@ const SPEAKERS: Record<string, { pitch: number; rate: number }> = {
 export class SpeechSynthesisEngine {
   private voice: SpeechSynthesisVoice | null = null;
   private looked = false;
+  private readonly utterances = new Map<SpeechSynthesisUtterance, () => void>();
+  private readonly voicesChanged = () => { this.looked = false; this.voice = null; };
 
   // Retry voice lookup until the browser finishes loading Korean voices.
   private korean(): SpeechSynthesisVoice | null {
@@ -301,10 +313,7 @@ export class SpeechSynthesisEngine {
     if (!voices.length) {
       if (!this.looked) {
         this.looked = true;
-        synth.addEventListener?.('voiceschanged', () => {
-          this.voice = null;
-          this.korean();
-        });
+        synth.addEventListener?.('voiceschanged', this.voicesChanged, { once: true });
       }
       return null;
     }
@@ -330,8 +339,14 @@ export class SpeechSynthesisEngine {
     utterance.pitch = Math.max(0, Math.min(2, speaker.pitch * (1 - voice.pitch * 0.1)));
     utterance.volume = voice.volume;
     return new Promise((resolve) => {
-      utterance.onend = () => resolve();
-      utterance.onerror = () => resolve();
+      const finish = () => {
+        this.utterances.delete(utterance);
+        utterance.onend = null; utterance.onerror = null;
+        resolve();
+      };
+      this.utterances.set(utterance, finish);
+      utterance.onend = finish;
+      utterance.onerror = finish;
       synth.speak(utterance);
     });
   }
@@ -345,7 +360,11 @@ export class SpeechSynthesisEngine {
   }
 
   stop(): void {
-    (globalThis as { speechSynthesis?: SpeechSynthesis }).speechSynthesis?.cancel();
+    const synth = (globalThis as { speechSynthesis?: SpeechSynthesis }).speechSynthesis;
+    synth?.removeEventListener?.('voiceschanged', this.voicesChanged);
+    this.looked = false;
+    synth?.cancel();
+    for (const finish of this.utterances.values()) finish();
   }
 }
 
@@ -398,13 +417,19 @@ export class EntryTtsEngine implements SpeechEngine {
           return;
         }
         settled = true;
+        audio.removeEventListener?.('ended', ended);
+        audio.removeEventListener?.('error', failed);
+        audio.pause();
+        audio.removeAttribute?.('src');
+        audio.load?.();
         this.playing.delete(reading);
         resolve(played);
       };
       // Stopping the work must end the TTS wait too.
       const reading: Reading = { audio, end: () => finish(true) };
-      audio.addEventListener('ended', () => finish(true));
-      audio.addEventListener('error', () => finish(false));
+      const ended = () => finish(true), failed = () => finish(false);
+      audio.addEventListener('ended', ended);
+      audio.addEventListener('error', failed);
       this.playing.add(reading);
       audio.play().catch(() => finish(false));
     });

@@ -1,0 +1,73 @@
+diff --git a/node_modules/pixi.js/.bun-tag-ba54a5b85da11878 b/.bun-tag-ba54a5b85da11878
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/pixi.mjs b/dist/pixi.mjs
+index 2486e6de1c80a335ff83758bf2f2749b0dacbddf..6e8ad4b1d97ba1a2a952eaef087bf3f6c7da5a98 100644
+--- a/dist/pixi.mjs
++++ b/dist/pixi.mjs
+@@ -17664,18 +17664,10 @@ ${src}`;
+ }
+ 
+ "use strict";
+-const fragmentNameCache = {};
+-const VertexNameCache = {};
+ function setProgramName(src, { name = `pixi-program` }, isFragment = true) {
+   name = name.replace(/\s+/g, "-");
+   name += isFragment ? "-fragment" : "-vertex";
+-  const nameCache = isFragment ? fragmentNameCache : VertexNameCache;
+-  if (nameCache[name]) {
+-    nameCache[name]++;
+-    name += `-${nameCache[name]}`;
+-  } else {
+-    nameCache[name] = 1;
+-  }
++  // Keep identical shader sources reusable across renderer lifetimes.
+   if (src.indexOf("#define SHADER_NAME") !== -1) return src;
+   const shaderName = `#define SHADER_NAME ${name}`;
+   return `${shaderName}
+diff --git a/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.js b/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.js
+index 7429b18acdf9f406b8200d4eab18f54fc5b85f2f..f9a93fcd8494df3c71987cd99115fbd15419bd8e 100644
+--- a/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.js
++++ b/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.js
+@@ -1,18 +1,10 @@
+ 'use strict';
+ 
+ "use strict";
+-const fragmentNameCache = {};
+-const VertexNameCache = {};
+ function setProgramName(src, { name = `pixi-program` }, isFragment = true) {
+   name = name.replace(/\s+/g, "-");
+   name += isFragment ? "-fragment" : "-vertex";
+-  const nameCache = isFragment ? fragmentNameCache : VertexNameCache;
+-  if (nameCache[name]) {
+-    nameCache[name]++;
+-    name += `-${nameCache[name]}`;
+-  } else {
+-    nameCache[name] = 1;
+-  }
++  // Keep identical shader sources reusable across renderer lifetimes.
+   if (src.indexOf("#define SHADER_NAME") !== -1) return src;
+   const shaderName = `#define SHADER_NAME ${name}`;
+   return `${shaderName}
+diff --git a/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.mjs b/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.mjs
+index 77cff22f845dce5e1c89ae71075746c950caf1b5..e7fe4e5a0bd23e7c28f487460f1d85825e2a9d1a 100644
+--- a/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.mjs
++++ b/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.mjs
+@@ -1,16 +1,8 @@
+ "use strict";
+-const fragmentNameCache = {};
+-const VertexNameCache = {};
+ function setProgramName(src, { name = `pixi-program` }, isFragment = true) {
+   name = name.replace(/\s+/g, "-");
+   name += isFragment ? "-fragment" : "-vertex";
+-  const nameCache = isFragment ? fragmentNameCache : VertexNameCache;
+-  if (nameCache[name]) {
+-    nameCache[name]++;
+-    name += `-${nameCache[name]}`;
+-  } else {
+-    nameCache[name] = 1;
+-  }
++  // Keep identical shader sources reusable across renderer lifetimes.
+   if (src.indexOf("#define SHADER_NAME") !== -1) return src;
+   const shaderName = `#define SHADER_NAME ${name}`;
+   return `${shaderName}

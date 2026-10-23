@@ -207,6 +207,7 @@ export function mountPlayer(
   let handle: TessVmHandle | null = null;
   let cloudStore: CloudClient | null = null;
   let disposed = false;
+  const controller = new AbortController();
   let onTick: (() => void) | null = null;
   let menu: { close(): void; dispose(): void } | null = null;
   let inspector: ReturnType<typeof mountInspector> | null = null;
@@ -241,6 +242,7 @@ export function mountPlayer(
       return;
     }
     disposed = true;
+    controller.abort();
     clearInterval(timer);
     menu?.dispose();
     inspector?.dispose();
@@ -297,8 +299,9 @@ export function mountPlayer(
   async function load(): Promise<void> {
     let work;
     try {
-      work = await fetchWork(projectId, groupId);
+      work = await fetchWork(projectId, groupId, controller.signal);
     } catch (error) {
+      if (disposed) return;
       status.textContent = "";
       showError(error instanceof Error ? error.message : String(error));
       return;
@@ -332,9 +335,11 @@ export function mountPlayer(
     const cloud = new CloudClient(projectId, csrfToken, work.variables ?? [], tessIdToEntryId, entryIdToTessId, variableMongoIds);
     cloudStore = cloud;
     await cloud.connect();
+    if (disposed) return;
 
     try {
       handle = await boot({
+        signal: controller.signal,
         project: work,
         store: cloud,
         // Keep saves in extension storage so the popup can manage them.
@@ -359,6 +364,7 @@ export function mountPlayer(
       });
 
     } catch (error) {
+      if (disposed) return;
       status.textContent = "";
       showError(error instanceof Error ? error.message : String(error));
       return;

@@ -2,15 +2,15 @@
 import { api, readSettings, ENABLED_KEY, SVG_KEY } from './browser.ts';
 
 const IFRAME_MARK = '/iframe/';
-const HELD = 'tessvmHeld';
 
 interface Held {
   frame: HTMLIFrameElement;
   // Restore the original iframe URL when disabling the extension.
   src: string;
   id: string;
+  host: HTMLElement | null;
   // Remember positioning changes so removing the player can restore the parent.
-  positioned: boolean;
+  positioned: HTMLElement | null;
 }
 
 let enabled: boolean | null = null;
@@ -20,11 +20,6 @@ const held: Held[] = [];
 
 function idOf(src: string): string | null {
   return /\/iframe\/([^/?#]+)/.exec(src)?.[1] ?? null;
-}
-
-function hostAfter(frame: HTMLIFrameElement): HTMLElement | null {
-  const next = frame.nextElementSibling;
-  return next instanceof HTMLElement && next.dataset.tessvmProject ? next : null;
 }
 
 function inject(): void {
@@ -42,7 +37,7 @@ function inject(): void {
   // Report a missing runner instead of leaving an unexplained empty player.
   script.onerror = () => {
     for (const item of held) {
-      const host = hostAfter(item.frame);
+      const host = item.host;
       if (host) {
         host.textContent = '실행기를 불러오지 못했습니다. 확장을 다시 불러와 주세요.';
         host.setAttribute('style', 'display:grid;place-items:center;font:13px sans-serif;color:#c0392b');
@@ -61,15 +56,16 @@ function capture(item: Held): void {
 
 function mount(item: Held): void {
   capture(item);
-  if (hostAfter(item.frame)) {
+  if (item.host?.isConnected) {
     return;
   }
   const parent = item.frame.parentElement;
   if (parent && getComputedStyle(parent).position === 'static') {
     parent.style.position = 'relative';
-    item.positioned = true;
+    item.positioned = parent;
   }
   const host = document.createElement('div');
+  item.host = host;
   host.className = 'tessvm-host';
   host.dataset.tessvmProject = item.id;
   const group = new URLSearchParams(location.search).get('groupId');
@@ -82,12 +78,17 @@ function mount(item: Held): void {
   window.postMessage({ __tessvm: 'scan' }, location.origin);
 }
 
-function release(item: Held): void {
-  hostAfter(item.frame)?.remove();
+function removeHost(item: Held): void {
+  item.host?.remove();
+  item.host = null;
   if (item.positioned) {
-    item.frame.parentElement?.style.removeProperty('position');
-    item.positioned = false;
+    item.positioned.style.removeProperty('position');
+    item.positioned = null;
   }
+}
+
+function release(item: Held): void {
+  removeHost(item);
   item.frame.style.removeProperty('visibility');
   if (item.frame.getAttribute('src') !== item.src) {
     item.frame.setAttribute('src', item.src);
@@ -95,10 +96,14 @@ function release(item: Held): void {
 }
 
 function applyAll(): void {
+  let removed = false;
   for (let i = held.length - 1; i >= 0; i -= 1) {
     const item = held[i]!;
     if (!item.frame.isConnected) {
+      // React may remove the iframe while leaving our sibling outside its ownership.
+      release(item);
       held.splice(i, 1);
+      removed = true;
       continue;
     }
     if (enabled) {
@@ -107,24 +112,38 @@ function applyAll(): void {
       release(item);
     }
   }
+  if (removed) window.postMessage({ __tessvm: 'scan' }, location.origin);
 }
 
 // Blank frames before settings arrive because Entry cannot be unloaded after it starts.
 function hold(frame: HTMLIFrameElement): void {
-  if (frame.dataset[HELD]) {
+  const src = frame.getAttribute('src') ?? '';
+  let item = held.find(item => item.frame === frame);
+  if (src === 'about:blank' && item) {
+    if (enabled) mount(item);
     return;
   }
-  const src = frame.getAttribute('src') ?? '';
   if (!src.includes(IFRAME_MARK)) {
+    if (item) {
+      removeHost(item);
+      frame.style.removeProperty('visibility');
+      held.splice(held.indexOf(item), 1);
+      window.postMessage({ __tessvm: 'scan' }, location.origin);
+    }
     return;
   }
   const id = idOf(src);
   if (!id) {
     return;
   }
-  frame.dataset[HELD] = '1';
-  const item: Held = { frame, src, id, positioned: false };
-  held.push(item);
+  if (item) {
+    if (item.src !== src || item.id !== id) removeHost(item);
+    item.src = src;
+    item.id = id;
+  } else {
+    item = { frame, src, id, host: null, positioned: null };
+    held.push(item);
+  }
   if (enabled === null) {
     capture(item);
   } else if (enabled) {
@@ -159,6 +178,8 @@ const observer = new MutationObserver((records) => {
       sweep(node);
     }
   }
+  // Sweep removals too, before a detached iframe's sibling can cover the next work.
+  if (records.some(record => record.removedNodes.length)) applyAll();
 });
 observer.observe(document.documentElement, {
   childList: true,
@@ -177,7 +198,7 @@ api.storage.onChanged.addListener((changes, area) => {
     // Rebuild players because they read this setting only when mounted.
     window.postMessage({ __tessvm: 'unmount' }, location.origin);
     for (const item of held) {
-      hostAfter(item.frame)?.remove();
+      removeHost(item);
     }
   }
   if (ENABLED_KEY in changes) {

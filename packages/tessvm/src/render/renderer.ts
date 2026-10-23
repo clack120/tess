@@ -47,21 +47,28 @@ interface Baked {
   resolution: number;
 }
 
-// Reference-count rasterized vectors because PIXI shares textures across runners on the same page.
+// PIXI shares all loaded textures across runners on the same page.
 const bakedHolds = new Map<string, number>();
+const unloading = new Map<string, Promise<void>>();
 
 function holdBaked(src: string): void {
+  src = new URL(src, document.baseURI).href;
   bakedHolds.set(src, (bakedHolds.get(src) ?? 0) + 1);
 }
 
 function releaseBaked(src: string): void {
+  src = new URL(src, document.baseURI).href;
   const held = bakedHolds.get(src) ?? 0;
   if (held > 1) {
     bakedHolds.set(src, held - 1);
     return;
   }
   bakedHolds.delete(src);
-  void Assets.unload(src).catch(() => undefined);
+  const job = Assets.unload(src).catch(() => undefined).then(() => {
+    Assets.resolver.removeAlias(src);
+    unloading.delete(src);
+  });
+  unloading.set(src, job);
 }
 
 function usableColor(value: unknown): Ink | null {
@@ -78,6 +85,7 @@ function usableColor(value: unknown): Ink | null {
     parsed = null;
   }
   colorCache.set(text, parsed);
+  if (colorCache.size > 1024) colorCache.delete(colorCache.keys().next().value!);
   return parsed;
 }
 
@@ -219,12 +227,16 @@ export class PixiRenderer implements Renderer {
   private readonly images = new Map<string, CanvasImageSource>();
   private readonly loading = new Map<string, Promise<void>>();
   private readonly svgBaked = new Map<string, Baked>();
+  private readonly rasterSources = new Map<string, string>();
+  private readonly rebaking = new Set<string>();
   // Cache SVG markup so resized copies do not fetch it again.
   private readonly svgTexts = new Map<string, string>();
   private readonly pictures = new Map<string, Picture>();
   private overlay: Overlay | null = null;
   private quality: number;
   private ready = false;
+  private destroyed = false;
+  private readonly controller = new AbortController();
   private lastResolution = 0;
   private svgBudget = 1;
   private svgSizes: Array<{ id: string; width: number; height: number }> = [];
@@ -398,6 +410,7 @@ export class PixiRenderer implements Renderer {
 
   // Keep old vector textures valid until their replacements are ready.
   private async rebakeVectors(): Promise<void> {
+    if (this.destroyed) return;
     const jobs: Array<{ id: string; url: string; resolution: number }> = [];
     for (const [id, baked] of this.svgBaked) {
       const picture = this.pictures.get(id);
@@ -416,9 +429,10 @@ export class PixiRenderer implements Renderer {
   private async bakeVector(id: string, url: string, resolution: number): Promise<void> {
     const previous = this.svgBaked.get(id);
     const picture = this.pictures.get(id);
-    if (!picture) {
+    if (!picture || this.destroyed || this.rebaking.has(id)) {
       return;
     }
+    this.rebaking.add(id);
     let src = url;
     try {
       const loaded = await this.loadVector(picture, url, resolution);
@@ -436,6 +450,7 @@ export class PixiRenderer implements Renderer {
       // Release unused rasterizations so each resize does not leak another texture.
       this.dropBaked(previous);
     } catch {
+      if (this.destroyed) return;
       // Keep the currently visible texture if replacing it fails.
       const failed = this.svgBaked.get(id);
       if (failed && failed !== previous) {
@@ -443,18 +458,17 @@ export class PixiRenderer implements Renderer {
         this.dropBaked(failed);
       }
       this.svgBaked.set(id, previous ?? { url, src, resolution });
+    } finally {
+      this.rebaking.delete(id);
     }
   }
 
   private keepBaked(id: string, baked: Baked): void {
     this.svgBaked.set(id, baked);
-    if (baked.src !== baked.url) {
-      holdBaked(baked.src);
-    }
   }
 
   private dropBaked(baked: Baked | undefined): void {
-    if (baked && baked.src !== baked.url) {
+    if (baked) {
       releaseBaked(baked.src);
     }
   }
@@ -560,8 +574,8 @@ export class PixiRenderer implements Renderer {
         this.dropStamp(stamp);
       }
       view.stamps = [];
-      view.brush?.root.destroy({ children: true });
-      view.paint?.root.destroy({ children: true });
+      view.brush?.root.destroy({ children: true, context: true });
+      view.paint?.root.destroy({ children: true, context: true });
       view.brush = null;
       view.paint = null;
     }
@@ -613,6 +627,7 @@ export class PixiRenderer implements Renderer {
   }
 
   reset(): void {
+    this.penDirty.clear();
     this.setInspection(null);
     for (const view of this.views.values()) {
       // Release stamp texture references separately because other runners may still use them.
@@ -620,11 +635,11 @@ export class PixiRenderer implements Renderer {
         this.dropStamp(stamp);
       }
       view.stamps = [];
-      view.root.destroy({ children: true });
+      view.root.destroy({ children: true, context: true });
     }
     this.views.clear();
     for (const layer of this.sceneLayers.values()) {
-      layer.destroy({ children: true });
+      layer.destroy({ children: true, context: true });
     }
     this.sceneLayers.clear();
     this.sceneTargets.clear();
@@ -632,6 +647,8 @@ export class PixiRenderer implements Renderer {
   }
 
   destroy(): void {
+    this.destroyed = true;
+    this.controller.abort();
     if (!this.ready) {
       return;
     }
@@ -645,9 +662,14 @@ export class PixiRenderer implements Renderer {
       this.dropBaked(baked);
     }
     this.svgBaked.clear();
+    for (const src of this.rasterSources.values()) releaseBaked(src);
+    this.rasterSources.clear();
+    this.svgTexts.clear();
+    this.svgPicks.clear();
+    this.svgSizes = [];
     this.svgScales.clear();
     this.pictures.clear();
-    this.app.destroy({ removeView: true }, { children: true });
+    this.app.destroy({ removeView: true }, { children: true, context: true });
   }
 
   // Redraw fills and text when boost changes because Entry uses different rendering rules.
@@ -721,9 +743,9 @@ export class PixiRenderer implements Renderer {
     for (const stamp of view.stamps) {
       this.dropStamp(stamp);
     }
-    view.brush?.root.destroy({ children: true });
-    view.paint?.root.destroy({ children: true });
-    view.root.destroy({ children: true });
+    view.brush?.root.destroy({ children: true, context: true });
+    view.paint?.root.destroy({ children: true, context: true });
+    view.root.destroy({ children: true, context: true });
     this.views.delete(entity);
   }
 
@@ -841,7 +863,7 @@ export class PixiRenderer implements Renderer {
     } catch {
       // Keep the raster copy when the SVG cannot be read.
     }
-    this.svgPicks.set(url, better);
+    if (!this.destroyed) this.svgPicks.set(url, better);
     return better;
   }
 
@@ -850,8 +872,8 @@ export class PixiRenderer implements Renderer {
     if (known !== undefined) {
       return known;
     }
-    const text = await (await fetch(url)).text();
-    this.svgTexts.set(url, text);
+    const text = await (await fetch(url, { signal: this.controller.signal })).text();
+    if (!this.destroyed) this.svgTexts.set(url, text);
     return text;
   }
 
@@ -865,11 +887,28 @@ export class PixiRenderer implements Renderer {
     const data = vectorTextureData(picture.dimension.width, picture.dimension.height, resolution);
     if (sized !== url) {
       try {
-        return { texture: (await Assets.load({ src: sized, data })) as Texture, src: sized };
+        return { texture: await this.loadTexture(sized, data), src: sized };
       } catch {
       }
     }
-    return { texture: (await Assets.load({ src: url, data })) as Texture, src: url };
+    return { texture: await this.loadTexture(url, data), src: url };
+  }
+
+  private async loadTexture(src: string, data: Record<string, unknown>): Promise<Texture> {
+    if (this.destroyed) throw new Error('Renderer disposed');
+    const url = new URL(src, document.baseURI).href;
+    holdBaked(url);
+    try {
+      // A new runner must wait until an older runner finishes unloading the same URL.
+      await unloading.get(url);
+      if (this.destroyed) throw new Error('Renderer disposed');
+      const texture = await Assets.load({ src: url, data }) as Texture;
+      if (this.destroyed) throw new Error('Renderer disposed');
+      return texture;
+    } catch (error) {
+      releaseBaked(url);
+      throw error;
+    }
   }
 
   private async vectorSource(
@@ -899,6 +938,7 @@ export class PixiRenderer implements Renderer {
   }
 
   async loadPicture(picture: Picture): Promise<void> {
+    if (this.destroyed) return;
     if (this.textures.has(picture.id)) {
       return;
     }
@@ -916,18 +956,18 @@ export class PixiRenderer implements Renderer {
         // Mipmaps keep raster costumes smooth when drawn much smaller than their source.
         const loaded = vector
           ? await this.loadVector(picture, url, resolution)
-          : { texture: (await Assets.load({ src: url, data: { autoGenerateMipmaps: true } })) as Texture, src: url };
+          : { texture: await this.loadTexture(url, { autoGenerateMipmaps: true }), src: url };
         const texture = loaded.texture;
         if (vector) {
           this.keepBaked(picture.id, { url, src: loaded.src, resolution });
-        }
+        } else this.rasterSources.set(picture.id, loaded.src);
         this.textures.set(picture.id, texture);
         const resource = texture.source?.resource as CanvasImageSource | undefined;
         if (resource) {
           this.images.set(picture.id, resource);
         }
       } catch {
-        this.textures.set(picture.id, Texture.EMPTY);
+        if (!this.destroyed) this.textures.set(picture.id, Texture.EMPTY);
       } finally {
         this.loading.delete(picture.id);
       }
@@ -1493,7 +1533,7 @@ export class PixiRenderer implements Renderer {
     const sprite = new Sprite(texture) as StampSprite;
     // Retain stamp textures even after a costume is rasterized again at a larger scale.
     const baked = this.svgBaked.get(mark.picture.id);
-    if (baked && baked.src !== baked.url) {
+    if (baked) {
       holdBaked(baked.src);
       sprite.__baked = baked.src;
     }

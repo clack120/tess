@@ -109,10 +109,11 @@ function withAssetUrls(work: EntryWork): EntryWork {
   return work;
 }
 
-export async function fetchWork(id: string, groupId: string | null = null): Promise<EntryWork> {
+export async function fetchWork(id: string, groupId: string | null = null, signal?: AbortSignal): Promise<EntryWork> {
   const response = await fetch(GRAPHQL_URL, {
     method: 'POST',
     credentials: 'include',
+    signal,
     headers: { 'content-type': 'application/json', 'csrf-token': csrfToken() },
     body: JSON.stringify({ query: SELECT_PROJECT, variables: { id, groupId } }),
   });
