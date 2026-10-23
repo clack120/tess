@@ -23,7 +23,7 @@ async function setup(t: any) {
   const source = (file: string) => stripTypes(fs.readFileSync(new URL('../packages/extension/src/' + file, import.meta.url), 'utf8'))
     .replace(/^import .*;\n/gm, '');
   w.eval(`(() => { ${source('page/main.ts')} })()`);
-  w.eval(`(() => { const ENABLED_KEY='enabled', SVG_KEY='svg'; ${source('content.ts')} })()`);
+  w.eval(`(() => { const ENABLED_KEY='enabled', SVG_KEY='svg', CACHE_KEY='assetCache'; ${source('content.ts')} })()`);
   const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); };
   await settle();
   t.after(() => w.close());

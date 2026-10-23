@@ -2,6 +2,7 @@ import { boot, type TessVmHandle } from "../../../tessvm/src/web/boot.ts";
 import { formatVmError } from "../../../tessvm/src/runtime/diagnostics.ts";
 import { ASK_FIELD_STYLE } from "../../../tessvm/src/web/ask-style.ts";
 import { CHART_WINDOW_STYLE } from "../../../tessvm/src/web/chart-view.ts";
+import { assetCacheSize } from "../../../tessvm/src/web/fetch-retry.ts";
 import { EXTRAS_DIALOG_STYLE } from "../../../tessvm/src/web/extras.ts";
 import { fetchWork, thumbUrl } from "./entry-project.ts";
 import { bridgeSaveStore } from "./save-bridge.ts";
@@ -163,6 +164,7 @@ export function mountPlayer(
   projectId: string,
   groupId: string | null = null,
   svg = true,
+  cacheAssets = false,
 ): MountedPlayer {
   ensureStageStyle();
   const root = el("div", "tessvm-player is-idle", host);
@@ -349,6 +351,7 @@ export function mountPlayer(
         keyTarget: root,
         boost: true,
         svg,
+        cacheAssets,
         user: signedInUser(),
         tableColumnName: (window as Window & { Lang?: { DataAnalytics?: { new_attribute?: string } } })
           .Lang?.DataAnalytics?.new_attribute,
@@ -378,6 +381,11 @@ export function mountPlayer(
     startButton.hidden = false;
     reportUnsupported(handle);
     ready(handle);
+    // The popup cannot read this page's Cache Storage, so hand the size to the content script.
+    void assetCacheSize().then(
+      (size) => window.postMessage({ __tessvm: "cache-size", ...size }, location.origin),
+      (error) => console.warn("[tessvm] 에셋 캐시 용량을 읽지 못했습니다", error),
+    );
   }
 
   // Report unsupported blocks so skipped code cannot look like a broken project.

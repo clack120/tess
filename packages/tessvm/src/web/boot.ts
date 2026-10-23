@@ -10,6 +10,7 @@ import { dexieSaveStore } from './save-store.ts';
 import type { SaveHost } from '../runtime/save.ts';
 import { bindExtras } from './extras.ts';
 import { RuntimeDiagnostics } from './diagnostics.ts';
+import { setAssetCache } from './fetch-retry.ts';
 import { mountDiagnostics } from './diagnostics-view.ts';
 
 export interface BootOptions {
@@ -31,6 +32,8 @@ export interface BootOptions {
   // A focusable target keeps work keys separate from surrounding page inputs.
   keyTarget?: HTMLElement;
   svg?: boolean;
+  // Keep downloaded costumes and sounds in Cache Storage and reuse them without revalidation.
+  cacheAssets?: boolean;
   // Without a viewer, both identity blocks return a space.
   user?: EntryUser | null;
   tableColumnName?: string;
@@ -209,6 +212,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
   frame.className = 'tessvm-frame';
   view.appendChild(frame);
 
+  setAssetCache(options.cacheAssets ?? false);
   // Forward boost changes because they also affect renderer behavior.
   const boost = options.boost ?? true;
   const renderer = new PixiRenderer({
@@ -277,9 +281,12 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     const waitForAssets = options.waitForAssets ?? true;
     const total = PixiRenderer.costumeCount(vm.targets) + sounds.length;
     let loaded = 0;
-    const arrived = () => {
+    let failed = 0;
+    const arrived = (ok: boolean) => {
       loaded += 1;
+      if (!ok) failed += 1;
       options.onProgress?.(loaded, total);
+      if (loaded === total && failed) console.warn(`[tessvm] 모양·소리 ${failed}개를 받지 못했습니다`);
     };
     options.onProgress?.(0, total);
     // Start both preloads regardless of whether the caller waits for them.

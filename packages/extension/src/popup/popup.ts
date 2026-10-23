@@ -1,10 +1,12 @@
-import { readSettings, write, ENABLED_KEY, SVG_KEY } from '../browser.ts';
+import { api, readSettings, write, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY } from '../browser.ts';
 import {
   clearWorks, exportAll, exportName, importAll, listWorks, removeWork, type SavedSummary,
 } from '../store-db.ts';
 
 const power = document.getElementById('enabled') as HTMLButtonElement;
 const svg = document.getElementById('svg') as HTMLInputElement;
+const cache = document.getElementById('cache') as HTMLInputElement;
+const cacheSize = document.getElementById('cache-size') as HTMLElement;
 const chip = document.getElementById('chip') as HTMLElement;
 const saves = document.getElementById('saves') as HTMLElement;
 const savesEmpty = document.getElementById('saves-empty') as HTMLElement;
@@ -56,8 +58,31 @@ svg.addEventListener('change', () => {
   void write(SVG_KEY, svg.checked);
 });
 
+cache.addEventListener('change', () => {
+  void write(CACHE_KEY, cache.checked);
+});
+
+// Pages report the size after loading a work, so this shows the last known value.
+function paintCacheSize(value: unknown): void {
+  const size = value as { count?: number; bytes?: number } | null;
+  cacheSize.hidden = !size?.count;
+  if (size?.count) cacheSize.textContent = `저장한 파일 ${size.count.toLocaleString('ko-KR')}개 · ${byteText(size.bytes ?? 0)}`;
+}
+
+function byteText(bytes: number): string {
+  if (bytes < 1024 * 1024) return sizeText(bytes);
+  const mb = bytes / 1024 / 1024;
+  return mb < 1024 ? `${mb.toFixed(1)} MB` : `${(mb / 1024).toFixed(2)} GB`;
+}
+
+void api.storage.local.get({ [CACHE_SIZE_KEY]: null }).then((stored) => paintCacheSize(stored[CACHE_SIZE_KEY]));
+api.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && CACHE_SIZE_KEY in changes) paintCacheSize(changes[CACHE_SIZE_KEY]?.newValue);
+});
+
 void readSettings().then((settings) => {
   svg.checked = settings.svg;
+  cache.checked = settings.cache;
   paint(settings.enabled);
 });
 

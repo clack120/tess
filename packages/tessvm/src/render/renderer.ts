@@ -7,6 +7,7 @@ import {
   TextStyle,
   ColorMatrixFilter,
   Container,
+  DOMAdapter,
   Graphics,
   Sprite,
   Text,
@@ -19,6 +20,7 @@ import type { AlphaMask } from '../collision/mask.ts';
 import { Overlay, type TableLike } from './overlay.ts';
 import { entityBounds, type Rect } from '../collision/detect.ts';
 import { fillParts } from './fill.ts';
+import { fetchAsset } from '../web/fetch-retry.ts';
 import { isSegment, SegmentBatch, SEGMENT_FLOOR } from './segments.ts';
 import {
   FULLSCREEN_CANVAS_WIDTH,
@@ -29,6 +31,19 @@ import {
   svgSharpness,
   textSharpness,
 } from './sharpness.ts';
+
+let adapterRouted = false;
+
+// Route Pixi's texture and SVG requests through the shared retry and asset cache path.
+function routePixiFetch(): void {
+  if (adapterRouted || !DOMAdapter) return;
+  adapterRouted = true;
+  // Worker loads bypass DOMAdapter.fetch; main-thread loads measured no slower in Chromium and Firefox.
+  Assets.setPreferences?.({ preferWorkers: false });
+  const base = DOMAdapter.get();
+  DOMAdapter.set({ ...base, fetch: (url: RequestInfo, options?: RequestInit) =>
+    typeof url === 'string' ? fetchAsset(url, options?.signal ?? undefined) : base.fetch(url, options) });
+}
 
 interface Ink {
   color: number;
@@ -261,6 +276,7 @@ export class PixiRenderer implements Renderer {
   private options: RendererOptions;
 
   async init(): Promise<void> {
+    routePixiFetch();
     const options = this.options;
     await this.app.init({
       width: stage.worldWidth,
@@ -804,7 +820,7 @@ export class PixiRenderer implements Renderer {
   async preload(
     targets: Target[],
     sceneId?: string,
-    onLoaded?: () => void,
+    onLoaded?: (ok: boolean) => void,
   ): Promise<void> {
     const inScene: Picture[] = [];
     const rest: Picture[] = [];
@@ -815,7 +831,7 @@ export class PixiRenderer implements Renderer {
     this.setSvgBudget(targets);
     const one = async (picture: Picture) => {
       await this.loadPicture(picture);
-      onLoaded?.();
+      onLoaded?.(this.textures.get(picture.id) !== Texture.EMPTY);
     };
     await pool(inScene, LOAD_CONCURRENCY, one);
     await pool(rest, LOAD_CONCURRENCY, one);
@@ -872,7 +888,7 @@ export class PixiRenderer implements Renderer {
     if (known !== undefined) {
       return known;
     }
-    const text = await (await fetch(url, { signal: this.controller.signal })).text();
+    const text = await (await fetchAsset(url, this.controller.signal)).text();
     if (!this.destroyed) this.svgTexts.set(url, text);
     return text;
   }

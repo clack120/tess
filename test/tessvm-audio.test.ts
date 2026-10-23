@@ -84,7 +84,10 @@ function fakeAudio() {
 }
 
 function loadEngine(context: unknown) {
-  const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/audio/sound.ts'), 'utf-8'));
+  const read = (file: string) => stripTypes(fs.readFileSync(path.join(root, file), 'utf-8'));
+  // The sandbox has no module loader, so inline the one runtime import.
+  const source = read('packages/tessvm/src/web/fetch-retry.ts') +
+    read('packages/tessvm/src/audio/sound.ts').replace(/^import .*fetch-retry.*$/m, '');
   const sandbox: Record<string, unknown> = {
     AbortController,
     AudioContext: function AudioContext() { return context; },
@@ -378,7 +381,10 @@ function fakeSpeaker(how: 'end' | 'error' | 'blocked' | 'hold') {
 }
 
 function loadTts(how: 'end' | 'error' | 'blocked' | 'hold', origin = 'https://example.test') {
-  const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/audio/sound.ts'), 'utf-8'));
+  const read = (file: string) => stripTypes(fs.readFileSync(path.join(root, file), 'utf-8'));
+  // The sandbox has no module loader, so inline the one runtime import.
+  const source = read('packages/tessvm/src/web/fetch-retry.ts') +
+    read('packages/tessvm/src/audio/sound.ts').replace(/^import .*fetch-retry.*$/m, '');
   const { FakeAudio, made } = fakeSpeaker(how);
   const spoken: Array<{ text: string; rate: number; pitch: number }> = [];
   const sandbox: Record<string, unknown> = {

@@ -234,6 +234,10 @@ body.is-off .chip {
   line-height: 1.45;
 }
 
+.row-hint[hidden] {
+  display: none;
+}
+
 .row input {
   position: absolute;
   width: 1px;

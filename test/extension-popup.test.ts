@@ -10,7 +10,7 @@ import { JSDOM } from 'jsdom';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const POPUP = path.join(root, 'packages/extension/src/popup');
 
-async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknown[] = []) {
+async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknown[] = [], cacheSize: unknown = null) {
   const html = fs.readFileSync(path.join(POPUP, 'popup.html'), 'utf-8');
   const dom = new JSDOM(html, { pretendToBeVisual: true });
   t.after(() => dom.window.close());
@@ -19,7 +19,8 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
   const dropped: string[] = [];
   let rows: any[] = saved.slice();
   const source = stripTypes(fs.readFileSync(path.join(POPUP, 'popup.ts'), 'utf-8'));
-  const settings = { enabled: true, svg: true, ...stored };
+  const settings = { enabled: true, svg: true, cache: false, ...stored };
+  const sizeListeners: Array<(changes: any, area: string) => void> = [];
   const sandbox: Record<string, unknown> = {
     document: dom.window.document,
     readSettings: () => Promise.resolve(settings),
@@ -29,6 +30,12 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
     },
     ENABLED_KEY: 'enabled',
     SVG_KEY: 'svg',
+    CACHE_KEY: 'assetCache',
+    CACHE_SIZE_KEY: 'assetCacheSize',
+    api: { storage: {
+      local: { get: () => Promise.resolve({ assetCacheSize: cacheSize }) },
+      onChanged: { addListener: (listener: (changes: any, area: string) => void) => sizeListeners.push(listener) },
+    } },
     Intl: globalThis.Intl,
     listWorks: () => Promise.resolve(rows.slice()),
     exportName: () => 'tessvm-save-2026-09-14.json',
@@ -66,6 +73,7 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
   return {
     written,
     dropped,
+    reportSize: (value: unknown) => sizeListeners.forEach(listener => listener({ assetCacheSize: { newValue: value } }, 'local')),
     downloads,
     find,
     pick(name: string) {
@@ -134,6 +142,25 @@ test('벡터 스위치는 저장된 값을 보여 주고, 바꾸면 그대로 �
 
   popup.toggle('svg');
   assert.deepEqual(popup.written, [['svg', false]]);
+});
+
+test('에셋 저장 스위치는 기본으로 꺼져 있고, 마지막으로 알린 용량을 보여 준다', async (t) => {
+  const popup = await mountPopup(t, {});
+  assert.equal((popup.find('cache') as HTMLInputElement).checked, false);
+  assert.equal(popup.find('cache-size').hidden, true);
+  popup.toggle('cache');
+  assert.deepEqual(popup.written, [['assetCache', true]]);
+  popup.reportSize({ count: 1234, bytes: 5 * 1024 * 1024 });
+  assert.equal(popup.find('cache-size').hidden, false);
+  assert.equal(popup.find('cache-size').textContent, '저장한 파일 1,234개 · 5.0 MB');
+  popup.reportSize({ count: 0, bytes: 0 });
+  assert.equal(popup.find('cache-size').hidden, true);
+});
+
+test('열 때 이미 알려진 용량이 있으면 바로 보여 준다', async (t) => {
+  const popup = await mountPopup(t, { cache: true }, [], { count: 3, bytes: 2048 });
+  assert.equal((popup.find('cache') as HTMLInputElement).checked, true);
+  assert.equal(popup.find('cache-size').textContent, '저장한 파일 3개 · 2.0 KB');
 });
 
 const WORKS = [
