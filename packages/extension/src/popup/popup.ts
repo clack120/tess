@@ -7,7 +7,6 @@ const power = document.getElementById('enabled') as HTMLButtonElement;
 const svg = document.getElementById('svg') as HTMLInputElement;
 const cache = document.getElementById('cache') as HTMLInputElement;
 const cacheSize = document.getElementById('cache-size') as HTMLElement;
-const chip = document.getElementById('chip') as HTMLElement;
 const saves = document.getElementById('saves') as HTMLElement;
 const savesEmpty = document.getElementById('saves-empty') as HTMLElement;
 const clearAll = document.getElementById('clear') as HTMLButtonElement;
@@ -20,12 +19,10 @@ const note = document.getElementById('note') as HTMLElement;
 
 const TEXT = {
   on: {
-    chip: '켜짐',
-    state: 'entropy로 실행 중',
+    state: 'Entropy로 실행 중',
     note: ['작품 페이지의 실행 화면을 Entropy가 대신합니다.', '눌러서 끌 수 있습니다.'],
   },
   off: {
-    chip: '꺼짐',
     state: '엔트리 기본 실행기',
     note: ['작품 페이지를 원래대로 둡니다.', '눌러서 Entropy 실행기를 켭니다.'],
   },
@@ -43,7 +40,6 @@ function paint(on: boolean): void {
   const text = on ? TEXT.on : TEXT.off;
   power.setAttribute('aria-checked', String(on));
   document.body.classList.toggle('is-off', !on);
-  chip.textContent = text.chip;
   state.textContent = text.state;
   note.replaceChildren(...lines(text.note));
 }
