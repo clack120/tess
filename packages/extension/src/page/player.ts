@@ -165,6 +165,7 @@ export function mountPlayer(
   groupId: string | null = null,
   svg = true,
   cacheAssets = false,
+  grabEscape = true,
 ): MountedPlayer {
   ensureStageStyle();
   const root = el("div", "tessvm-player is-idle", host);
@@ -352,6 +353,7 @@ export function mountPlayer(
         boost: true,
         svg,
         cacheAssets,
+        grabEscape,
         user: signedInUser(),
         tableColumnName: (window as Window & { Lang?: { DataAnalytics?: { new_attribute?: string } } })
           .Lang?.DataAnalytics?.new_attribute,

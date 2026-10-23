@@ -32,6 +32,8 @@ export interface BootOptions {
   // A focusable target keeps work keys separate from surrounding page inputs.
   keyTarget?: HTMLElement;
   svg?: boolean;
+  // Claim Escape like other work keys and lock it during element fullscreen where supported (default true).
+  grabEscape?: boolean;
   // Keep downloaded costumes and sounds in Cache Storage and reuse them without revalidation.
   cacheAssets?: boolean;
   // Without a viewer, both identity blocks return a space.
@@ -303,7 +305,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
 
     const question = makeQuestionField(frame, (value) => {
       vm.pendingAnswer = value;
-    });
+    }, () => (options.keyTarget ?? view).focus({ preventScroll: true }));
     const originalShow = renderer.showQuestion.bind(renderer);
     renderer.showQuestion = (text: string) => {
       originalShow(text);
@@ -337,6 +339,7 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
       options.keyTarget ?? window,
       cleanups,
       extras.cursor,
+      options.grabEscape ?? true,
     );
 
     // Skip unchanged sizes and defer layout writes to avoid a ResizeObserver feedback loop.
@@ -467,15 +470,14 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
 }
 
 const MODIFIER_KEY_CODES = new Set([16, 17, 18]);
-// Never prevent Escape's browser action.
 const ESCAPE = 27;
 
 const CONTROL_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A']);
 
 // Capture work keys only while running and focused; leave text controls to their own key handlers.
-function worksKey(vm: Vm, event: KeyboardEvent, code: number): boolean {
-  // Stopped or paused works keep browser actions; Escape always reaches the browser and the work.
-  if (code === 0 || code === ESCAPE || vm.state !== 'run') {
+function worksKey(vm: Vm, event: KeyboardEvent, code: number, grabEscape: boolean): boolean {
+  // Stopped or paused works keep browser actions; Escape reaches the browser too unless it is grabbed.
+  if (code === 0 || (code === ESCAPE && !grabEscape) || vm.state !== 'run') {
     return false;
   }
   // Keep browser shortcuts unless the running work reacts to their key.
@@ -496,6 +498,7 @@ function bindInput(
   cleanups: Array<() => void>,
   // Explicit work cursor requests take precedence over the automatic cursor.
   workCursor: () => string,
+  grabEscape: boolean,
 ): () => void {
   const on = <T extends EventTarget>(target: T, type: string, handler: EventListener, capture = false) => {
     target.addEventListener(type, handler, capture);
@@ -510,7 +513,7 @@ function bindInput(
   };
 
   const claim = (event: KeyboardEvent, code: number) => {
-    if (worksKey(vm, event, code)) {
+    if (worksKey(vm, event, code, grabEscape)) {
       event.preventDefault();
       event.stopPropagation();
     }
@@ -566,6 +569,17 @@ function bindInput(
     on(window, 'focus', syncFocus);
     on(document, 'visibilitychange', syncFocus);
     on(document, 'fullscreenchange', syncFocus);
+    // Element fullscreen exits on Escape before pages see it; Chromium's Keyboard Lock keeps it (hold to exit).
+    const keyboard = (globalThis.navigator as Navigator & { keyboard?: { lock?(keys: string[]): Promise<void>; unlock?(): void } } | undefined)?.keyboard;
+    if (grabEscape && keyboard?.lock) {
+      const lockEscape = () => {
+        if (fullscreen()) keyboard.lock!(['Escape']).catch((error) => console.warn('[tessvm] 전체화면에서 Esc 를 잡지 못했습니다', error));
+        else keyboard.unlock?.();
+      };
+      on(document, 'fullscreenchange', lockEscape);
+      lockEscape();
+      cleanups.push(() => keyboard.unlock?.());
+    }
   }
   // Clear pressed keys on blur because the window may never receive their releases.
   on(window, 'blur', () => vm.pressedKeys.clear());
@@ -757,7 +771,7 @@ function pick(vm: Vm): Entity | null {
   );
 }
 
-function makeQuestionField(view: HTMLElement, submit: (value: string) => void) {
+function makeQuestionField(view: HTMLElement, submit: (value: string) => void, refocus: () => void) {
   const wrap = document.createElement('form');
   wrap.className = 'tessvm-ask';
   wrap.hidden = true;
@@ -781,11 +795,14 @@ function makeQuestionField(view: HTMLElement, submit: (value: string) => void) {
   return {
     show() {
       wrap.hidden = false;
-      input.focus();
+      input.focus({ preventScroll: true });
     },
     hide() {
+      // Return typing focus to the work; a plain blur would leave keys on the page body.
+      const typing = document.activeElement === input;
       wrap.hidden = true;
-      input.blur();
+      if (typing) refocus();
+      else input.blur();
     },
   };
 }

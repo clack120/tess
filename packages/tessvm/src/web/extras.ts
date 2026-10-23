@@ -256,11 +256,16 @@ function makeDialog(parent: HTMLElement): Dialog {
   parent.appendChild(root);
 
   let pending: Request | null = null;
+  let returnFocus: HTMLElement | null = null;
 
   const close = (allowed: boolean) => {
     const request = pending;
     pending = null;
+    // Hiding the focused button would drop focus to the page body, so give it back.
+    const inside = root.contains(document.activeElement);
     root.hidden = true;
+    if (inside && returnFocus?.isConnected) returnFocus.focus?.({ preventScroll: true });
+    returnFocus = null;
     content.textContent = '';
     request?.answer(allowed, keepBox.checked);
   };
@@ -299,6 +304,7 @@ function makeDialog(parent: HTMLElement): Dialog {
           ? `${detail.slice(0, DETAIL_LIMIT)}\n… ${detail.length - DETAIL_LIMIT}자 더`
           : detail;
       root.hidden = false;
+      returnFocus = document.activeElement as HTMLElement | null;
       allow.focus({ preventScroll: true });
       return true;
     },

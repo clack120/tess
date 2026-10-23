@@ -104,6 +104,7 @@ function mountExtras(t: any) {
       button.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
     },
     notice: () => frame.querySelector('.tessvm-notice') as HTMLElement | null,
+    focused: () => document_.activeElement?.id,
     focus(on: string) {
       (document_.getElementById(on) as HTMLElement).focus();
     },
@@ -180,6 +181,17 @@ test('붙여넣기에는 간격도 한도도 없다', (t) => {
   assert.equal(page.dialogOpen(), true);
   page.paste('canvas', '창이 서 있는 동안');
   assert.equal(page.pasted.at(-1), '창이 서 있는 동안');
+});
+
+test('closing a permission dialog gives focus back to the player', (t) => {
+  for (const confirm of [true, false]) {
+    const page = mountExtras(t);
+    page.focus('player');
+    page.host().copy('글');
+    assert.notEqual(page.focused(), 'player', 'the dialog takes focus while open');
+    page.answer(confirm);
+    assert.equal(page.focused(), 'player', `answer ${confirm}`);
+  }
 });
 
 test('복사는 다시 묻지 않기를 켜면 그다음부터 묻지 않고 복사한다', async (t) => {
