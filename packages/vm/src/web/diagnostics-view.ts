@@ -76,9 +76,9 @@ export function mountDiagnostics(parent: HTMLElement, diagnostics: RuntimeDiagno
     const recent = report.activity.slice(-10);
     const elapsed = recent.reduce((sum, item) => sum + item.elapsedMs, 0) / 1000;
     const calls = recent.reduce((sum, item) => sum + item.callbacks, 0);
-    const total = (key: 'ticks' | 'kernelRuns' | 'kernelFallbacks' | 'workMs') => recent.reduce((sum, item) => sum + item[key], 0);
+    const total = (key: 'ticks' | 'renders' | 'kernelRuns' | 'kernelFallbacks' | 'workMs') => recent.reduce((sum, item) => sum + item[key], 0);
     activity.textContent = elapsed > 0 && calls > 0
-      ? `최근 ${elapsed.toFixed(1)}초: ${(total('ticks') / elapsed).toFixed(1)}틱/초 · 커널 ${(total('kernelRuns') / elapsed).toFixed(1)}회/초 · 커널 되돌림 ${total('kernelFallbacks')}회\nVM·화면 처리 평균 ${(total('workMs') / calls).toFixed(2)}ms · 최대 ${Math.max(...recent.map((item) => item.maxWorkMs)).toFixed(2)}ms`
+      ? `최근 ${elapsed.toFixed(1)}초: 그리기 ${(total('renders') / elapsed).toFixed(1)}회/초, 실행 ${(total('ticks') / elapsed).toFixed(1)}틱/초, 커널 ${(total('kernelRuns') / elapsed).toFixed(1)}회/초, 커널 되돌림 ${total('kernelFallbacks')}회\nVM·화면 처리 평균 ${(total('workMs') / calls).toFixed(2)}ms, 최대 ${Math.max(...recent.map((item) => item.maxWorkMs)).toFixed(2)}ms`
       : '최근 처리량 측정 중…';
     activity.style.whiteSpace = 'pre-line';
     heap.textContent = report.heap

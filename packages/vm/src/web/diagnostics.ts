@@ -6,6 +6,7 @@ interface Activity {
   elapsedMs: number;
   callbacks: number;
   ticks: number;
+  renders: number;
   workMs: number;
   maxWorkMs: number;
   kernelRuns: number;
@@ -22,9 +23,10 @@ export class RuntimeDiagnostics {
   private readonly vm: Vm;
   private since: number;
   private frame: number;
+  private renders: number;
   private runs: number;
   private fallbacks: number;
-  private pending = { callbacks: 0, ticks: 0, workMs: 0, maxWorkMs: 0, kernelRuns: 0, kernelFallbacks: 0 };
+  private pending = { callbacks: 0, ticks: 0, renders: 0, workMs: 0, maxWorkMs: 0, kernelRuns: 0, kernelFallbacks: 0 };
   private readonly history: Activity[] = [];
   private readonly focusEvents: Array<{ at: number; type: string; element: string | null; focused: boolean }> = [];
   private failure: { error: NonNullable<Vm['lastError']>; activity: Activity[] } | null = null;
@@ -33,29 +35,36 @@ export class RuntimeDiagnostics {
     this.vm = vm;
     this.since = now;
     this.frame = vm.frame;
+    this.renders = vm.renderer?.renderCount ?? 0;
     this.runs = vm.kernel?.stats.runs ?? 0;
     this.fallbacks = vm.kernel?.stats.fallbacks ?? 0;
   }
 
-  record(now: number, workMs: number): void {
+  record(now: number, workMs: number): Activity | undefined {
+    const renders = this.vm.renderer?.renderCount ?? 0;
     const runs = this.vm.kernel?.stats.runs ?? 0;
     const fallbacks = this.vm.kernel?.stats.fallbacks ?? 0;
     this.pending.callbacks++;
     this.pending.ticks += Math.max(0, this.vm.frame - this.frame);
+    this.pending.renders += Math.max(0, renders - this.renders);
     this.pending.kernelRuns += Math.max(0, runs - this.runs);
     this.pending.kernelFallbacks += Math.max(0, fallbacks - this.fallbacks);
     this.pending.workMs += workMs;
     this.pending.maxWorkMs = Math.max(this.pending.maxWorkMs, workMs);
     this.frame = this.vm.frame;
+    this.renders = renders;
     this.runs = runs;
     this.fallbacks = fallbacks;
+    let activity: Activity | undefined;
     if (now - this.since >= 500) {
-      this.history.push({ at: now, elapsedMs: now - this.since, ...this.pending });
+      activity = { at: now, elapsedMs: now - this.since, ...this.pending };
+      this.history.push(activity);
       if (this.history.length > 60) this.history.shift();
       this.since = now;
-      this.pending = { callbacks: 0, ticks: 0, workMs: 0, maxWorkMs: 0, kernelRuns: 0, kernelFallbacks: 0 };
+      this.pending = { callbacks: 0, ticks: 0, renders: 0, workMs: 0, maxWorkMs: 0, kernelRuns: 0, kernelFallbacks: 0 };
     }
     this.keepFailure(now);
+    return activity;
   }
 
   recordFocus(type: string): void {

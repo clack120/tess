@@ -386,10 +386,6 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       (options.keyTarget ?? view).focus({ preventScroll: true });
     });
     cleanups.push(() => diagnosticView.dispose());
-    let last = performance.now();
-    let frames = 0;
-    let accumulated = 0;
-
     const step = (now: number) => {
       // Stop and report uncaught frame failures instead of leaving a frozen canvas with a live driver.
       const began = performance.now();
@@ -398,20 +394,15 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       } catch (error) {
         vm.fail(error);
       }
-      diagnostics.record(now, performance.now() - began);
+      const finished = performance.now();
+      const activity = diagnostics.record(finished, finished - began);
       syncCursor();
       chartWindow.sync();
-      if (stats) {
-        frames += 1;
-        accumulated += now - last;
-        last = now;
-        if (accumulated >= 500) {
-          stats.textContent =
-            `${Math.round((frames * 1000) / accumulated)} fps · ${vm.frame} tick` +
-            ` · ${vm.frameRate}Hz · ${stage.width}×${stage.height}`;
-          frames = 0;
-          accumulated = 0;
-        }
+      if (stats && activity) {
+        const seconds = activity.elapsedMs / 1000;
+        stats.textContent =
+          `그리기 ${(activity.renders / seconds).toFixed(1)}회/초, 실행 ${(activity.ticks / seconds).toFixed(1)}틱/초` +
+          `, 설정 ${vm.frameRate}Hz, ${stage.width}×${stage.height}`;
       }
     };
     const stopFrames = startFrameDriver(step);
