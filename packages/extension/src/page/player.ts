@@ -468,7 +468,7 @@ export function mountPlayer(
         { label: "정지", run: stop, disabled: still },
         null,
         { label: "현재 상태 보기", run: () => live.inspect() },
-        { label: "오브젝트·클론 보기", run: () => inspector?.open() },
+        { label: `TessVM 디버그 ${inspector?.enabled ? "끄기" : "켜기"}`, run: () => inspector?.toggle() },
         { label: "진단 파일 저장", run: () => live.downloadDiagnostics() },
         null,
         { label: "이전 장면", run: () => sceneStep("prev"), disabled: still || !sceneAt(-1) },
