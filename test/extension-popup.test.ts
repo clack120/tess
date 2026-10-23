@@ -114,13 +114,13 @@ test('실행기 단추는 한 번 누르면 켜지고 다시 누르면 꺼진다
 
   popup.click('enabled');
   assert.equal(popup.on(), false);
-  assert.equal(popup.find('chip').textContent, '꺼짐');
+  assert.equal(popup.find('state').textContent, '엔트리 기본 실행기');
   assert.match(popup.find('note').textContent ?? '', /켭니다/);
   assert.equal(popup.find('note').querySelectorAll('br').length, 1);
 
   popup.click('enabled');
   assert.equal(popup.on(), true);
-  assert.equal(popup.find('chip').textContent, '켜짐');
+  assert.equal(popup.find('state').textContent, 'entropy로 실행 중');
   assert.deepEqual(popup.written, [
     ['enabled', false],
     ['enabled', true],
@@ -130,7 +130,7 @@ test('실행기 단추는 한 번 누르면 켜지고 다시 누르면 꺼진다
 test('꺼진 채로 열면 꺼진 모습으로 시작한다', async (t) => {
   const popup = await mountPopup(t, { enabled: false });
   assert.equal(popup.on(), false);
-  assert.equal(popup.find('chip').textContent, '꺼짐');
+  assert.equal(popup.find('state').textContent, '엔트리 기본 실행기');
   assert.deepEqual(popup.written, [], '연 것만으로는 아무것도 쓰지 않습니다');
 });
 

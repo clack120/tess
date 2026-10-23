@@ -39,50 +39,13 @@ body {
   text-align: center;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  text-align: left;
-}
-
-.brand-mark {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px rgb(22 215 153 / 18%);
-  transition:
-    background 0.2s ease-out,
-    box-shadow 0.2s ease-out;
-}
-
-.brand-name {
-  flex: 1;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-}
-
-.chip {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgb(22 215 153 / 14%);
-  color: var(--accent-deep);
-  font-size: 11px;
-  font-weight: 700;
-  transition:
-    background 0.2s ease-out,
-    color 0.2s ease-out;
-}
-
 .power {
   position: relative;
   display: grid;
   place-items: center;
   width: 124px;
   height: 124px;
-  margin: 18px auto 0;
+  margin: 0 auto;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -192,16 +155,6 @@ body {
 
 body.is-off .card {
   opacity: 0.55;
-}
-
-body.is-off .brand-mark {
-  background: var(--off);
-  box-shadow: none;
-}
-
-body.is-off .chip {
-  background: rgb(128 136 144 / 16%);
-  color: var(--muted);
 }
 
 .row {
