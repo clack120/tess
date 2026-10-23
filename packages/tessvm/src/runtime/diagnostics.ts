@@ -95,9 +95,10 @@ export type VmSnapshot = ReturnType<typeof snapshotVm>;
 // Resolve stack locations to blocks without instrumenting every executed block.
 export function blockOfError(stack: string | undefined, trace: GeneratedTrace | undefined): BlockSite | null {
   if (!stack || !trace) return null;
-  const at = stack.indexOf(`${trace.sourceId}:`);
+  const at = stack.indexOf(trace.sourceId);
   if (at === -1) return null;
-  const match = /^(\d+):(\d+)/.exec(stack.slice(at + trace.sourceId.length + 1));
+  // Deno writes "name, <anonymous>:line:column" for code from new Function.
+  const match = /^(?:, <anonymous>)?:(\d+):(\d+)/.exec(stack.slice(at + trace.sourceId.length));
   if (!match) return null;
   const line = Number(match[1]), column = Number(match[2]);
   let low = 0, high = trace.sites.length;

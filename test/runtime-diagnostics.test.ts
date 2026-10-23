@@ -56,7 +56,7 @@ end`, kernel);
     const error = vm.errors[0]!;
     assert.equal(error.blockId, blocks.find((block) => block.type === 'char_at')!.id);
     assert.equal(error.blockType, 'char_at');
-    assert.match(error.stack!, /tessvm-generated-\d+\.js:\d+:\d+/);
+    assert.match(error.stack!, /tessvm-generated-\d+\.js(?:, <anonymous>)?:\d+:\d+/);
     assert.deepEqual(error.inputs, {
       text: { type: 'string', value: '🙂abc', length: 5, truncated: false },
       index: { type: 'number', value: 12 },
@@ -237,7 +237,7 @@ test('runtime value snapshots bound text and preserve falsy and nonfinite values
   assert.doesNotThrow(() => JSON.stringify([hostile, 1n, Symbol('x'), undefined, null].map(runtimeValue)));
 });
 
-test('Chrome and Firefox stack positions resolve consistently and unknown sources stay unknown', () => {
+test('Chrome, Firefox and Deno stack positions resolve consistently and unknown sources stay unknown', () => {
   const trace = { sourceId: 'tessvm-generated-123.js', sites: [
     { line: 5, column: 2, blockId: 'statement', blockType: 'text_read' },
     { line: 6, column: 30, blockId: 'inner', blockType: 'char_at' },
@@ -245,6 +245,7 @@ test('Chrome and Firefox stack positions resolve consistently and unknown source
   for (const stack of [
     'Error: bad\n    at Object.charAt (ops.js:100:2)\n    at F (tessvm-generated-123.js:6:31)',
     'charAt@ops.js:100:2\nF@tessvm-generated-123.js:6:31',
+    'Error: bad\n    at Array.eval (tessvm-generated-123.js, <anonymous>:6:31)',
   ]) assert.equal(blockOfError(stack, trace)?.blockId, 'inner');
   assert.equal(blockOfError('at F (tessvm-generated-123.js:6:29)', trace)?.blockId, 'statement');
   assert.equal(blockOfError('at F (tessvm-generated-123.js:1:1)', trace), null);
