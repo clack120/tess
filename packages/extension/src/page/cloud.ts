@@ -203,42 +203,45 @@ export class CloudClient implements VariableStore {
       return;
     }
 
-    const oldArr = (this.values.get(key) as any[]) || [];
+    let oldArr = (this.values.get(key) as any[]) || [];
     const newArr = value as any[];
-    let diffs: any[] = [];
-    
-        let prefix = 0;
-        while (prefix < oldArr.length && prefix < newArr.length && oldArr[prefix].data === newArr[prefix].data) {
-            prefix++;
-        }
-        let suffix = 0;
-        while (suffix < oldArr.length - prefix && suffix < newArr.length - prefix && oldArr[oldArr.length - 1 - suffix].data === newArr[newArr.length - 1 - suffix].data) {
-            suffix++;
-        }
+    const diffs: any[] = [];
 
-        const deleteCount = oldArr.length - prefix - suffix;
-        const insertCount = newArr.length - prefix - suffix;
-        const replaceCount = Math.min(deleteCount, insertCount);
+    let prefix = 0;
+    while (prefix < oldArr.length && prefix < newArr.length && oldArr[prefix].data === newArr[prefix].data) {
+      prefix++;
+    }
+    let suffix = 0;
+    while (suffix < oldArr.length - prefix && suffix < newArr.length - prefix && oldArr[oldArr.length - 1 - suffix].data === newArr[newArr.length - 1 - suffix].data) {
+      suffix++;
+    }
 
-        for (let i = 0; i < replaceCount; i++) {
-            const currentKey = oldArr[prefix + i].key;
-            diffs.push({ type: 'replace', index: prefix + i, data: newArr[prefix + i].data, key: currentKey });
-            oldArr[prefix + i].data = newArr[prefix + i].data;
-        }
+    const deleteCount = oldArr.length - prefix - suffix;
+    const insertCount = newArr.length - prefix - suffix;
+    const replaceCount = Math.min(deleteCount, insertCount);
 
-        const remainingDelete = deleteCount - replaceCount;
-        for (let i = 0; i < remainingDelete; i++) {
-            const deletedKey = oldArr[prefix + replaceCount].key;
-            diffs.push({ type: 'delete', index: prefix + replaceCount, key: deletedKey });
-            oldArr.splice(prefix + replaceCount, 1);
-        }
+    for (let i = 0; i < replaceCount; i++) {
+      const currentKey = oldArr[prefix + i].key;
+      diffs.push({ type: 'replace', index: prefix + i, data: newArr[prefix + i].data, key: currentKey });
+      oldArr[prefix + i].data = newArr[prefix + i].data;
+    }
 
-        const remainingInsert = insertCount - replaceCount;
-        for (let i = 0; i < remainingInsert; i++) {
-            const newKey = this.generateKey();
-            diffs.push({ type: 'insert', index: prefix + replaceCount + i, data: newArr[prefix + replaceCount + i].data, key: newKey });
-            oldArr.splice(prefix + replaceCount + i, 0, { data: newArr[prefix + replaceCount + i].data, key: newKey });
-        }
+    const remainingDelete = deleteCount - replaceCount;
+    const at = prefix + replaceCount;
+    for (let i = 0; i < remainingDelete; i++) {
+      diffs.push({ type: 'delete', index: at, key: oldArr[at + i].key });
+    }
+    if (remainingDelete) oldArr.splice(at, remainingDelete);
+
+    // Rebuild once instead of shifting the suffix for every inserted item.
+    const inserted = [];
+    for (let i = 0; i < insertCount - replaceCount; i++) {
+      const item = { data: newArr[at + i].data, key: this.generateKey() };
+      diffs.push({ type: 'insert', index: at + i, ...item });
+      inserted.push(item);
+    }
+    if (inserted.length) oldArr = oldArr.slice(0, at).concat(inserted, oldArr.slice(at));
+    this.values.set(key, oldArr);
 
     for (const diff of diffs) {
       this.sendAction(key, "list", diff);
