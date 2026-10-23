@@ -287,6 +287,11 @@ export function mountPlayer(
       void root
         .requestFullscreen()
         .catch(() => showError("전체화면으로 바꾸지 못했습니다"));
+      // Lock within the same click so Chromium keeps Escape for the work; a pending lock taken first can hold fullscreen back.
+      const keyboard = (navigator as Navigator & { keyboard?: { lock?(keys: string[]): Promise<void> } }).keyboard;
+      if (grabEscape && keyboard?.lock) {
+        keyboard.lock(["Escape"]).catch((error) => console.warn("[tessvm] 전체화면에서 Esc 를 잡지 못했습니다", error));
+      }
     }
   };
 
