@@ -120,7 +120,7 @@ test('실행기 단추는 한 번 누르면 켜지고 다시 누르면 꺼진다
 
   popup.click('enabled');
   assert.equal(popup.on(), true);
-  assert.equal(popup.find('state').textContent, 'entropy로 실행 중');
+  assert.equal(popup.find('state').textContent, 'Entropy로 실행 중');
   assert.deepEqual(popup.written, [
     ['enabled', false],
     ['enabled', true],

@@ -19,7 +19,7 @@ const note = document.getElementById('note') as HTMLElement;
 
 const TEXT = {
   on: {
-    state: 'entropy로 실행 중',
+    state: 'Entropy로 실행 중',
     note: ['작품 페이지의 실행 화면을 Entropy가 대신합니다.', '눌러서 끌 수 있습니다.'],
   },
   off: {
