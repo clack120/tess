@@ -13,8 +13,9 @@ export class EntryTranslator implements Translator {
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       return response.ok ? ((await response.json()) as Record<string, unknown>) : {};
-    } catch {
+    } catch (error) {
       // Return the block's default after refusal, network failure, or timeout.
+      console.warn('[tessvm] 번역·언어 감지 요청이 실패해 기본값을 씁니다', error);
       return {};
     }
   }

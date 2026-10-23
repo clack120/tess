@@ -20,7 +20,9 @@ export function buildMask(
   ctx.drawImage(source, 0, 0, width, height);
   try {
     return maskFromPixels(ctx.getImageData(0, 0, width, height).data, width, height);
-  } catch {
+  } catch (error) {
+    // A cross-origin image taints the canvas, so collisions fall back to the bounding box.
+    console.warn('[tessvm] 모양의 충돌 영역을 읽지 못해 사각형으로 판정합니다', error);
     return null;
   }
 }

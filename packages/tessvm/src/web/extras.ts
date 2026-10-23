@@ -393,7 +393,7 @@ export function bindExtras(
           copyAlways = allowed;
         }
         if (allowed) {
-          void write(text).catch(() => undefined);
+          void write(text).catch((error) => console.warn('[tessvm] 클립보드에 복사하지 못했습니다', error));
         }
       },
     });

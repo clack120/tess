@@ -292,8 +292,8 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     // Start both preloads regardless of whether the caller waits for them.
     const costumes = renderer
       .preload(vm.targets, vm.currentSceneId, arrived)
-      .catch(() => undefined);
-    const files = audio.preload(sounds, 6, arrived).catch(() => undefined);
+      .catch((error) => console.warn('[tessvm] 모양을 미리 받지 못했습니다', error));
+    const files = audio.preload(sounds, 6, arrived).catch((error) => console.warn('[tessvm] 소리를 미리 받지 못했습니다', error));
     if (waitForAssets) {
       await wait(Promise.all([costumes, files]));
     }

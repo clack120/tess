@@ -150,7 +150,10 @@ clearButton.hidden = true;
 clearAll.replaceWith(clearButton);
 
 async function paintSaves(): Promise<void> {
-  const rows = await listWorks().catch(() => []);
+  const rows = await listWorks().catch((error) => {
+    console.warn('[tessvm] 저장된 작품 목록을 읽지 못했습니다', error);
+    return [];
+  });
   saves.replaceChildren(...rows.map((row) => saveRow(row, () => void paintSaves())));
   savesEmpty.hidden = rows.length > 0;
   clearButton.hidden = rows.length === 0;

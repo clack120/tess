@@ -43,7 +43,8 @@ export function attachJsKernel(
   try {
     const factory = new Function('R', plan.javascript) as (ops: unknown) => Record<string, unknown>;
     built = factory(kernelOps(cells, marks));
-  } catch {
+  } catch (error) {
+    console.warn('[tessvm] 숫자 커널을 만들지 못해 일반 실행으로 돌립니다', error);
     return null;
   }
   const entries = new Map<number, KernelFn>();

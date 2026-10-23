@@ -22,15 +22,17 @@ export function localVariableStore(projectKey: string): VariableStore | null {
       try {
         const text = backing.getItem(keyOf(id));
         return text === null ? undefined : (JSON.parse(text) as Stored);
-      } catch {
+      } catch (error) {
+        console.warn('[tessvm] 저장된 변수 값을 읽지 못했습니다', id, error);
         return undefined;
       }
     },
     write(id, value) {
       try {
         backing.setItem(keyOf(id), JSON.stringify(value));
-      } catch {
+      } catch (error) {
         // Keep running with in-memory values when storage is full or refused.
+        console.warn('[tessvm] 변수 값을 저장하지 못했습니다', id, error);
       }
     },
   };

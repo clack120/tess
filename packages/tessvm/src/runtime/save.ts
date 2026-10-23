@@ -51,7 +51,10 @@ export class SaveStore {
     if (!this.host || !this.used) {
       return;
     }
-    this.values = await this.host.read().catch(() => ({}));
+    this.values = await this.host.read().catch((error) => {
+      console.warn('[tessvm] 저장된 값을 읽지 못했습니다', error);
+      return {};
+    });
     this.apply();
   }
 
@@ -71,7 +74,7 @@ export class SaveStore {
         : variable.getValue();
     }
     this.values = values;
-    await this.host.write(values).catch(() => undefined);
+    await this.host.write(values).catch((error) => console.warn('[tessvm] 값을 저장하지 못했습니다', error));
   }
 
   private apply(): void {
@@ -126,7 +129,8 @@ export function functionName(content: unknown): string {
 function safeParse(text: string): unknown {
   try {
     return JSON.parse(text);
-  } catch {
+  } catch (error) {
+    console.warn('[tessvm] 저장된 값이 깨져 있어 빈 목록으로 읽습니다', error);
     return [];
   }
 }

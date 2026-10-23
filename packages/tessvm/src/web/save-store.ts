@@ -28,7 +28,8 @@ export function dexieSaveStore(work: string): SaveHost | null {
   }
   try {
     database ??= new SaveDatabase();
-  } catch {
+  } catch (error) {
+    console.warn('[tessvm] 저장소를 열지 못해 저장 기능을 끕니다', error);
     return null;
   }
   const open = database;
