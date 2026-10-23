@@ -13,6 +13,7 @@ import { RuntimeDiagnostics } from './diagnostics.ts';
 import { mountDiagnostics } from './diagnostics-view.ts';
 
 export interface BootOptions {
+  signal?: AbortSignal;
   projectUrl?: string;
   project?: EntryProjectLike;
   container?: HTMLElement;
@@ -178,10 +179,24 @@ function storeKey(project: EntryProjectLike): string {
 }
 
 export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
+  const signal = options.signal;
+  signal?.throwIfAborted();
+  const wait = async <T>(job: Promise<T>): Promise<T> => {
+    if (!signal) return job;
+    signal.throwIfAborted();
+    let abort: () => void = () => {};
+    try {
+      return await Promise.race([job, new Promise<never>((_, reject) => {
+        abort = () => reject(signal.reason);
+        signal.addEventListener('abort', abort, { once: true });
+      })]);
+    } finally { signal.removeEventListener('abort', abort); }
+  };
   const container = options.container ?? document.body;
   const project =
     options.project ??
-    ((await (await fetch(options.projectUrl ?? '/project.json')).json()) as EntryProjectLike);
+    ((await (await fetch(options.projectUrl ?? '/project.json', { signal })).json()) as EntryProjectLike);
+  signal?.throwIfAborted();
 
   if (options.stageWidth && options.stageHeight) {
     setStageSize(options.stageWidth, options.stageHeight);
@@ -202,234 +217,246 @@ export async function boot(options: BootOptions = {}): Promise<TessVmHandle> {
     svg: options.svg ?? true,
     boost,
   });
-  await renderer.init();
-
-  const audio = new WebAudioEngine();
-  const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop';
-  const vm = new Vm({
-    renderer,
-    audio,
-    speech: new EntryTtsEngine(),
-    translator: new EntryTranslator(),
-    fps: options.fps,
-    boost,
-    touch,
-    deviceType,
-    user: options.user,
-    tableColumnName: options.tableColumnName,
-    store: options.store === null ? null : (options.store ?? localVariableStore(storeKey(project))),
-    kernel: options.kernel !== false,
-  });
-
-  vm.load(project);
-  if (options.scene) vm.setStartScene(options.scene);
-  // Restore saved values before the work starts on every run.
-  vm.save.host = options.saveStore === null ? null : (options.saveStore ?? dexieSaveStore(storeKey(project)));
-  await vm.save.load();
-  renderer.overlayView?.bind({
-    variables: vm.variables,
-    ownerName: (objectId) => vm.targetOf(objectId)?.name ?? null,
-    ownerScene: (objectId) => vm.targetOf(objectId)?.sceneId ?? null,
-    answer: () => vm.answer,
-    answerVisible: () => vm.answerVisible,
-    timer: () => vm.timerValue(),
-    timerVisible: () => vm.timerVisible,
-    scene: () => vm.currentSceneId,
-  });
-  // Wait for assets by default; opting out allows missing costumes and late sound loads during execution.
-  const sounds = vm.targets.flatMap((target) => target.sounds);
-  const waitForAssets = options.waitForAssets ?? true;
-  const total = PixiRenderer.costumeCount(vm.targets) + sounds.length;
-  let loaded = 0;
-  const arrived = () => {
-    loaded += 1;
-    options.onProgress?.(loaded, total);
-  };
-  options.onProgress?.(0, total);
-  // Start both preloads regardless of whether the caller waits for them.
-  const costumes = renderer
-    .preload(vm.targets, vm.currentSceneId, arrived)
-    .catch(() => undefined);
-  const files = audio.preload(sounds, 6, arrived).catch(() => undefined);
-  if (waitForAssets) {
-    await Promise.all([costumes, files]);
-  }
-  // Paint the idle stage, then remeasure text after web fonts finish loading.
-  renderer.flush();
-  void renderer.waitForFonts();
-
-  const question = makeQuestionField(frame, (value) => {
-    vm.pendingAnswer = value;
-  });
-  const originalShow = renderer.showQuestion.bind(renderer);
-  renderer.showQuestion = (text: string) => {
-    originalShow(text);
-    question.show();
-  };
-  const originalHide = renderer.hideQuestion.bind(renderer);
-  renderer.hideQuestion = () => {
-    originalHide();
-    question.hide();
-  };
-
-  // Charts use HTML windows; ordinary tables stay on the canvas.
-  const chartWindow = mountChartWindow(frame, () => vm.openTable(null));
-  const originalTable = renderer.showTable.bind(renderer);
-  renderer.showTable = (table, chart = null) => {
-    originalTable(table, chart);
-    if (table && chart !== null && table.charts?.[chart]) {
-      chartWindow.show(table, chart);
-    } else {
-      chartWindow.hide();
-    }
-  };
+  try { await renderer.init(); }
+  catch (error) { renderer.destroy(); view.remove(); throw error; }
 
   const cleanups: Array<() => void> = [];
-  const extras = bindExtras(vm, renderer, frame, view, cleanups);
-  cleanups.push(() => extras.dispose());
-  const syncCursor = bindInput(
-    vm,
-    renderer,
-    view,
-    options.keyTarget ?? window,
-    cleanups,
-    extras.cursor,
-  );
-
-  // Skip unchanged sizes and defer layout writes to avoid a ResizeObserver feedback loop.
-  let lastWidth = 0;
-  let lastHeight = 0;
-  const layout = (force: boolean) => {
-    const width = view.clientWidth || stage.worldWidth;
-    const height = view.clientHeight || stage.worldHeight;
-    if (!force && width === lastWidth && height === lastHeight) {
-      return;
-    }
-    lastWidth = width;
-    lastHeight = height;
-    const fitted = renderer.layout(width, height);
-    if (fitted) {
-      frame.style.setProperty('--tessvm-stage-width', `${fitted.width}px`);
-    }
+  let disposed = false;
+  let handle: TessVmHandle | undefined;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    signal?.removeEventListener('abort', dispose);
+    for (const undo of cleanups.splice(0).reverse()) undo();
+    renderer.destroy();
+    view.remove();
+    const exposed = window as unknown as { tessvm?: TessVmHandle };
+    if (handle && exposed.tessvm === handle) delete exposed.tessvm;
   };
-  const resize = () => layout(true);
-  let queued = 0;
-  const layoutSoon = () => {
-    if (queued) {
-      return;
-    }
-    queued = requestAnimationFrame(() => {
-      queued = 0;
-      layout(false);
+  signal?.addEventListener('abort', dispose, { once: true });
+  try {
+    signal?.throwIfAborted();
+
+    const audio = new WebAudioEngine();
+    cleanups.push(() => audio.close());
+    const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop';
+    const vm = new Vm({
+      renderer,
+      audio,
+      speech: new EntryTtsEngine(),
+      translator: new EntryTranslator(),
+      fps: options.fps,
+      boost,
+      touch,
+      deviceType,
+      user: options.user,
+      tableColumnName: options.tableColumnName,
+      store: options.store === null ? null : (options.store ?? localVariableStore(storeKey(project))),
+      kernel: options.kernel !== false,
     });
-  };
-  resize();
-  window.addEventListener('resize', resize);
-  cleanups.push(() => window.removeEventListener('resize', resize));
-  if (typeof ResizeObserver !== 'undefined') {
-    const observer = new ResizeObserver(layoutSoon);
-    observer.observe(view);
-    cleanups.push(() => observer.disconnect());
-  }
+    cleanups.push(() => vm.stop());
 
-  const stats = options.showStats ? makeStats(frame) : null;
-  const diagnostics = new RuntimeDiagnostics(vm);
-  for (const type of ['focus', 'blur', 'focusin']) {
-    const listener = () => diagnostics.recordFocus(type);
-    window.addEventListener(type, listener);
-    cleanups.push(() => window.removeEventListener(type, listener));
-  }
-  const diagnosticView = mountDiagnostics(container, diagnostics, () => {
-    (options.keyTarget ?? view).focus({ preventScroll: true });
-  });
-  cleanups.push(() => diagnosticView.dispose());
-  let last = performance.now();
-  let frames = 0;
-  let accumulated = 0;
-
-  const step = (now: number) => {
-    // Stop and report uncaught frame failures instead of leaving a frozen canvas with a live driver.
-    const began = performance.now();
-    try {
-      vm.advance(now);
-    } catch (error) {
-      vm.fail(error);
+    vm.load(project);
+    if (options.scene) vm.setStartScene(options.scene);
+    // Restore saved values before the work starts on every run.
+    vm.save.host = options.saveStore === null ? null : (options.saveStore ?? dexieSaveStore(storeKey(project)));
+    await wait(vm.save.load());
+    renderer.overlayView?.bind({
+      variables: vm.variables,
+      ownerName: (objectId) => vm.targetOf(objectId)?.name ?? null,
+      ownerScene: (objectId) => vm.targetOf(objectId)?.sceneId ?? null,
+      answer: () => vm.answer,
+      answerVisible: () => vm.answerVisible,
+      timer: () => vm.timerValue(),
+      timerVisible: () => vm.timerVisible,
+      scene: () => vm.currentSceneId,
+    });
+    // Wait for assets by default; opting out allows missing costumes and late sound loads during execution.
+    const sounds = vm.targets.flatMap((target) => target.sounds);
+    const waitForAssets = options.waitForAssets ?? true;
+    const total = PixiRenderer.costumeCount(vm.targets) + sounds.length;
+    let loaded = 0;
+    const arrived = () => {
+      loaded += 1;
+      options.onProgress?.(loaded, total);
+    };
+    options.onProgress?.(0, total);
+    // Start both preloads regardless of whether the caller waits for them.
+    const costumes = renderer
+      .preload(vm.targets, vm.currentSceneId, arrived)
+      .catch(() => undefined);
+    const files = audio.preload(sounds, 6, arrived).catch(() => undefined);
+    if (waitForAssets) {
+      await wait(Promise.all([costumes, files]));
     }
-    diagnostics.record(now, performance.now() - began);
-    syncCursor();
-    chartWindow.sync();
-    if (stats) {
-      frames += 1;
-      accumulated += now - last;
-      last = now;
-      if (accumulated >= 500) {
-        stats.textContent =
-          `${Math.round((frames * 1000) / accumulated)} fps · ${vm.frame} tick` +
-          ` · ${vm.frameRate}Hz · ${stage.width}×${stage.height}`;
-        frames = 0;
-        accumulated = 0;
-      }
-    }
-  };
-  const stopFrames = startFrameDriver(step);
+    // Paint the idle stage, then remeasure text after web fonts finish loading.
+    renderer.flush();
+    void renderer.waitForFonts();
 
-  const handle: TessVmHandle = {
-    vm,
-    renderer,
-    audio,
-    stage,
-    defaultBoost: boost,
-    defaultTouch: touch,
-    defaultDeviceType: deviceType,
-    defaultUser: vm.user,
-    start: () => {
-      // Focus the player before it starts so keyboard input can reach the work.
-      (options.keyTarget ?? view).focus?.({ preventScroll: true });
-      vm.start();
-    },
-    stop: () => {
-      vm.stop();
-      vm.reset();
-      renderer.flush();
-    },
-    pause: () => vm.pause(),
-    inspect: () => diagnosticView.open(),
-    downloadDiagnostics: () => diagnosticView.download(),
-    relayout: resize,
-    setStageSize(width: number, height: number) {
-      setStageSize(width, height);
-      renderer.applyStageSize();
-      for (const target of vm.targets) {
-        target.forEachEntity((entity) => {
-          entity.touch();
-        });
+    const question = makeQuestionField(frame, (value) => {
+      vm.pendingAnswer = value;
+    });
+    const originalShow = renderer.showQuestion.bind(renderer);
+    renderer.showQuestion = (text: string) => {
+      originalShow(text);
+      question.show();
+    };
+    const originalHide = renderer.hideQuestion.bind(renderer);
+    renderer.hideQuestion = () => {
+      originalHide();
+      question.hide();
+    };
+
+    // Charts use HTML windows; ordinary tables stay on the canvas.
+    const chartWindow = mountChartWindow(frame, () => vm.openTable(null));
+    cleanups.push(() => chartWindow.dispose());
+    const originalTable = renderer.showTable.bind(renderer);
+    renderer.showTable = (table, chart = null) => {
+      originalTable(table, chart);
+      if (table && chart !== null && table.charts?.[chart]) {
+        chartWindow.show(table, chart);
+      } else {
+        chartWindow.hide();
       }
-      resize();
-      renderer.flush();
-    },
-    dispose() {
-      stopFrames();
+    };
+
+    const extras = bindExtras(vm, renderer, frame, view, cleanups);
+    cleanups.push(() => extras.dispose());
+    const syncCursor = bindInput(
+      vm,
+      renderer,
+      view,
+      options.keyTarget ?? window,
+      cleanups,
+      extras.cursor,
+    );
+
+    // Skip unchanged sizes and defer layout writes to avoid a ResizeObserver feedback loop.
+    let lastWidth = 0;
+    let lastHeight = 0;
+    const layout = (force: boolean) => {
+      const width = view.clientWidth || stage.worldWidth;
+      const height = view.clientHeight || stage.worldHeight;
+      if (!force && width === lastWidth && height === lastHeight) {
+        return;
+      }
+      lastWidth = width;
+      lastHeight = height;
+      const fitted = renderer.layout(width, height);
+      if (fitted) {
+        frame.style.setProperty('--tessvm-stage-width', `${fitted.width}px`);
+      }
+    };
+    const resize = () => layout(true);
+    let queued = 0;
+    cleanups.push(() => { if (queued) cancelAnimationFrame(queued); });
+    const layoutSoon = () => {
       if (queued) {
-        cancelAnimationFrame(queued);
+        return;
+      }
+      queued = requestAnimationFrame(() => {
         queued = 0;
-      }
-      for (const undo of cleanups.splice(0)) {
-        undo();
-      }
-      vm.stop();
-      audio.close();
-      chartWindow.dispose();
-      renderer.destroy();
-      view.remove();
-    },
-  };
+        layout(false);
+      });
+    };
+    resize();
+    window.addEventListener('resize', resize);
+    cleanups.push(() => window.removeEventListener('resize', resize));
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(layoutSoon);
+      observer.observe(view);
+      cleanups.push(() => observer.disconnect());
+    }
 
-  if (options.autoStart) {
-    vm.start();
+    const stats = options.showStats ? makeStats(frame) : null;
+    const diagnostics = new RuntimeDiagnostics(vm);
+    for (const type of ['focus', 'blur', 'focusin']) {
+      const listener = () => diagnostics.recordFocus(type);
+      window.addEventListener(type, listener);
+      cleanups.push(() => window.removeEventListener(type, listener));
+    }
+    const diagnosticView = mountDiagnostics(container, diagnostics, () => {
+      (options.keyTarget ?? view).focus({ preventScroll: true });
+    });
+    cleanups.push(() => diagnosticView.dispose());
+    let last = performance.now();
+    let frames = 0;
+    let accumulated = 0;
+
+    const step = (now: number) => {
+      // Stop and report uncaught frame failures instead of leaving a frozen canvas with a live driver.
+      const began = performance.now();
+      try {
+        vm.advance(now);
+      } catch (error) {
+        vm.fail(error);
+      }
+      diagnostics.record(now, performance.now() - began);
+      syncCursor();
+      chartWindow.sync();
+      if (stats) {
+        frames += 1;
+        accumulated += now - last;
+        last = now;
+        if (accumulated >= 500) {
+          stats.textContent =
+            `${Math.round((frames * 1000) / accumulated)} fps · ${vm.frame} tick` +
+            ` · ${vm.frameRate}Hz · ${stage.width}×${stage.height}`;
+          frames = 0;
+          accumulated = 0;
+        }
+      }
+    };
+    const stopFrames = startFrameDriver(step);
+    cleanups.push(stopFrames);
+
+    handle = {
+      vm,
+      renderer,
+      audio,
+      stage,
+      defaultBoost: boost,
+      defaultTouch: touch,
+      defaultDeviceType: deviceType,
+      defaultUser: vm.user,
+      start: () => {
+        // Focus the player before it starts so keyboard input can reach the work.
+        (options.keyTarget ?? view).focus?.({ preventScroll: true });
+        vm.start();
+      },
+      stop: () => {
+        vm.stop();
+        vm.reset();
+        renderer.flush();
+      },
+      pause: () => vm.pause(),
+      inspect: () => diagnosticView.open(),
+      downloadDiagnostics: () => diagnosticView.download(),
+      relayout: resize,
+      setStageSize(width: number, height: number) {
+        setStageSize(width, height);
+        renderer.applyStageSize();
+        for (const target of vm.targets) {
+          target.forEachEntity((entity) => {
+            entity.touch();
+          });
+        }
+        resize();
+        renderer.flush();
+      },
+      dispose,
+    };
+
+    if (options.autoStart) {
+      vm.start();
+    }
+    (window as unknown as { tessvm: TessVmHandle }).tessvm = handle;
+    return handle;
+  } catch (error) {
+    dispose();
+    throw error;
   }
-  (window as unknown as { tessvm: TessVmHandle }).tessvm = handle;
-  return handle;
 }
 
 const MODIFIER_KEY_CODES = new Set([16, 17, 18]);

@@ -254,7 +254,8 @@ for (const entry of CLASSIC_ENTRIES) {
 }
 execFileSync(process.execPath, ['build', path.join(SRC, 'background.ts'), '--target=browser',
   '--format=iife', '--minify', `--outfile=${path.join(DIST, 'background.js')}`]);
-copyVendor(path.join(ROOT, '../tessvm/package.json'), 'pixi.js', 'dist/pixi.min.mjs', PIXI_OUT);
+execFileSync(process.execPath, ['build', path.join(packageDir(path.join(ROOT, '../tessvm/package.json'), 'pixi.js'),
+  'dist/pixi.mjs'), '--target=browser', '--format=esm', '--minify', `--outfile=${PIXI_OUT}`]);
 copyVendor(
   path.join(ROOT, '../tessvm/package.json'),
   'dexie',

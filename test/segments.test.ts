@@ -51,3 +51,24 @@ test('점이 모자란 획은 건너뛰고 세지 않는다', () => {
 test('사각형마다 삼각형 두 개가 같은 차례로 나온다', () => {
   assert.deepEqual([...quadIndices(2)], [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]);
 });
+
+test('segment meshes release their private geometry and buffers when resized or removed', async () => {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(new URL('../packages/tessvm/package.json', import.meta.url));
+  const { Container } = await import(require.resolve('pixi.js'));
+  const { SegmentBatch } = await import('../packages/tessvm/src/render/segments.ts');
+  const parent = new Container();
+  const batch = new SegmentBatch(parent);
+  const strokes = Array.from({ length: 600 }, (_, i) => line([i, 0, i + 1, 0]));
+  batch.set(strokes, 0, 20, 1, 0, 1);
+  const first = parent.children[0].geometry;
+  const firstBuffers = first.buffers.slice();
+  batch.set(strokes, 0, 600, 1, 0, 1);
+  assert.equal(first.buffers, null);
+  assert.equal(firstBuffers.every((buffer: any) => buffer.destroyed), true);
+  const last = parent.children[0].geometry;
+  const lastBuffers = last.buffers.slice();
+  parent.destroy({ children: true });
+  assert.equal(last.buffers, null);
+  assert.equal(lastBuffers.every((buffer: any) => buffer.destroyed), true);
+});

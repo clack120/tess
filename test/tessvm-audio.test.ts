@@ -86,6 +86,7 @@ function fakeAudio() {
 function loadEngine(context: unknown) {
   const source = stripTypes(fs.readFileSync(path.join(root, 'packages/tessvm/src/audio/sound.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = {
+    AbortController,
     AudioContext: function AudioContext() { return context; },
     fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) }),
   };

@@ -11,6 +11,7 @@ export class CloudClient implements VariableStore {
   private tessIdToEntryId: Map<string, string>;
   private entryIdToTessId: Map<string, string>;
   private variableMongoIds: Map<string, string>;
+  private readonly controller = new AbortController();
 
   constructor(
     projectId: string,
@@ -41,10 +42,12 @@ export class CloudClient implements VariableStore {
   }
 
   async connect() {
+    if (this.controller.signal.aborted || this.ws) return;
     try {
       const response = await fetch("https://playentry.org/graphql/GET_CLOUD_SERVER_INFO", {
         method: "POST",
         credentials: "include",
+        signal: this.controller.signal,
         headers: {
           "content-type": "application/json",
           "csrf-token": this.csrfToken
@@ -62,6 +65,7 @@ export class CloudClient implements VariableStore {
         })
       });
       const data = await response.json();
+      if (this.controller.signal.aborted) return;
       const info = data?.data?.cloudServerInfo;
       if (!info || !info.url || !info.query) return;
       
@@ -85,6 +89,7 @@ export class CloudClient implements VariableStore {
           this.ws?.send('40');
 
           if (packet.pingInterval) {
+            clearInterval(this.pingTimer);
             this.pingTimer = window.setInterval(() => {
               if (this.ws?.readyState === WebSocket.OPEN) {
                 this.ws.send('2');
@@ -121,7 +126,7 @@ export class CloudClient implements VariableStore {
         clearInterval(this.pingTimer);
       };
     } catch (e) {
-      console.warn("Cloud connect error", e);
+      if (!this.controller.signal.aborted) console.warn("Cloud connect error", e);
     }
   }
 
@@ -258,8 +263,13 @@ export class CloudClient implements VariableStore {
   }
 
   dispose() {
+    this.controller.abort();
     clearInterval(this.pingTimer);
+    this.onRemoteChange = undefined;
     if (this.ws) {
+      this.ws.onmessage = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
       this.ws.close();
       this.ws = null;
     }

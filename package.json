@@ -40,5 +40,8 @@
     "typescript": "^7.0.2",
     "vscode-oniguruma": "^2.0.1",
     "vscode-textmate": "^9.3.2"
+  },
+  "patchedDependencies": {
+    "pixi.js@8.22.0": "patches/pixi.js@8.22.0.patch"
   }
 }

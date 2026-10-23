@@ -236,7 +236,7 @@ export class Overlay {
     const table = this.openTable;
     if (!table) {
       if (this.tableView) {
-        this.tableView.root.destroy({ children: true });
+        this.tableView.root.destroy({ children: true, context: true });
         this.tableView = null;
       }
       return;
@@ -363,16 +363,16 @@ export class Overlay {
     this.drawTable();
     this.scrolled.clear();
     for (const view of this.dialogs.values()) {
-      view.root.destroy({ children: true });
+      view.root.destroy({ children: true, context: true });
     }
     this.dialogs.clear();
     for (const view of this.monitors.values()) {
-      view.root.destroy({ children: true });
+      view.root.destroy({ children: true, context: true });
     }
     this.monitors.clear();
-    this.answerMonitor?.root.destroy({ children: true });
+    this.answerMonitor?.root.destroy({ children: true, context: true });
     this.answerMonitor = null;
-    this.timerMonitor?.root.destroy({ children: true });
+    this.timerMonitor?.root.destroy({ children: true, context: true });
     this.timerMonitor = null;
   }
 
@@ -382,7 +382,7 @@ export class Overlay {
     if (!view) {
       return;
     }
-    view.root.destroy({ children: true });
+    view.root.destroy({ children: true, context: true });
     this.dialogs.delete(entity);
   }
 
@@ -391,7 +391,7 @@ export class Overlay {
     const existing = this.dialogs.get(entity);
     if (!state) {
       if (existing) {
-        existing.root.destroy({ children: true });
+        existing.root.destroy({ children: true, context: true });
         this.dialogs.delete(entity);
       }
       return;
