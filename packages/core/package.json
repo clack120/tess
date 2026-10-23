@@ -1,7 +1,7 @@
 {
-  "name": "@tess/core",
+  "name": "@entropy/core",
   "version": "0.3.53",
-  "description": "Tess 언어용 공용 정의",
+  "description": "Entropy 언어용 공용 정의",
   "license": "MIT",
   "type": "module",
   "main": "index.ts",

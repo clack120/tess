@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
-import { playerPage, findPreactDir } from '@tess/player';
-import { compileProject } from '@tess/compiler';
-import { stripTypes } from '@tess/core/strip-types';
+import { playerPage, findPreactDir } from '@entropy/player';
+import { compileProject } from '@entropy/compiler';
+import { stripTypes } from '@entropy/core/strip-types';
 
 // bun's vm gives jsdom a window that is not its own global, so window.addEventListener throws there.
 const test = 'Bun' in globalThis ? nodeTest.skip : nodeTest;
@@ -106,8 +106,8 @@ async function mountDebugPanel(t: any) {
     addEventListener: (name: string, fn: any) => { (listeners[name] = listeners[name] || []).push(fn); },
     dispatchEvent: (name: string, ...args: any[]) => (listeners[name] || []).forEach((fn) => fn(...args)),
   };
-  window.tessDebugSink = (fn: any) => { window.__sink = fn; };
-  window.tessReportError = (kind: string, error: any) => window.__sink({
+  window.entropyDebugSink = (fn: any) => { window.__sink = fn; };
+  window.entropyReportError = (kind: string, error: any) => window.__sink({
     kind: String(kind), message: String(error && error.message), stack: '', time: Date.now(),
   });
   window.fetch = () => Promise.resolve({ json: () => Promise.resolve({}) });
@@ -219,7 +219,7 @@ test('실행 상태에 따라 버튼과 안내 글이 바뀐다', async (t) => {
 test('부스트 모드 · 기기 · 터치를 디버그 창에서 정한 값으로 바꿔치기한다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessPatchEnvironmentBlocks();
+  ui.window.entropyPatchEnvironmentBlocks();
   const askMobile = { getField: () => 'mobile' };
 
   assert.equal(ui.blocks.is_boost_mode.func(), '실제부스트');
@@ -281,7 +281,7 @@ const functionProject = {
 test('자료 탭에서 변수의 지금 값 · 신호 · 함수를 볼 수 있다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug(dataProject);
+  ui.window.entropyRenderProjectDebug(dataProject);
   ui.tab('data');
   await ui.settle();
 
@@ -299,7 +299,7 @@ test('자료 탭에서 변수의 지금 값 · 신호 · 함수를 볼 수 있�
 });
 
 async function openData(ui: any, project = dataProject) {
-  ui.window.tessRenderProjectDebug(project);
+  ui.window.entropyRenderProjectDebug(project);
   ui.tab('data');
   await ui.settle();
   return ui.byId('var-list');
@@ -464,7 +464,7 @@ test('리스트가 길어도 펼친 높이에는 한계가 있다', () => {
 test('함수 이름을 누르면 그 함수의 블록이 펼쳐진다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug(functionProject);
+  ui.window.entropyRenderProjectDebug(functionProject);
   ui.tab('data');
   await ui.settle();
 
@@ -486,7 +486,7 @@ test('함수 이름을 누르면 그 함수의 블록이 펼쳐진다', async (t
 test('자료 탭의 신호를 눌러서 바로 보낼 수 있다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug(dataProject);
+  ui.window.entropyRenderProjectDebug(dataProject);
   ui.tab('data');
   await ui.settle();
 
@@ -498,7 +498,7 @@ test('자료 탭의 신호를 눌러서 바로 보낼 수 있다', async (t) => 
 test('오브젝트 정보에 좌표 · 크기 · 방향 · 모양이 나온다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug(dataProject);
+  ui.window.entropyRenderProjectDebug(dataProject);
   ui.tab('objects');
   await ui.settle();
 
@@ -520,7 +520,7 @@ test('오브젝트 정보에 좌표 · 크기 · 방향 · 모양이 나온다',
 test('모양·회전 방식을 드롭다운으로 바꾸고 보이기를 토글한다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug(dataProject);
+  ui.window.entropyRenderProjectDebug(dataProject);
   ui.tab('objects');
   await ui.settle();
 
@@ -543,7 +543,7 @@ test('모양·회전 방식을 드롭다운으로 바꾸고 보이기를 토글�
 test('오브젝트 좌표를 눌러서 바로 옮길 수 있다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug(dataProject);
+  ui.window.entropyRenderProjectDebug(dataProject);
   ui.tab('objects');
   await ui.settle();
 
@@ -557,7 +557,7 @@ test('실행기가 아직 없으면 오브젝트 정보는 안내만 보여 준�
   const ui = await mountDebugPanel(t);
   await ui.settle();
   ui.window.Entry!.container = { getObject: () => null };
-  ui.window.tessRenderProjectDebug(dataProject);
+  ui.window.entropyRenderProjectDebug(dataProject);
   ui.tab('objects');
   await ui.settle();
   assert.match(ui.byId('object-info')!.textContent, /한 번 실행해 보세요/);
@@ -569,7 +569,7 @@ test('실행기가 오브젝트를 아직 모르면 안내만 보여 준다', as
   const labels = () => [...ui.byId('object-info')!.querySelectorAll('li')]
     .map((li) => li.querySelector('.key')?.textContent ?? '');
 
-  ui.window.tessRenderProjectDebug(dataProject);
+  ui.window.entropyRenderProjectDebug(dataProject);
   ui.tab('objects');
   await ui.settle();
   assert.ok(labels().length > 5, '실행기가 아는 오브젝트는 값 줄이 나온다');
@@ -586,7 +586,7 @@ test('글상자는 글 내용을 고칠 수 있고, 모양 줄은 내지 않는�
   await ui.settle();
   ui.entity.text = '점수: 0';
   ui.entity.setText = (value: any) => { ui.entity.text = value; };
-  ui.window.tessRenderProjectDebug(dataProject);
+  ui.window.entropyRenderProjectDebug(dataProject);
   ui.tab('objects');
   await ui.settle();
 
@@ -601,7 +601,7 @@ test('글상자는 글 내용을 고칠 수 있고, 모양 줄은 내지 않는�
 });
 
 async function openScenes(ui: any) {
-  ui.window.tessRenderProjectDebug({
+  ui.window.entropyRenderProjectDebug({
     ...dataProject,
     scenes: [{ id: 's1', name: '장면 1' }, { id: 's2', name: '장면 2' }],
   });
@@ -686,7 +686,7 @@ function withStage(ui: any, objects: any, current = objects) {
   ui.byId('workspace').append(canvas);
   ui.window.Entry.container.objects_ = objects;
   ui.window.Entry.container.getCurrentObjects = () => current;
-  ui.window.tessWatchStagePicks();
+  ui.window.entropyWatchStagePicks();
   return { canvas, center: { clientX: 340, clientY: 185 } };
 }
 
@@ -716,7 +716,7 @@ function stageActor(id: string, name: string, x = 0, y = 0) {
 test('고르기를 켜고 무대에 마우스를 대면 그 오브젝트가 디버거에서 열린다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug({
+  ui.window.entropyRenderProjectDebug({
     ...dataProject,
     objects: [
       { id: 'o0', name: '다른', scene: 's1', script: '[]' },
@@ -743,7 +743,7 @@ test('고르기를 켜고 무대에 마우스를 대면 그 오브젝트가 디�
 test('마우스를 옮길 때마다 그 자리의 오브젝트로 계속 따라간다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug({
+  ui.window.entropyRenderProjectDebug({
     ...dataProject,
     objects: [
       { id: 'o1', name: '치로', scene: 's1', script: '[]' },
@@ -768,7 +768,7 @@ test('마우스를 옮길 때마다 그 자리의 오브젝트로 계속 따라�
 test('누르면 그 오브젝트에 붙박고, 한 번 더 누르면 다시 따라간다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug({
+  ui.window.entropyRenderProjectDebug({
     ...dataProject,
     objects: [
       { id: 'o1', name: '치로', scene: 's1', script: '[]' },
@@ -802,7 +802,7 @@ test('누르면 그 오브젝트에 붙박고, 한 번 더 누르면 다시 따�
 test('고르기를 끄면 붙박은 것도 풀리고 무대를 놓아 준다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug({
+  ui.window.entropyRenderProjectDebug({
     ...dataProject,
     objects: [
       { id: 'o1', name: '치로', scene: 's1', script: '[]' },
@@ -835,7 +835,7 @@ test('고르기를 끄면 붙박은 것도 풀리고 무대를 놓아 준다', a
 test('모양이 비어 있는 큰 판은 그 밑의 오브젝트를 가리지 않는다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug({
+  ui.window.entropyRenderProjectDebug({
     ...dataProject,
     objects: [
       { id: 'o2', name: '덮개', scene: 's1', script: '[]' },
@@ -854,7 +854,7 @@ test('모양이 비어 있는 큰 판은 그 밑의 오브젝트를 가리지 �
 
   // Make the pixel-aware runtime reject the empty overlay at every point.
   const idle = () => undefined;
-  ui.window.tessRuntime = {
+  ui.window.entropyRuntime = {
     stageCanvas: () => canvas,
     stageSize: () => ({ width: 480, height: 270 }),
     currentObjects: () => objects,
@@ -875,7 +875,7 @@ test('모양이 비어 있는 큰 판은 그 밑의 오브젝트를 가리지 �
 test('픽셀로 답하지 못하는 실행기에서는 상자로 고른다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug({
+  ui.window.entropyRenderProjectDebug({
     ...dataProject,
     objects: [{ id: 'o1', name: '치로', scene: 's1', script: '[]' }],
   });
@@ -892,7 +892,7 @@ test('픽셀로 답하지 못하는 실행기에서는 상자로 고른다', asy
 test('그냥 누른 것은 디버거가 가로채지 않는다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug({
+  ui.window.entropyRenderProjectDebug({
     ...dataProject,
     objects: [
       { id: 'o0', name: '다른', scene: 's1', script: '[]' },
@@ -916,7 +916,7 @@ test('그냥 누른 것은 디버거가 가로채지 않는다', async (t) => {
 test('고르는 클릭은 무대까지 내려가지 않는다', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug(dataProject);
+  ui.window.entropyRenderProjectDebug(dataProject);
   ui.tab('objects');
   await ui.settle();
 
@@ -937,7 +937,7 @@ test('다른 장면의 오브젝트는 고르지 않는다', async (t) => {
   // Other scenes remain in memory, so picking must filter to the current scene.
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug({
+  ui.window.entropyRenderProjectDebug({
     ...dataProject,
     scenes: [{ id: 's1', name: '인트로' }, { id: 's2', name: '전투' }],
     objects: [
@@ -963,7 +963,7 @@ test('부스트 모드처럼 캔버스가 여럿이어도 무대에서 오브젝
   // PIXI helper canvases must not be mistaken for the visible stage.
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug(dataProject);
+  ui.window.entropyRenderProjectDebug(dataProject);
   await ui.settle();
 
   const doc = ui.window.document;
@@ -980,7 +980,7 @@ test('부스트 모드처럼 캔버스가 여럿이어도 무대에서 오브젝
   workspace!.append(decoy, stage);
 
   ui.window.Entry!.container.objects_ = [ui.stageObject];
-  ui.window.tessWatchStagePicks();
+  ui.window.entropyWatchStagePicks();
 
   ui.entity.x = 0;
   ui.entity.y = 0;
@@ -1056,7 +1056,7 @@ test('접어 둔 패널을 다시 열면 폭이 되살아난다', async (t) => {
 test('작품 안의 이름은 어떤 것도 태그가 되지 않는다 (XSS)', async (t) => {
   const ui = await mountDebugPanel(t);
   await ui.settle();
-  ui.window.tessRenderProjectDebug({
+  ui.window.entropyRenderProjectDebug({
     scenes: [{ id: 's1', name: '<img src=x onerror=window.PWNED=1>' }],
     objects: [{ id: 'o1', name: '<script>window.PWNED=1</script>', scene: 's1', script: '[]' }],
     variables: [{ id: 'v9', name: '<svg onload=window.PWNED=1>', value: '<b>굵게</b>' }],
@@ -1156,9 +1156,9 @@ test('실제 작품을 넣으면 네 탭이 모두 내용을 채운다', async (
   const ui = await mountDebugPanel(t);
   await ui.settle();
 
-  const file = path.join(root, 'examples/all_blocks.tess');
+  const file = path.join(root, 'examples/all_blocks.etp');
   const { project } = compileProject(fs.readFileSync(file, 'utf-8'), { path: file });
-  ui.window.tessRenderProjectDebug(project);
+  ui.window.entropyRenderProjectDebug(project);
   await ui.settle();
 
   const textOf = (id: string) => ui.byId(id)!.textContent.replace(/\s+/g, ' ');
@@ -1186,7 +1186,7 @@ test('실제 작품을 넣으면 네 탭이 모두 내용을 채운다', async (
   assert.match(objects, /스크립트 1/);
   assert.ok(ui.byId('block-tree')!.querySelectorAll('li').length > 20, '블록 트리가 펼쳐져야 한다');
 
-  ui.window.tessReportError('실행 오류', new Error('일부러 낸 오류'));
+  ui.window.entropyReportError('실행 오류', new Error('일부러 낸 오류'));
   await ui.settle();
   assert.match(textOf('tab-errors'), /일부러 낸 오류/);
   assert.equal(ui.window.document.querySelector('.debug-tab[aria-selected="true"]')!.dataset.tab, 'errors');

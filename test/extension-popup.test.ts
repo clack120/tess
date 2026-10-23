@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { stripTypes } from '@tess/core/strip-types';
+import { stripTypes } from '@entropy/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 
@@ -38,11 +38,11 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
     } },
     Intl: globalThis.Intl,
     listWorks: () => Promise.resolve(rows.slice()),
-    exportName: () => 'tessvm-save-2026-09-14.json',
+    exportName: () => 'entropy-save-2026-09-14.json',
     exportAll: () => Promise.resolve({ size: 884 }),
     importAll: (picked: { name?: string }) =>
       picked?.name === '남의것.json'
-        ? Promise.reject(new Error('tessvm 이 내보낸 파일이 아닙니다.'))
+        ? Promise.reject(new Error('entropy가 내보낸 파일이 아닙니다.'))
         : Promise.resolve(2),
     removeWork: (work: string) => {
       dropped.push(work);
@@ -57,7 +57,7 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
   };
   // Capture blob downloads because jsdom has no object-URL implementation.
   const downloads: string[] = [];
-  sandbox.URL = { createObjectURL: () => 'blob:tessvm', revokeObjectURL: () => undefined };
+  sandbox.URL = { createObjectURL: () => 'blob:entropy', revokeObjectURL: () => undefined };
   sandbox.setTimeout = (run: () => void, delay: number) =>
     dom.window.setTimeout(run, delay);
   dom.window.HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement) {
@@ -213,7 +213,7 @@ test('내보내기는 파일 하나를 받아 내리고 그렇게 알린다', as
   const popup = await mountPopup(t, {}, WORKS);
   popup.press(popup.find('export'));
   await popup.settle();
-  assert.deepEqual(popup.downloads, ['tessvm-save-2026-09-14.json']);
+  assert.deepEqual(popup.downloads, ['entropy-save-2026-09-14.json']);
   assert.match(popup.note().text, /내보냈습니다/);
   assert.equal(popup.note().bad, false);
 });
@@ -223,17 +223,17 @@ test('가져오기는 파일 칸을 열고, 읽어 들이면 목록을 다시 �
   assert.equal(popup.saves().length, 0);
 
   popup.press(popup.find('import'));
-  popup.pick('tessvm-save-2026-09-14.json');
+  popup.pick('entropy-save-2026-09-14.json');
   await popup.settle();
   assert.match(popup.note().text, /작품 2개를 가져왔습니다/);
   assert.equal(popup.note().bad, false);
 });
 
-test('tessvm 이 내보낸 파일이 아니면 그렇다고 알린다', async (t) => {
+test('entropy가 내보낸 파일이 아니면 그렇다고 알린다', async (t) => {
   const popup = await mountPopup(t, {}, WORKS);
   popup.pick('남의것.json');
   await popup.settle();
-  assert.match(popup.note().text, /tessvm 이 내보낸 파일이 아닙니다/);
+  assert.match(popup.note().text, /entropy가 내보낸 파일이 아닙니다/);
   assert.equal(popup.note().bad, true, '빨간 줄로 알립니다');
   assert.equal(popup.saves().length, 2, '목록은 그대로입니다');
 });

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject, verifyEntryProject } from '@tess/compiler';
-import { decompileProject } from '@tess/decompiler';
-import { Vm } from '@tess/vm';
+import { compileProject, verifyEntryProject } from '@entropy/compiler';
+import { decompileProject } from '@entropy/decompiler';
+import { Vm } from '@entropy/vm';
 
 function run(body: string, declarations = '', roundtrip = false) {
   const build = (source: string) => {

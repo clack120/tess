@@ -13,7 +13,7 @@ const textmate = textmateModule;
 
 const require = createRequire(import.meta.url);
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const grammarPath = path.join(root, 'editors', 'vscode', 'syntaxes', 'tess.tmLanguage.json');
+const grammarPath = path.join(root, 'editors', 'vscode', 'syntaxes', 'entropy.tmLanguage.json');
 
 let grammar: IGrammar | null;
 
@@ -26,11 +26,11 @@ test.before(async () => {
       createOnigScanner: (patterns) => new oniguruma.OnigScanner(patterns),
       createOnigString: (text) => new oniguruma.OnigString(text),
     }),
-    loadGrammar: async (scope) => (scope === 'source.tess'
+    loadGrammar: async (scope) => (scope === 'source.etp'
       ? textmate.parseRawGrammar(fs.readFileSync(grammarPath, 'utf-8'), grammarPath)
       : null),
   });
-  grammar = await registry.loadGrammar('source.tess');
+  grammar = await registry.loadGrammar('source.etp');
   assert.ok(grammar, '문법을 불러오지 못했습니다.');
 });
 
@@ -70,8 +70,8 @@ test('선언 키워드와 이름을 나눠 칠한다', () => {
   assert.match(scopeOf('function 점수_더하기(값):', '점수_더하기'), /^entity\.name\.function/);
   assert.match(scopeOf('var 점수 = 0', 'var'), /^keyword\.declaration/);
   assert.match(scopeOf('var 점수 = 0', '점수'), /^variable\.other/);
-  assert.match(scopeOf('useobject "objects/치로.tess"', 'useobject'), /^keyword\.declaration/);
-  assert.match(scopeOf('usetext "objects/판.tess"', 'usetext'), /^keyword\.declaration/);
+  assert.match(scopeOf('useobject "objects/치로.etp"', 'useobject'), /^keyword\.declaration/);
+  assert.match(scopeOf('usetext "objects/판.etp"', 'usetext'), /^keyword\.declaration/);
 });
 
 test('테이블 선언과 이름을 나눠 칠한다', () => {
@@ -138,7 +138,7 @@ test('구분 기호와 판단 매개변수 표시를 칠한다', () => {
 });
 
 test('예제 파일 전체를 토큰으로 쪼갤 수 있다', () => {
-  const source = fs.readFileSync(path.join(root, 'examples', 'all_blocks.tess'), 'utf-8');
+  const source = fs.readFileSync(path.join(root, 'examples', 'all_blocks.etp'), 'utf-8');
   let state = textmate.INITIAL;
   let colored = 0;
   for (const line of source.split('\n')) {

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findLocalRuntime } from '@tess/player';
+import { findLocalRuntime } from '@entropy/player';
 import { readTar } from './tar.ts';
 import { decompileProject } from './index.ts';
 import type { DecompileOptions, DecompileResult } from './types.ts';

@@ -52,7 +52,7 @@ export interface TableInfo {
 
 export interface FunctionLocal {
   name: string;
-  // Preserve display names with as when they differ from Tess identifiers.
+  // Preserve display names with as when they differ from Entropy identifiers.
   entryName: string;
   value: string | number;
 }

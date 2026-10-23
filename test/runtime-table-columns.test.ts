@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Vm } from '@tess/vm';
-import { columnIndex } from '../packages/tessvm/src/runtime/table.ts';
-import { RuntimeBlockError } from '../packages/tessvm/src/runtime/diagnostics.ts';
+import { Vm } from '@entropy/vm';
+import { columnIndex } from '../packages/vm/src/runtime/table.ts';
+import { RuntimeBlockError } from '../packages/vm/src/runtime/diagnostics.ts';
 
 function tableVm() {
   const vm = new Vm({ renderer: null, audio: null });

@@ -1,5 +1,5 @@
 // Read the signed-in viewer from the same Next.js page data Entry uses.
-import type { EntryUser } from '../../../tessvm/src/runtime/engine.ts';
+import type { EntryUser } from '../../../vm/src/runtime/engine.ts';
 
 const PAYLOAD_ID = '__NEXT_DATA__';
 
@@ -25,7 +25,7 @@ export function signedInUser(): EntryUser | null {
   try {
     data = JSON.parse(payload) as NextPayload;
   } catch (error) {
-    console.warn('[tessvm] 로그인 정보를 읽지 못해 비로그인으로 실행합니다', error);
+    console.warn('[entropy] 로그인 정보를 읽지 못해 비로그인으로 실행합니다', error);
     return null;
   }
   const user = data.props?.pageProps?.initialState?.common?.user;

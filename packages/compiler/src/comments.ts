@@ -1,5 +1,5 @@
-import { colorLiteralLength } from '@tess/core';
-import type { Node } from '@tess/parser';
+import { colorLiteralLength } from '@entropy/core';
+import type { Node } from '@entropy/parser';
 import type { EntryComment } from './types.ts';
 
 interface ScannedComment {

@@ -20,12 +20,12 @@ function changed(): void {
 }
 
 // Watch source directories because the build replaces dist.
-const watchers = ['src', '../tessvm/src', '../core/src'].map((dir) =>
+const watchers = ['src', '../vm/src', '../core/src'].map((dir) =>
   fs.watch(path.resolve(root, dir), { recursive: true }, changed),
 );
 for (const [dir, names] of [
   [root, ['build.ts', 'icons.ts', 'pack.ts', 'manifest.json', 'package.json']],
-  [path.resolve(root, '../tessvm'), ['package.json']],
+  [path.resolve(root, '../vm'), ['package.json']],
   [path.resolve(root, '../..'), ['package.json', 'bun.lock']],
 ] as const) {
   watchers.push(fs.watch(dir, (_event, name) => {

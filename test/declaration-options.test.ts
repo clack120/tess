@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parse } from '@tess/parser';
+import { parse } from '@entropy/parser';
 
 test('declaration assignments parse as statements', () => {
   const source = `function f():

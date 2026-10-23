@@ -2,7 +2,7 @@ import nodeTest from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { stripTypes } from '@tess/core/strip-types';
+import { stripTypes } from '@entropy/core/strip-types';
 
 // bun's vm gives jsdom a window that is not its own global, so window.addEventListener throws there.
 const test = 'Bun' in globalThis ? nodeTest.skip : nodeTest;
@@ -18,7 +18,7 @@ async function setup(t: any) {
   (w as any).readSettings = async () => ({ enabled: true, svg: true });
   (w as any).mountPlayer = (host: HTMLElement, id: string) => {
     const item = { id, disposed: false, host }; mounted.push(item);
-    const root = w.document.createElement('div'); root.className = 'tessvm-player'; host.append(root);
+    const root = w.document.createElement('div'); root.className = 'entropy-player'; host.append(root);
     return { dispose() { assert.equal(item.disposed, false); item.disposed = true; root.remove(); } };
   };
   // Deliver content-to-page messages in order without jsdom's missing event.source.
@@ -31,19 +31,19 @@ async function setup(t: any) {
   await settle();
   t.after(() => w.close());
   return { w, mounted, settle, settings, frame: w.document.querySelector('iframe')!,
-    scan: async () => { w.postMessage({ __tessvm: 'scan' }); await settle(); } };
+    scan: async () => { w.postMessage({ __entropy: 'scan' }); await settle(); } };
 }
 
 test('removing an Entry iframe removes its sibling host and stops its player before the next work', async t => {
   const { w, frame, mounted, settle } = await setup(t);
   assert.equal(mounted.length, 1);
   frame.remove(); await settle();
-  assert.equal(w.document.querySelectorAll('.tessvm-host').length, 0);
+  assert.equal(w.document.querySelectorAll('.entropy-host').length, 0);
   assert.equal(mounted[0]!.disposed, true);
   const next = w.document.createElement('iframe'); next.src = '/iframe/second';
   w.document.getElementById('wrap')!.append(next); await settle();
   assert.deepEqual(mounted.filter(item => !item.disposed).map(item => item.id), ['second']);
-  assert.equal(w.document.querySelectorAll('.tessvm-player').length, 1);
+  assert.equal(w.document.querySelectorAll('.entropy-player').length, 1);
 });
 
 test('reusing the same iframe for another work replaces its player and restores the latest original URL', async t => {
@@ -52,11 +52,11 @@ test('reusing the same iframe for another work replaces its player and restores 
     frame.src = '/iframe/' + id; await settle();
     assert.deepEqual(mounted.filter(item => !item.disposed).map(item => item.id), [id]);
     assert.equal(frame.getAttribute('src'), 'about:blank');
-    assert.equal(w.document.querySelectorAll('.tessvm-host').length, 1);
+    assert.equal(w.document.querySelectorAll('.entropy-host').length, 1);
   }
   settings({ enabled: { newValue: false } }, 'local'); await settle();
   assert.equal(frame.getAttribute('src'), '/iframe/second');
-  assert.equal(w.document.querySelectorAll('.tessvm-host').length, 0);
+  assert.equal(w.document.querySelectorAll('.entropy-host').length, 0);
   assert.equal(mounted.every(item => item.disposed), true);
   settings({ enabled: { newValue: true } }, 'local'); await settle();
   assert.deepEqual(mounted.filter(item => !item.disposed).map(item => item.id), ['second']);
@@ -68,7 +68,7 @@ test('detached and reinserted iframes are captured again and unrelated iframe UR
   frame.remove(); await settle(); wrap.append(frame); await settle();
   assert.deepEqual(mounted.filter(item => !item.disposed).map(item => item.id), ['first']);
   frame.src = '/other'; await settle();
-  assert.equal(w.document.querySelectorAll('.tessvm-host').length, 0);
+  assert.equal(w.document.querySelectorAll('.entropy-host').length, 0);
   assert.equal(mounted.every(item => item.disposed), true);
   assert.equal(frame.style.visibility, '');
   assert.equal(frame.getAttribute('src'), '/other');
@@ -76,8 +76,8 @@ test('detached and reinserted iframes are captured again and unrelated iframe UR
 
 test('the page runner replaces a host whose project metadata changes and ignores repeated scans', async t => {
   const { w, frame, mounted, scan } = await setup(t);
-  const host = w.document.querySelector<HTMLElement>('.tessvm-host')!;
-  host.dataset.tessvmProject = 'other'; await scan();
+  const host = w.document.querySelector<HTMLElement>('.entropy-host')!;
+  host.dataset.entropyProject = 'other'; await scan();
   assert.equal(mounted[0]!.disposed, true);
   assert.equal(mounted.at(-1)!.id, 'other');
   await scan(); assert.equal(mounted.length, 2);

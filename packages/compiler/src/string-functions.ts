@@ -39,7 +39,7 @@ export function requireStringHelper(kind: StringHelper, ctx: Context): CompiledF
   const number = (value: number) => ctx.number(value);
   const text = () => combine(ctx.text(''), param('text'));
   const resultId = ctx.newId();
-  ctx.variables.push({ id: resultId, name: `[Tess] ${kind} result`, value: '', visible: false,
+  ctx.variables.push({ id: resultId, name: `[Entropy] ${kind} result`, value: '', visible: false,
     variableType: 'variable', isCloud: false, isRealTime: false, cloudDate: false, object: null, x: 0, y: 0 });
   // Write the result after yielding loops so concurrent calls cannot overwrite working state.
   const finish = (value: EntryParam) => ctx.block('set_variable', [resultId, value, null]);
@@ -80,11 +80,11 @@ export function requireStringHelper(kind: StringHelper, ctx: Context): CompiledF
     body.push(choose(test, doubled, [finish(pad ? text() : ctx.text(''))]));
   }
   const field = ctx.block('function_field_label', [
-    `[Tess] ${kind}`,
+    `[Entropy] ${kind}`,
     params.reduceRight<EntryParam>((next, name) => ctx.block('function_field_string', [ctx.block(paramTypes.get(name)!, []), next]), null),
   ]);
   const create = ctx.block('function_create_value', [field, null, null, ctx.block('get_variable', [resultId, null])], [body]);
-  const fn: CompiledFunction = { id, name: `[Tess] ${kind}`, params, paramTypes, localVariables,
+  const fn: CompiledFunction = { id, name: `[Entropy] ${kind}`, params, paramTypes, localVariables,
     isValue: true, generated: true, type: 'value', content: [[create]] };
   ctx.functions.push(fn);
   ctx.runtimeFunctions.set(kind, fn);

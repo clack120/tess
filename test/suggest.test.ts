@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { editDistance, nearestName, didYouMean } from '@tess/core';
-import { compileProject } from '@tess/compiler';
-import { parse } from '@tess/parser';
+import { editDistance, nearestName, didYouMean } from '@entropy/core';
+import { compileProject } from '@entropy/compiler';
+import { parse } from '@entropy/parser';
 
 const object = (body: any) => `scene "s":\n  object "o":\n${body}\n  end\nend`;
-const firstError = (source: string) => compileProject(source, { path: 't.tess' }).errors[0]?.message ?? '';
-const firstNotice = (source: string) => compileProject(source, { path: 't.tess' }).notices[0]?.message ?? '';
+const firstError = (source: string) => compileProject(source, { path: 't.etp' }).errors[0]?.message ?? '';
+const firstNotice = (source: string) => compileProject(source, { path: 't.etp' }).notices[0]?.message ?? '';
 
 test('붙어 있는 두 글자가 바뀐 것은 한 번으로 센다', () => {
   // Count adjacent transpositions as one edit.
@@ -80,7 +80,7 @@ test('같은 오타를 에러와 경고로 두 번 읽히지 않는다', () => {
   // Suppress duplicate validation warnings when compilation already reports a precise error.
   const result = compileProject(
     object('    var 체력 = 3\n    when start do\n      체렄 = 5\n    end'),
-    { path: 't.tess' },
+    { path: 't.etp' },
   );
   const spots = new Set(result.errors.map((e) => `${e.line}:${e.column}`));
   const overlap = result.warnings.filter((w) => spots.has(`${w.line}:${w.column}`));

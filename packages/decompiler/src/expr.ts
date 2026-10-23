@@ -1,7 +1,7 @@
-import { KEY_CODES, STORE_FLAG_ON, STORE_FLAG_VARIABLE } from '@tess/core';
-import { tessNumber, tessString, tessLiteral, ownsResource, isExactNumber } from './ident.ts';
+import { KEY_CODES, STORE_FLAG_ON, STORE_FLAG_VARIABLE } from '@entropy/core';
+import { entropyNumber, entropyString, entropyLiteral, ownsResource, isExactNumber } from './ident.ts';
 import { isBooleanBlock } from '../../compiler/src/expression.ts';
-import { expansionBlock } from '@tess/core';
+import { expansionBlock } from '@entropy/core';
 import type { DecompileContext, RawBlock, ResourceInfo } from './types.ts';
 
 // Preserve condition values; an empty Entry slot reads as false.
@@ -68,7 +68,7 @@ const EMPTY = '0';
 export function colorLiteral(raw: string): string {
   if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw;
   if (raw === 'transparent') return 'transparent';
-  return tessString(raw);
+  return entropyString(raw);
 }
 
 // Keep missing object IDs in placeholder names so compilation can restore the unresolved target.
@@ -90,8 +90,8 @@ function resourceRef(
   byId: Map<string, ResourceInfo>,
   nameOf: (id: string) => string,
 ): string {
-  if (ctx.inFunction && byId.has(id) && !ownsResource(ctx, byId.get(id))) return tessString(id);
-  return tessString(nameOf(id));
+  if (ctx.inFunction && byId.has(id) && !ownsResource(ctx, byId.get(id))) return entropyString(id);
+  return entropyString(nameOf(id));
 }
 
 const BARE_NAME = /^[\p{L}_][\p{L}0-9_]*$/u;
@@ -117,7 +117,7 @@ const SOUND_PLAY_BLOCKS = new Set([
   'sound_from_to_and_wait',
 ]);
 
-// Sound probes become 1 because tessvm loads all sounds before starting.
+// Sound probes become 1 because entropy loads all sounds before starting.
 function soundProbe(ctx: DecompileContext, block: RawBlock | undefined): string | null {
   if (!block?.type || !SOUND_PLAY_BLOCKS.has(block.type)) return null;
   ctx.notices.add(
@@ -147,8 +147,8 @@ function placeholder(ctx: DecompileContext, block: RawBlock | undefined): string
 
 export function exprOf(block: any, ctx: DecompileContext): string {
   if (block === null || block === undefined) return EMPTY;
-  if (typeof block === 'string') return tessString(block);
-  if (typeof block === 'number') return tessNumber(block);
+  if (typeof block === 'string') return entropyString(block);
+  if (typeof block === 'number') return entropyNumber(block);
   if (typeof block !== 'object' || !block.type) return EMPTY;
 
   const p = block.params ?? [];
@@ -160,9 +160,9 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       const raw = String(at(0) ?? '');
       if (raw === 'transparent') return 'transparent';
       if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw;
-      return isExactNumber(raw) ? raw : tessString(raw);
+      return isExactNumber(raw) ? raw : entropyString(raw);
     }
-    case 'angle': return tessNumber(Number(at(0)) || 0);
+    case 'angle': return entropyNumber(Number(at(0)) || 0);
 
     case 'get_variable': return ctx.varName(at(0));
     case 'get_func_variable': return funcLocal(ctx, at(0)) ?? '0';
@@ -172,7 +172,7 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       const coordinate = REVERSE_PROPERTY_COORD[at(3)] ?? REVERSE_OBJECT_COORD[at(3)];
       if (!coordinate) return placeholder(ctx, block);
       if (target === 'self' || target === null) return coordinate;
-      return `${coordinate}(${tessString(targetName(ctx, target))})`;
+      return `${coordinate}(${entropyString(targetName(ctx, target))})`;
     }
     case 'get_x_coordinate': return 'x';
     case 'get_y_coordinate': return 'y';
@@ -187,11 +187,11 @@ export function exprOf(block: any, ctx: DecompileContext): string {
     case 'boolean_bigger': return `(${exprOf(at(0), ctx)} > ${exprOf(at(2), ctx)})`;
     case 'boolean_smaller': return `(${exprOf(at(0), ctx)} < ${exprOf(at(2), ctx)})`;
     // Entry resolves FIRST, LAST, and RANDOM in list index slots.
-    case 'options_for_list': return tessString(String(at(0) ?? 'FIRST'));
+    case 'options_for_list': return entropyString(String(at(0) ?? 'FIRST'));
 
     case 'coordinate_mouse': {
       const coordinate = REVERSE_OBJECT_COORD[at(1)];
-      return coordinate ? `${coordinate}(${tessString('mouse')})` : placeholder(ctx, block);
+      return coordinate ? `${coordinate}(${entropyString('mouse')})` : placeholder(ctx, block);
     }
 
     case 'calc_basic': {
@@ -234,7 +234,7 @@ export function exprOf(block: any, ctx: DecompileContext): string {
     case 'boolean_not': return `not (${conditionOf(at(1), ctx)})`;
     case 'True': return 'true';
     case 'False': return 'false';
-    // Keep judgement expressions directly because Tess value slots accept them.
+    // Keep judgement expressions directly because Entropy value slots accept them.
     case 'get_boolean_value': return `boolean_value(${conditionOf(at(0), ctx)})`;
     case 'is_clicked': case 'is_object_clicked': case 'is_boost_mode':
     case 'is_touch_supported': case 'get_user_name': case 'get_nickname':
@@ -245,20 +245,20 @@ export function exprOf(block: any, ctx: DecompileContext): string {
     case 'get_block_count': {
       const target = at(0);
       if (!target || target === 'all') return 'block_count';
-      return `block_count(${tessString(targetName(ctx, target))})`;
+      return `block_count(${entropyString(targetName(ctx, target))})`;
     }
     case 'is_press_some_key': {
       // Keep unnamed key codes as numbers.
       const code = String(at(0) ?? '').trim();
       const key = REVERSE_KEY_CODE[code] ?? (/^[0-9]{1,3}$/.test(code) ? code : null);
-      return key ? `key_down(${tessString(key)})` : placeholder(ctx, block);
+      return key ? `key_down(${entropyString(key)})` : placeholder(ctx, block);
     }
-    case 'reach_something': return `touching(${tessString(targetName(ctx, at(1)))})`;
-    case 'distance_something': return `distance(${tessString(targetName(ctx, at(1)))})`;
-    case 'is_current_device_type': return `(device == ${tessString(at(0))})`;
+    case 'reach_something': return `touching(${entropyString(targetName(ctx, at(1)))})`;
+    case 'distance_something': return `distance(${entropyString(targetName(ctx, at(1)))})`;
+    case 'is_current_device_type': return `(device == ${entropyString(at(0))})`;
     case 'is_type': {
       const kind = at(2) === 'number' ? 'number' : 'string';
-      return `(type(${exprOf(at(0), ctx)}) == ${tessString(kind)})`;
+      return `(type(${exprOf(at(0), ctx)}) == ${entropyString(kind)})`;
     }
 
     case 'value_of_index_from_list': {
@@ -291,14 +291,14 @@ export function exprOf(block: any, ctx: DecompileContext): string {
     case 'change_string_case': return `${at(3) === 'toUpperCase' ? 'uppercase' : 'lowercase'}(${exprOf(at(1), ctx)})`;
     case 'get_date': {
       const unit = REVERSE_DATE_UNITS[at(1)];
-      return unit ? `now(${tessString(unit)})` : placeholder(ctx, block);
+      return unit ? `now(${entropyString(unit)})` : placeholder(ctx, block);
     }
     case 'change_rgb_to_hex': return `to_hex(${exprOf(at(0), ctx)}, ${exprOf(at(1), ctx)}, ${exprOf(at(2), ctx)})`;
     case 'change_hex_to_rgb': {
       const channel = REVERSE_HEX_CHANNEL[at(1)];
       return channel ? `from_hex(${exprOf(at(0), ctx)}, ${channel})` : placeholder(ctx, block);
     }
-    case 'text_read': return `text_content(${tessString(targetName(ctx, at(0)))})`;
+    case 'text_read': return `text_content(${entropyString(targetName(ctx, at(0)))})`;
 
     case 'get_table_count':
       return `${String(at(1)) === 'COL' ? 'column_count' : 'row_count'}(${ctx.tableName(at(0))})`;
@@ -308,7 +308,7 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       return `${ctx.tableName(at(0))}[${exprOf(at(1), ctx)}]`;
     // Entry stores one-based column numbers even when the dropdown displays names.
     case 'get_table_fields':
-      return tessLiteral(at(0));
+      return entropyLiteral(at(0));
     case 'get_value_from_last_row':
       return `last_row(${ctx.tableName(at(0))}, ${exprOf(at(1), ctx)})`;
     case 'calc_values_from_table': {
@@ -334,7 +334,7 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       if (expansion) {
         const args = expansion.slots.map((slot, i) => (slot === 'value'
           ? exprOf(at(i), ctx)
-          : tessString(String(at(i) ?? ''))));
+          : entropyString(String(at(i) ?? ''))));
         return `${block.type}(${args.join(', ')})`;
       }
 

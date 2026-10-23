@@ -3,18 +3,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse } from '@tess/parser';
-import { compileProject } from '@tess/compiler';
-import type { StartRule } from '@tess/parser';
+import { parse } from '@entropy/parser';
+import { compileProject } from '@entropy/compiler';
+import type { StartRule } from '@entropy/parser';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'examples');
 const FRAGMENT_RULES: Array<StartRule | undefined> = [undefined, 'SceneFragment', 'ObjectFragment'];
 
-function tessFiles(dir: string): string[] {
+function entropyFiles(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return tessFiles(full);
-    return entry.name.endsWith('.tess') ? [full] : [];
+    if (entry.isDirectory()) return entropyFiles(full);
+    return entry.name.endsWith('.etp') ? [full] : [];
   });
 }
 
@@ -33,7 +33,7 @@ function usedFiles(node: any, base: string, found = new Set<string>()): Set<stri
   return found;
 }
 
-const files = tessFiles(root);
+const files = entropyFiles(root);
 const fragments = new Set<string>();
 for (const file of files) {
   const result = parse(fs.readFileSync(file, 'utf-8'));

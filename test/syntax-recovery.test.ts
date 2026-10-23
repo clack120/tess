@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parse } from '@tess/parser';
-import { compileProject } from '@tess/compiler';
+import { parse } from '@entropy/parser';
+import { compileProject } from '@entropy/compiler';
 
 test('independent syntax errors are reported together without compiling a partial AST', () => {
   const source = 'object "o":\n  when start do\n    say (1 + )\n    say (2 + )\n  end\nend';

@@ -1,9 +1,9 @@
-import { boot, type TessVmHandle } from "../../../tessvm/src/web/boot.ts";
-import { formatVmError } from "../../../tessvm/src/runtime/diagnostics.ts";
-import { ASK_FIELD_STYLE } from "../../../tessvm/src/web/ask-style.ts";
-import { CHART_WINDOW_STYLE } from "../../../tessvm/src/web/chart-view.ts";
-import { assetCacheSize } from "../../../tessvm/src/web/fetch-retry.ts";
-import { EXTRAS_DIALOG_STYLE } from "../../../tessvm/src/web/extras.ts";
+import { boot, type EntropyHandle } from "../../../vm/src/web/boot.ts";
+import { formatVmError } from "../../../vm/src/runtime/diagnostics.ts";
+import { ASK_FIELD_STYLE } from "../../../vm/src/web/ask-style.ts";
+import { CHART_WINDOW_STYLE } from "../../../vm/src/web/chart-view.ts";
+import { assetCacheSize } from "../../../vm/src/web/fetch-retry.ts";
+import { EXTRAS_DIALOG_STYLE } from "../../../vm/src/web/extras.ts";
 import { fetchWork, thumbUrl } from "./entry-project.ts";
 import { bridgeSaveStore } from "./save-bridge.ts";
 import { CloudClient } from "./cloud.ts";
@@ -25,7 +25,7 @@ const ICONS = {
     'M6 13.2V10H2.8M10 13.2V10h3.2"/></svg>',
 };
 
-const STAGE_STYLE_ID = "tessvm-stage-style";
+const STAGE_STYLE_ID = "entropy-stage-style";
 
 // A timer also releases background tabs where animation frames may not arrive.
 const nextFrame = () =>
@@ -72,7 +72,7 @@ function iconButton(
   label: string,
   icon: string,
 ) {
-  const button = el("button", `tessvm-btn ${className}`, parent);
+  const button = el("button", `entropy-btn ${className}`, parent);
   button.type = "button";
   button.title = label;
   button.setAttribute("aria-label", label);
@@ -91,7 +91,7 @@ function mountMenu(
   root: HTMLElement,
   lines: () => Array<MenuItem | null>,
 ): { close(): void; dispose(): void } {
-  const menu = el("div", "tessvm-menu", root);
+  const menu = el("div", "entropy-menu", root);
   menu.hidden = true;
   menu.setAttribute("role", "menu");
 
@@ -168,46 +168,46 @@ export function mountPlayer(
   grabEscape = true,
 ): MountedPlayer {
   ensureStageStyle();
-  const root = el("div", "tessvm-player is-idle", host);
+  const root = el("div", "entropy-player is-idle", host);
   // Capture work keys only inside the player so page inputs remain usable.
   root.tabIndex = 0;
 
-  const view = el("div", "tessvm-view", root);
-  const cover = el("div", "tessvm-cover", view);
-  const startButton = el("button", "tessvm-start", cover);
+  const view = el("div", "entropy-view", root);
+  const cover = el("div", "entropy-cover", view);
+  const startButton = el("button", "entropy-start", cover);
   startButton.type = "button";
   startButton.hidden = true;
   startButton.title = "시작하기";
   startButton.setAttribute("aria-label", "시작하기");
   startButton.innerHTML = ICONS.play;
-  const status = el("div", "tessvm-status", cover);
+  const status = el("div", "entropy-status", cover);
   status.textContent = "작품을 읽어들이는 중…";
 
-  const bar = el("div", "tessvm-bar", root);
-  const left = el("div", "tessvm-bar-side", bar);
-  const stopButton = iconButton(left, "tessvm-stop", "정지", ICONS.stop);
-  const pauseButton = iconButton(left, "tessvm-pause", "일시정지", ICONS.pause);
-  const coords = el("div", "tessvm-coords", bar);
-  const right = el("div", "tessvm-bar-side tessvm-bar-right", bar);
-  const boostLabel = el("label", "tessvm-boost", right);
-  const boostText = el("span", "tessvm-boost-text", boostLabel);
+  const bar = el("div", "entropy-bar", root);
+  const left = el("div", "entropy-bar-side", bar);
+  const stopButton = iconButton(left, "entropy-stop", "정지", ICONS.stop);
+  const pauseButton = iconButton(left, "entropy-pause", "일시정지", ICONS.pause);
+  const coords = el("div", "entropy-coords", bar);
+  const right = el("div", "entropy-bar-side entropy-bar-right", bar);
+  const boostLabel = el("label", "entropy-boost", right);
+  const boostText = el("span", "entropy-boost-text", boostLabel);
   boostText.textContent = "부스트모드";
   const boostInput = document.createElement("input");
   boostInput.type = "checkbox";
   boostInput.checked = true;
   boostLabel.appendChild(boostInput);
-  el("span", "tessvm-switch", boostLabel);
+  el("span", "entropy-switch", boostLabel);
   const fullButton = iconButton(
     right,
-    "tessvm-full",
+    "entropy-full",
     "전체화면",
     ICONS.enterFull,
   );
 
-  const errorBox = el("div", "tessvm-error", root);
+  const errorBox = el("div", "entropy-error", root);
   errorBox.hidden = true;
 
-  let handle: TessVmHandle | null = null;
+  let handle: EntropyHandle | null = null;
   let cloudStore: CloudClient | null = null;
   let disposed = false;
   const controller = new AbortController();
@@ -290,7 +290,7 @@ export function mountPlayer(
       // Lock within the same click so Chromium keeps Escape for the work; a pending lock taken first can hold fullscreen back.
       const keyboard = (navigator as Navigator & { keyboard?: { lock?(keys: string[]): Promise<void> } }).keyboard;
       if (grabEscape && keyboard?.lock) {
-        keyboard.lock(["Escape"]).catch((error) => console.warn("[tessvm] 전체화면에서 Esc 를 잡지 못했습니다", error));
+        keyboard.lock(["Escape"]).catch((error) => console.warn("[entropy] 전체화면에서 Esc 를 잡지 못했습니다", error));
       }
     }
   };
@@ -329,18 +329,18 @@ export function mountPlayer(
       return;
     }
 
-    const tessIdToEntryId = new Map<string, string>();
-    const entryIdToTessId = new Map<string, string>();
+    const entropyIdToEntryId = new Map<string, string>();
+    const entryIdToEntropyId = new Map<string, string>();
     const variableMongoIds = new Map<string, string>();
     for (const v of work.variables ?? []) {
       if (v.isCloud || v.isRealTime) {
-        tessIdToEntryId.set(String(v.id), String(v.id));
-        entryIdToTessId.set(String(v.id), String(v.id));
+        entropyIdToEntryId.set(String(v.id), String(v.id));
+        entryIdToEntropyId.set(String(v.id), String(v.id));
         variableMongoIds.set(String(v.id), String(v._id));
       }
     }
     const csrfToken = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
-    const cloud = new CloudClient(projectId, csrfToken, work.variables ?? [], tessIdToEntryId, entryIdToTessId, variableMongoIds);
+    const cloud = new CloudClient(projectId, csrfToken, work.variables ?? [], entropyIdToEntryId, entryIdToEntropyId, variableMongoIds);
     cloudStore = cloud;
     await cloud.connect();
     if (disposed) return;
@@ -390,13 +390,13 @@ export function mountPlayer(
     ready(handle);
     // The popup cannot read this page's Cache Storage, so hand the size to the content script.
     void assetCacheSize().then(
-      (size) => window.postMessage({ __tessvm: "cache-size", ...size }, location.origin),
-      (error) => console.warn("[tessvm] 에셋 캐시 용량을 읽지 못했습니다", error),
+      (size) => window.postMessage({ __entropy: "cache-size", ...size }, location.origin),
+      (error) => console.warn("[entropy] 에셋 캐시 용량을 읽지 못했습니다", error),
     );
   }
 
   // Report unsupported blocks so skipped code cannot look like a broken project.
-  function reportUnsupported(live: TessVmHandle): void {
+  function reportUnsupported(live: EntropyHandle): void {
     const blocks = [...live.vm.unknownBlocks.keys()].filter(
       (type) => !type.startsWith("variable:"),
     );
@@ -414,7 +414,7 @@ export function mountPlayer(
     );
   }
 
-  function ready(live: TessVmHandle): void {
+  function ready(live: EntropyHandle): void {
     inspector = mountInspector(root, live);
     const seen = new Set<string>();
     let shown = "";
@@ -489,7 +489,7 @@ export function mountPlayer(
         { label: "정지", run: stop, disabled: still },
         null,
         { label: "현재 상태 보기", run: () => live.inspect() },
-        { label: `TessVM 디버그 ${inspector?.enabled ? "끄기" : "켜기"}`, run: () => inspector?.toggle() },
+        { label: `Entropy 디버그 ${inspector?.enabled ? "끄기" : "켜기"}`, run: () => inspector?.toggle() },
         { label: "진단 파일 저장", run: () => live.downloadDiagnostics() },
         null,
         { label: "이전 장면", run: () => sceneStep("prev"), disabled: still || !sceneAt(-1) },

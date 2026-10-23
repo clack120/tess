@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { parse } from '@tess/parser';
-import type { Expr, ParseRoot, StartRule, Stmt } from '@tess/parser';
+import { parse } from '@entropy/parser';
+import type { Expr, ParseRoot, StartRule, Stmt } from '@entropy/parser';
 
 export function inObject(code: string, kind = 'object'): string {
   const indented = code.split('\n').map((line) => `    ${line}`).join('\n');

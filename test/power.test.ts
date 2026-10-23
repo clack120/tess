@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@tess/compiler';
-import { verifyEntryProject } from '@tess/compiler';
+import { compileProject } from '@entropy/compiler';
+import { verifyEntryProject } from '@entropy/compiler';
 
 function build(expression: string) {
   const source = `scene "s":
@@ -11,7 +11,7 @@ function build(expression: string) {
     end
   end
 end`;
-  const result = compileProject(source, { path: 'x.tess' });
+  const result = compileProject(source, { path: 'x.etp' });
   assert.deepEqual(result.errors, [], result.errors.map((e) => e.message).join('\n'));
   return { block: JSON.parse(result.project!.objects[0]!.script)[0][1].params[1], project: result.project! };
 }
@@ -113,7 +113,7 @@ test('다듬기 함수는 작품에 한 번만 생긴다', () => {
     end
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   assert.equal(project!.functions.length, 1);
   assert.deepEqual(verifyEntryProject(project!), []);
 });
@@ -128,7 +128,7 @@ scene "s":
     end
   end
 end`;
-  const result = compileProject(source, { path: 'x.tess' });
+  const result = compileProject(source, { path: 'x.etp' });
   assert.deepEqual(result.errors, []);
 
   const thread = JSON.parse(result.project!.objects[0].script)[0];

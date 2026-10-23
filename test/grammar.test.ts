@@ -40,7 +40,7 @@ end
 `);
 
 okRaw('3.3 use', `
-use "common/settings.tess"
+use "common/settings.etp"
 
 project:
   title "모듈화 예제"
@@ -48,8 +48,8 @@ project:
 end
 
 scene "stage1":
-  use "objects/hero.tess"
-  use "objects/monster.tess"
+  use "objects/hero.etp"
+  use "objects/monster.etp"
 end
 `);
 
@@ -432,15 +432,15 @@ end
 `);
 
 ok('12.3 문자열 처리', `
-var msg = "Entry Tess"
+var msg = "Entry Entropy"
 var len = length(msg)
 var first_ch = msg[0]
 var sub = slice(msg, 0, 5)
 var cnt = count("banana", "a")
-var merged = join("Hello, ", "Tess!")
-var idx = index_of(msg, "Tess")
+var merged = join("Hello, ", "Entropy!")
+var idx = index_of(msg, "Entropy")
 var replaced = replace(msg, "Entry", "Hello")
-var rev = reverse("Tess")
+var rev = reverse("Entropy")
 var upper = uppercase("abc")
 var lower = lowercase("ABC")
 `);

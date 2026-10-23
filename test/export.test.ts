@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { compileProject } from '@tess/compiler';
-import { exportHtml, exportZip } from '../packages/tessvm/src/node/export.ts';
+import { compileProject } from '@entropy/compiler';
+import { exportHtml, exportZip } from '../packages/vm/src/node/export.ts';
 
 // Use real PNG bytes because the compiler reads image dimensions.
 const PNG = Buffer.from(
@@ -23,9 +23,9 @@ const SOURCE = `scene "s":
 end`;
 
 function fixture(): { project: ReturnType<typeof compileProject>['project']; assets: { source: string; target: string }[] } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-export-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-export-'));
   fs.writeFileSync(path.join(dir, 'dot.png'), PNG);
-  const main = path.join(dir, 'main.tess');
+  const main = path.join(dir, 'main.etp');
   fs.writeFileSync(main, SOURCE);
   const result = compileProject(SOURCE, { path: main, assetDirs: [dir] });
   assert.ok(result.project, result.errors.map((error) => error.message).join('\n'));
@@ -79,8 +79,8 @@ test('단일 html 은 모듈·작품·에셋을 글 안에 담고 커널을 끈 
   const html = made.data.toString('utf-8');
 
   // Rewrite relative module imports because blob URLs have no directory base.
-  assert.match(html, /tessvm\/web\/boot\.ts/);
-  assert.match(html, /tessvm\/runtime\/engine\.ts/);
+  assert.match(html, /entropy\/web\/boot\.ts/);
+  assert.match(html, /entropy\/runtime\/engine\.ts/);
   assert.ok(!html.includes('../runtime/engine.ts'));
   // Decode textures on this thread so they can access the page's in-memory assets.
   assert.match(html, /preferWorkers = false/);

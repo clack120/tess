@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Vm, cellToRowCol } from '@tess/vm';
-import { RuntimeBlockError } from '../packages/tessvm/src/runtime/diagnostics.ts';
+import { Vm, cellToRowCol } from '@entropy/vm';
+import { RuntimeBlockError } from '../packages/vm/src/runtime/diagnostics.ts';
 
 function tableVm() {
   const vm = new Vm({ renderer: null, audio: null });

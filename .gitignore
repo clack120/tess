@@ -5,10 +5,9 @@ scratch
 examples/ent
 *.ent
 packages/extension/dist
-packages/extension/tessvm-extension.zip
-packages/extension/tessvm-extension-chrome.zip
-packages/extension/tessvm-extension.crx
+packages/extension/entropy-extension.zip
+packages/extension/entropy-extension-chrome.zip
+packages/extension/entropy-extension.crx
 packages/extension/crx-key.pem
 editors/vscode/*.vsix
 packages/painter/dist
-packages/tessblock/dist

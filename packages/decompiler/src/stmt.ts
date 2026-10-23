@@ -1,13 +1,13 @@
 import { exprOf, conditionOf, isJudgement, targetName } from "./expr.ts";
 import {
   append,
-  tessString,
-  tessNumber,
-  tessComment,
-  tessCommentLines,
+  entropyString,
+  entropyNumber,
+  entropyComment,
+  entropyCommentLines,
   ownsResource,
   isExactNumber,
-  tessLiteral,
+  entropyLiteral,
   displayNamePart,
 } from "./ident.ts";
 import type {
@@ -71,7 +71,7 @@ export function blocksToLines(
 export function commentLines(block: RawBlock | undefined): string[] {
   const value = String(block?.comment?.value ?? "").trimEnd();
   if (!value.trim()) return [];
-  return tessCommentLines(value);
+  return entropyCommentLines(value);
 }
 
 function branch(
@@ -106,7 +106,7 @@ function unsupported(
     200,
   );
   return [
-    tessComment(`[decompile] 지원하지 않는 블록: ${type} params=${paramsText}`),
+    entropyComment(`[decompile] 지원하지 않는 블록: ${type} params=${paramsText}`),
   ];
 }
 
@@ -227,10 +227,10 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
     if (carried) return ctx.loopDepth > 0 ? [carried] : [];
   }
 
-  // Entry ignores text-box operations on sprites; Tess rejects them there.
+  // Entry ignores text-box operations on sprites; Entropy rejects them there.
   if (ctx.spriteScripts && TEXT_BOX_STATEMENTS.has(block.type)) {
     ctx.notices.add(`글상자 블록 '${block.type}' 이(가) 그림 오브젝트에 있어 주석으로 남겼습니다 (엔트리에서도 아무 일도 하지 않습니다).`);
-    return [tessComment(`[decompile] 그림 오브젝트의 글상자 블록 (실행되지 않음): ${block.type}`)];
+    return [entropyComment(`[decompile] 그림 오브젝트의 글상자 블록 (실행되지 않음): ${block.type}`)];
   }
 
   switch (block.type) {
@@ -304,7 +304,7 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
     case "message_cast_wait": {
       const name = ctx.messageName(at(0));
       return [
-        `${block.type === "message_cast_wait" ? "call" : "send"} ${tessString(name)}`,
+        `${block.type === "message_cast_wait" ? "call" : "send"} ${entropyString(name)}`,
       ];
     }
     case "create_clone": {
@@ -312,7 +312,7 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
       return [
         target === "self"
           ? "clone"
-          : `clone ${tessString(targetName(ctx, target))}`,
+          : `clone ${entropyString(targetName(ctx, target))}`,
       ];
     }
     case "delete_clone":
@@ -327,12 +327,12 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
           `장면 id '${at(0)}' 이(가) 작품에 없어 그 자리로 가는 'jump' 를 주석으로 남겼습니다.`,
         );
         return [
-          tessComment(
-            `[decompile] jump ${tessString(String(at(0)))} — 작품에 없는 장면입니다`,
+          entropyComment(
+            `[decompile] jump ${entropyString(String(at(0)))} — 작품에 없는 장면입니다`,
           ),
         ];
       }
-      return [`jump ${tessString(scene.identifier)}`];
+      return [`jump ${entropyString(scene.identifier)}`];
     }
     case "start_neighbor_scene":
       return [`jump ${at(0) === "next" ? "next" : "back"}`];
@@ -354,12 +354,12 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
       return [
         target === "self"
           ? "# go self (엔트리 원본이 자기 자신으로 이동)"
-          : `go ${tessString(targetName(ctx, target))}`,
+          : `go ${entropyString(targetName(ctx, target))}`,
       ];
     }
     case "locate_object_time": {
       const target = at(1);
-      return [`go ${tessString(targetName(ctx, target))} in ${e(0)}`];
+      return [`go ${entropyString(targetName(ctx, target))} in ${e(0)}`];
     }
     case "locate_x":
       return [`x = ${e(0)}`];
@@ -382,7 +382,7 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
     case "direction_absolute":
       return [`way = ${e(0)}`];
     case "see_angle_object":
-      return [`look ${tessString(targetName(ctx, at(0)))}`];
+      return [`look ${entropyString(targetName(ctx, at(0)))}`];
 
     case "show":
       return ["show"];
@@ -444,8 +444,8 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
       if (!saved) return unsupported(ctx, block);
       const value = e(0);
       return [
-        `scale_x = ${value} * ${tessNumber(saved.x)} / 100`,
-        `scale_y = ${value} * ${tessNumber(saved.y)} / 100`,
+        `scale_x = ${value} * ${entropyNumber(saved.x)} / 100`,
+        `scale_y = ${value} * ${entropyNumber(saved.y)} / 100`,
       ];
     }
     // Entry's reported size scales with both axes, so multiply it directly.
@@ -474,7 +474,7 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
     case "text_flush":
       return ["clear text"];
     case "text_change_font":
-      return [`font = ${tessString(at(0))}`];
+      return [`font = ${entropyString(at(0))}`];
     case "text_change_font_color":
       return [`font_color = ${colorExpr(at(0), ctx)}`];
     case "text_change_bg_color":
@@ -568,8 +568,8 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
     case "set_tts_property": {
       // Keep TTS speed and pitch codes because their aliases have opposite directions.
       return [
-        `tts voice ${tessString(REVERSE_TTS_SPEAKER[at(0)] ?? at(0))} ` +
-          `speed ${tessString(String(at(1)))} pitch ${tessString(String(at(2)))}`,
+        `tts voice ${entropyString(REVERSE_TTS_SPEAKER[at(0)] ?? at(0))} ` +
+          `speed ${entropyString(String(at(1)))} pitch ${entropyString(String(at(2)))}`,
       ];
     }
 
@@ -596,9 +596,9 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
     case "open_table_wait":
       return [`show ${ctx.tableName(at(0))} for ${e(1)}`];
     case "open_table_chart":
-      // Convert zero-based Entry chart indices to one-based Tess indices.
+      // Convert zero-based Entry chart indices to one-based Entropy indices.
       return [
-        `show ${ctx.tableName(at(0))} chart ${tessNumber(Number(at(1) ?? 0) + 1)}`,
+        `show ${ctx.tableName(at(0))} chart ${entropyNumber(Number(at(1) ?? 0) + 1)}`,
       ];
     case "close_table_chart":
       return ["hide chart"];
@@ -623,7 +623,7 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
     case "set_func_variable": {
       const name = ctx.funcLocalName(at(0));
       if (name === null) {
-        // Entry throws before writing a missing target; omit the failed assignment in Tess.
+        // Entry throws before writing a missing target; omit the failed assignment in Entropy.
         ctx.notices.add(
           `'${at(0)}' 은(는) 다른 함수의 지역변수라 엔트리에서도 값이 들어가지 않습니다. 그 문장은 옮기지 않았습니다.`,
         );
@@ -652,9 +652,9 @@ export function colorExpr(value: any, ctx?: DecompileContext): string {
     // Preserve alpha in eight-digit hex colors.
     if (/^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(literal)) return literal;
     if (literal === "transparent") return "transparent";
-    return tessString(literal);
+    return entropyString(literal);
   }
-  return ctx ? exprOf(value, ctx) : tessString(String(value ?? ""));
+  return ctx ? exprOf(value, ctx) : entropyString(String(value ?? ""));
 }
 
 function literalStringOf(value: any): string | null {
@@ -687,12 +687,12 @@ function resourceExpr(
   if (literal !== null && byId.has(literal)) {
     const info = byId.get(literal)!;
     // Keep forced IDs in global functions; object-owned functions can use local resource names.
-    if (ctx.inFunction && !ownsResource(ctx, info)) return tessString(literal);
-    return tessString(info.identifier);
+    if (ctx.inFunction && !ownsResource(ctx, info)) return entropyString(literal);
+    return entropyString(info.identifier);
   }
   // Resource indices can arrive as text blocks; emit numbers to avoid name lookup errors.
   if (literal !== null && isExactNumber(literal))
-    return tessNumber(Number(literal));
+    return entropyNumber(Number(literal));
   return exprOf(value, ctx);
 }
 
@@ -721,7 +721,7 @@ export function functionDeclarationLines(
   // Declare function locals at the start so each call initializes its own copy.
   const locals = (fn.locals ?? []).map(
     (local) =>
-      `var ${local.name}${displayNamePart(local.name, local.entryName)} = ${tessLiteral(local.value)}`,
+      `var ${local.name}${displayNamePart(local.name, local.entryName)} = ${entropyLiteral(local.value)}`,
   );
 
   const lines = [

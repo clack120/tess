@@ -86,7 +86,7 @@ export function playerPage({
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(name)} — Tess</title>
+<title>${escapeHtml(name)} — Entropy</title>
 <link rel="stylesheet" href="${escapeHtml(THIRD_PARTY_STYLE)}">
 <link rel="stylesheet" href="${libBase}/${escapeHtml(RUNTIME_STYLE)}">
 ${fontStyles}
@@ -180,11 +180,11 @@ ${fontStyles}
   const pending = [];
   let sink = null;
 
-  window.tessDebugSink = (fn) => {
+  window.entropyDebugSink = (fn) => {
     sink = fn;
     for (const item of pending.splice(0)) sink(item);
   };
-  window.tessReportError = function reportError(kind, error) {
+  window.entropyReportError = function reportError(kind, error) {
     const item = {
       kind: String(kind),
       message: (error && error.message) || String(error),
@@ -206,24 +206,24 @@ ${fontStyles}
     if (benign(event.message) || benign(event.error?.message)) return;
     if (event.target && event.target !== window && !event.message) {
       const what = event.target.src || event.target.href || '리소스';
-      window.tessReportError('로딩 실패', new Error(what + ' 를 불러오지 못했습니다.'));
+      window.entropyReportError('로딩 실패', new Error(what + ' 를 불러오지 못했습니다.'));
       return;
     }
-    window.tessReportError('실행 오류', event.error || new Error(event.message));
+    window.entropyReportError('실행 오류', event.error || new Error(event.message));
   }, true);
 
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason;
-    if (reason && reason.tessAlreadyReported) return; // stopProjectWithToast 가 이미 보고했다
+    if (reason && reason.entropyAlreadyReported) return; // stopProjectWithToast 가 이미 보고했다
     if (benign(reason && reason.message)) return;
-    window.tessReportError('처리되지 않은 Promise 거부', reason instanceof Error ? reason : new Error(String(reason)));
+    window.entropyReportError('처리되지 않은 Promise 거부', reason instanceof Error ? reason : new Error(String(reason)));
   });
 
   // Use no-op hooks until the debug panel loads.
-  window.tessLayoutCanvas = () => {};
-  window.tessHighlightBlock = () => {};
-  window.tessRenderProjectDebug = () => {};
-  window.tessPatchEnvironmentBlocks = () => {};
+  window.entropyLayoutCanvas = () => {};
+  window.entropyHighlightBlock = () => {};
+  window.entropyRenderProjectDebug = () => {};
+  window.entropyPatchEnvironmentBlocks = () => {};
 })();
 </script>
 ${thirdPartyScripts}
@@ -274,7 +274,7 @@ ${runtimeScripts}
     if (Entry.toast) {
       Entry.toast.alert = function (title, message) {
         const text = Array.isArray(message) ? message.join(' ') : String(message ?? '');
-        window.tessReportError(String(title || '알림'), new Error(text));
+        window.entropyReportError(String(title || '알림'), new Error(text));
       };
       // Suppress editor-only warnings in the minimized viewer; runtime failures still use error reporting.
       Entry.toast.warning = function () {};
@@ -296,17 +296,17 @@ ${runtimeScripts}
         ? (loc.file ? loc.file + ':' : '') + loc.line + ':' + loc.column
         : (blockId ? '컴파일된 블록 ' + blockId : '위치를 알 수 없음');
       const label = [objectName, block && block.type].filter(Boolean).join(' / ');
-      const friendlyMessage = blockId && window.tessDescribeListIndexError
-        ? window.tessDescribeListIndexError(blockId, err)
+      const friendlyMessage = blockId && window.entropyDescribeListIndexError
+        ? window.entropyDescribeListIndexError(blockId, err)
         : null;
       const baseMessage = friendlyMessage || (err && err.message) || kind;
 
       const error = new Error((label ? label + ' — ' : '') + baseMessage + ' (' + where + ')');
       if (err && err.stack) error.stack = err.stack;
-      error.tessAlreadyReported = true;
+      error.entropyAlreadyReported = true;
 
-      window.tessReportError(kind, error);
-      if (blockId) window.tessHighlightBlock(blockId);
+      window.entropyReportError(kind, error);
+      if (blockId) window.entropyHighlightBlock(blockId);
 
       try {
         if (Entry.engine && Entry.engine.isState && Entry.engine.isState('run') && Entry.engine.toggleStop) {
@@ -378,8 +378,8 @@ ${runtimeScripts}
   try {
     const project = await (await fetch('/project.json')).json();
     const sourceMap = await (await fetch('/sourcemap.json')).json().catch(() => ({}));
-    window.tessSourceMap = sourceMap;
-    window.tessRenderProjectDebug(project);
+    window.entropySourceMap = sourceMap;
+    window.entropyRenderProjectDebug(project);
     await preloadTextFonts(project);
     Entry.init(document.getElementById('workspace'), {
       type: 'minimize',
@@ -392,9 +392,9 @@ ${runtimeScripts}
     // Install error hooks after Entry.init creates the toast object they must replace.
     interceptRuntimeErrors(sourceMap);
     // Wrap environment blocks only after Entry.init has registered them.
-    window.tessPatchEnvironmentBlocks();
+    window.entropyPatchEnvironmentBlocks();
     Entry.loadProject(project);
-    requestAnimationFrame(() => window.tessLayoutCanvas());
+    requestAnimationFrame(() => window.entropyLayoutCanvas());
     await waitForStartGate();
     const gate = document.getElementById('start-gate');
     const gateCard = document.getElementById('start-gate-card');
@@ -408,7 +408,7 @@ ${runtimeScripts}
     Entry.engine && Entry.engine.toggleRun && Entry.engine.toggleRun();
   } catch (error) {
     showFallback('작품을 실행하는 중 문제가 생겼습니다: ' + error.message);
-    window.tessReportError('초기화 오류', error);
+    window.entropyReportError('초기화 오류', error);
   }
 })();
 ${reload ? `

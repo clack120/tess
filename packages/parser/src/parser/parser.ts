@@ -46,7 +46,7 @@ const errorMessageProvider: IParserErrorMessageProvider = {
 
 type Rule = ParserMethod<[], CstNode>;
 
-export class TessParser extends CstParser {
+export class EntropyParser extends CstParser {
   declare readonly addExpr: Rule;
   declare readonly andExpr: Rule;
   declare readonly askStatement: Rule;
@@ -1369,4 +1369,4 @@ export class TessParser extends CstParser {
   }
 }
 
-export const parser = new TessParser();
+export const parser = new EntropyParser();

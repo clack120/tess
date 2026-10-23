@@ -1,21 +1,21 @@
 import { mountPlayer, type MountedPlayer } from './player.ts';
 
-const HOST_SELECTOR = '[data-tessvm-project]';
+const HOST_SELECTOR = '[data-entropy-project]';
 const players = new Map<HTMLElement, { player: MountedPlayer; key: string }>();
 
 function keyOf(host: HTMLElement): string {
-  return JSON.stringify([host.dataset.tessvmProject, host.dataset.tessvmGroup, host.dataset.tessvmSvg, host.dataset.tessvmCache, host.dataset.tessvmEscape]);
+  return JSON.stringify([host.dataset.entropyProject, host.dataset.entropyGroup, host.dataset.entropySvg, host.dataset.entropyCache, host.dataset.entropyEscape]);
 }
 
 function scan(): void {
   for (const [host, { player, key }] of players) {
-    if (!host.isConnected || !host.dataset.tessvmProject || key !== keyOf(host)) {
+    if (!host.isConnected || !host.dataset.entropyProject || key !== keyOf(host)) {
       player.dispose();
       players.delete(host);
     }
   }
   for (const host of document.querySelectorAll<HTMLElement>(HOST_SELECTOR)) {
-    const id = host.dataset.tessvmProject;
+    const id = host.dataset.entropyProject;
     if (players.has(host) || !id) {
       continue;
     }
@@ -24,10 +24,10 @@ function scan(): void {
       { key: keyOf(host), player: mountPlayer(
         host,
         id,
-        host.dataset.tessvmGroup ?? null,
-        host.dataset.tessvmSvg !== '0',
-        host.dataset.tessvmCache === '1',
-        host.dataset.tessvmEscape !== '0',
+        host.dataset.entropyGroup ?? null,
+        host.dataset.entropySvg !== '0',
+        host.dataset.entropyCache === '1',
+        host.dataset.entropyEscape !== '0',
       ) },
     );
   }
@@ -44,13 +44,13 @@ window.addEventListener('message', (event) => {
   if (event.source !== window) {
     return;
   }
-  const data = event.data as { __tessvm?: string } | null;
+  const data = event.data as { __entropy?: string } | null;
   if (!data || typeof data !== 'object') {
     return;
   }
-  if (data.__tessvm === 'scan') {
+  if (data.__entropy === 'scan') {
     scan();
-  } else if (data.__tessvm === 'unmount') {
+  } else if (data.__entropy === 'unmount') {
     unmountAll();
   }
 });

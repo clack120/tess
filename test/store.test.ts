@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@tess/compiler';
-import { decompileProject } from '@tess/decompiler';
-import { Vm } from '@tess/vm';
-import type { RawEntity } from '@tess/decompiler';
+import { compileProject } from '@entropy/compiler';
+import { decompileProject } from '@entropy/decompiler';
+import { Vm } from '@entropy/vm';
+import type { RawEntity } from '@entropy/decompiler';
 
 const WORK = `store var 골드 = 0
 store list 인벤토리 = ["검"]
@@ -21,7 +21,7 @@ scene "장면 1":
 end`;
 
 function build(source = WORK) {
-  const result = compileProject(source, { path: 'main.tess' });
+  const result = compileProject(source, { path: 'main.etp' });
   assert.deepEqual(result.errors.map((error) => error.message), []);
   return result.project as unknown as RawEntity;
 }
@@ -118,18 +118,18 @@ test('되돌리면 store 선언과 save · can_save 가 그대로 돌아온다',
 test('되돌린 것을 다시 컴파일하면 같은 이름과 같은 함수가 나온다', () => {
   const first = build();
   const back = decompileProject(first, [], { inline: true });
-  const again = compileProject(back.source, { path: 'main.tess' });
+  const again = compileProject(back.source, { path: 'main.etp' });
   assert.deepEqual(again.errors.map((error) => error.message), []);
   const second = again.project as unknown as RawEntity;
   assert.deepEqual(names(second).sort(), names(first).sort());
   assert.deepEqual(functionLabels(second).sort(), functionLabels(first).sort());
 });
 
-test('@ 가 붙은 이름이 Tess 이름으로 쓸 수 없으면 as 로 남긴다', () => {
+test('@ 가 붙은 이름이 Entropy 이름으로 쓸 수 없으면 as 로 남긴다', () => {
   const project = build('store var 골드 as "게임 머니" = 0\nscene "s":\n  object "o":\n    when start do\n      save\n    end\n  end\nend');
   const back = decompileProject(project, [], { inline: true });
   assert.match(back.source, /store var \S+ as "게임 머니" = 0/);
-  const again = compileProject(back.source, { path: 'main.tess' });
+  const again = compileProject(back.source, { path: 'main.etp' });
   assert.deepEqual(again.errors.map((error) => error.message), []);
   assert.ok(names(again.project as unknown as RawEntity).includes('@게임 머니'));
 });

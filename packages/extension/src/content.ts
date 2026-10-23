@@ -68,18 +68,18 @@ function mount(item: Held): void {
   }
   const host = document.createElement('div');
   item.host = host;
-  host.className = 'tessvm-host';
-  host.dataset.tessvmProject = item.id;
+  host.className = 'entropy-host';
+  host.dataset.entropyProject = item.id;
   const group = new URLSearchParams(location.search).get('groupId');
   if (group) {
-    host.dataset.tessvmGroup = group;
+    host.dataset.entropyGroup = group;
   }
-  host.dataset.tessvmSvg = svg ? '1' : '0';
-  host.dataset.tessvmCache = cache ? '1' : '0';
-  host.dataset.tessvmEscape = escape ? '1' : '0';
+  host.dataset.entropySvg = svg ? '1' : '0';
+  host.dataset.entropyCache = cache ? '1' : '0';
+  host.dataset.entropyEscape = escape ? '1' : '0';
   item.frame.after(host);
   inject();
-  window.postMessage({ __tessvm: 'scan' }, location.origin);
+  window.postMessage({ __entropy: 'scan' }, location.origin);
 }
 
 function removeHost(item: Held): void {
@@ -116,7 +116,7 @@ function applyAll(): void {
       release(item);
     }
   }
-  if (removed) window.postMessage({ __tessvm: 'scan' }, location.origin);
+  if (removed) window.postMessage({ __entropy: 'scan' }, location.origin);
 }
 
 // Blank frames before settings arrive because Entry cannot be unloaded after it starts.
@@ -132,7 +132,7 @@ function hold(frame: HTMLIFrameElement): void {
       removeHost(item);
       frame.style.removeProperty('visibility');
       held.splice(held.indexOf(item), 1);
-      window.postMessage({ __tessvm: 'scan' }, location.origin);
+      window.postMessage({ __entropy: 'scan' }, location.origin);
     }
     return;
   }
@@ -202,7 +202,7 @@ api.storage.onChanged.addListener((changes, area) => {
     if (CACHE_KEY in changes) cache = changes[CACHE_KEY]?.newValue === true;
     if (ESCAPE_KEY in changes) escape = changes[ESCAPE_KEY]?.newValue !== false;
     // Rebuild players because they read this setting only when mounted.
-    window.postMessage({ __tessvm: 'unmount' }, location.origin);
+    window.postMessage({ __entropy: 'unmount' }, location.origin);
     for (const item of held) {
       removeHost(item);
     }
@@ -211,7 +211,7 @@ api.storage.onChanged.addListener((changes, area) => {
     enabled = changes[ENABLED_KEY]?.newValue !== false;
   }
   if (!enabled) {
-    window.postMessage({ __tessvm: 'unmount' }, location.origin);
+    window.postMessage({ __entropy: 'unmount' }, location.origin);
   }
   applyAll();
 });
@@ -229,17 +229,17 @@ window.addEventListener('message', (event) => {
   if (event.source !== window) {
     return;
   }
-  const data = event.data as { __tessvm?: string; id?: number; count?: unknown; bytes?: unknown } | null;
-  if (data && typeof data === 'object' && data.__tessvm === 'cache-size') {
+  const data = event.data as { __entropy?: string; id?: number; count?: unknown; bytes?: unknown } | null;
+  if (data && typeof data === 'object' && data.__entropy === 'cache-size') {
     const size = { count: Number(data.count) || 0, bytes: Number(data.bytes) || 0 };
-    void api.storage.local.set({ [CACHE_SIZE_KEY]: size }).catch((error) => console.warn('[tessvm] 캐시 용량을 기록하지 못했습니다', error));
+    void api.storage.local.set({ [CACHE_SIZE_KEY]: size }).catch((error) => console.warn('[entropy] 캐시 용량을 기록하지 못했습니다', error));
     return;
   }
-  if (!data || typeof data !== 'object' || !String(data.__tessvm).startsWith('store-')) {
+  if (!data || typeof data !== 'object' || !String(data.__entropy).startsWith('store-')) {
     return;
   }
   const reply = (answer: unknown) => {
-    window.postMessage({ __tessvm: 'store-answer', id: data.id, answer }, location.origin);
+    window.postMessage({ __entropy: 'store-answer', id: data.id, answer }, location.origin);
   };
   const sent = api.runtime.sendMessage?.(data);
   if (!sent) {

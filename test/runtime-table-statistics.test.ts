@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Vm } from '@tess/vm';
-import type { RawBlock } from '../packages/tessvm/src/compile/codegen.ts';
+import { Vm } from '@entropy/vm';
+import type { RawBlock } from '../packages/vm/src/compile/codegen.ts';
 
 function tableVm(rows: unknown[][]) {
   const vm = new Vm({ renderer: null, audio: null });

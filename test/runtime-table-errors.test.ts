@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Vm } from '@tess/vm';
-import type { RawBlock, FunctionEntry } from '../packages/tessvm/src/compile/codegen.ts';
+import { Vm } from '@entropy/vm';
+import type { RawBlock, FunctionEntry } from '../packages/vm/src/compile/codegen.ts';
 
 let nextId = 0;
 const block = (type: string, params: unknown[] = []): RawBlock => ({ id: `block-${nextId++}`, type, params });

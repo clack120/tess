@@ -1,10 +1,10 @@
 {
-  "name": "tess-lang",
-  "displayName": "Tess",
-  "description": "Tess 언어 문법 강조 (엔트리 작품으로 컴파일되는 텍스트 언어)",
+  "name": "entropy-lang",
+  "displayName": "Entropy",
+  "description": "Entropy 언어 문법 강조 (엔트리 작품으로 컴파일되는 텍스트 언어)",
   "version": "0.3.53",
   "type": "module",
-  "publisher": "tess",
+  "publisher": "entropy",
   "license": "MIT",
   "engines": {
     "vscode": "^1.60.0"
@@ -15,22 +15,22 @@
   "contributes": {
     "languages": [
       {
-        "id": "tess",
+        "id": "entropy",
         "aliases": [
-          "Tess",
-          "tess"
+          "Entropy",
+          "entropy"
         ],
         "extensions": [
-          ".tess"
+          ".etp"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "tess",
-        "scopeName": "source.tess",
-        "path": "./syntaxes/tess.tmLanguage.json"
+        "language": "entropy",
+        "scopeName": "source.etp",
+        "path": "./syntaxes/entropy.tmLanguage.json"
       }
     ]
   },
@@ -39,7 +39,7 @@
     "build:grammar": "node build-grammar.ts"
   },
   "devDependencies": {
-    "@tess/core": "workspace:*",
-    "@tess/parser": "workspace:*"
+    "@entropy/core": "workspace:*",
+    "@entropy/parser": "workspace:*"
   }
 }

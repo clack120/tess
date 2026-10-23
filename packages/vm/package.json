@@ -1,0 +1,27 @@
+{
+  "name": "@entropy/vm",
+  "version": "0.3.53",
+  "description": "Entropy 작품을 PixiJS 위에서 엔트리와 같게, 훨씬 빠르게 실행하는 런타임",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "bin": {
+    "entropy-vm": "./src/node/cli.ts"
+  },
+  "files": [
+    "index.ts",
+    "src"
+  ],
+  "dependencies": {
+    "@entropy/compiler": "workspace:*",
+    "@entropy/core": "workspace:*",
+    "@entropy/decompiler": "workspace:*",
+    "@entropy/parser": "workspace:*",
+    "@entropy/player": "workspace:*",
+    "dexie": "^4.4.6",
+    "pixi.js": "^8.20.1"
+  }
+}

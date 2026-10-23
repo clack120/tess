@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stub } from './stub.ts';
-import { compileProject } from '@tess/compiler';
-import { Vm } from '@tess/vm';
-import { RuntimeBlockError } from '../packages/tessvm/src/runtime/diagnostics.ts';
-import { Codegen } from '../packages/tessvm/src/compile/codegen.ts';
+import { compileProject } from '@entropy/compiler';
+import { Vm } from '@entropy/vm';
+import { RuntimeBlockError } from '../packages/vm/src/runtime/diagnostics.ts';
+import { Codegen } from '../packages/vm/src/compile/codegen.ts';
 
 const entity = { localVars: null } as never;
 function listVm(values: unknown[] = ['A', 'B', 'C']) {

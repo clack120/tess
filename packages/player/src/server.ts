@@ -1,14 +1,14 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { stripTypes } from '@tess/core/strip-types';
+import { stripTypes } from '@entropy/core/strip-types';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import { playerPage, DEBUG_UI_PATH, PREACT_PATH } from './template.ts';
 import { assetRoutes, withServedAssets } from './asset-routes.ts';
-import { makeEntryBundle } from '@tess/compiler';
-import type { AssetFile, EntryProject, SourceMap } from '@tess/compiler';
+import { makeEntryBundle } from '@entropy/compiler';
+import type { AssetFile, EntryProject, SourceMap } from '@entropy/compiler';
 
 export interface ServeOptions {
   project: EntryProject;

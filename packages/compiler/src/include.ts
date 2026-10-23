@@ -1,9 +1,9 @@
-import { parse } from '@tess/parser';
-import { lineAndColumn } from '@tess/parser';
+import { parse } from '@entropy/parser';
+import { lineAndColumn } from '@entropy/parser';
 import type {
   Node, ObjectMember, ObjectNode, ParseRoot, ProgramNode, SceneMember, StartRule,
   TopLevelItem, UseObjectNode,
-} from '@tess/parser';
+} from '@entropy/parser';
 import { EMPTY_HOST, basename, dirname, extname } from './host.ts';
 import type { CompilerHost } from './host.ts';
 import type { CompileCache, CompileDiagnostic } from './types.ts';

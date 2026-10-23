@@ -1,9 +1,9 @@
 import { createIdFactory, seedFrom } from './ids.ts';
 import type { IdFactory } from './ids.ts';
 import { commentKey, makeComment } from './comments.ts';
-import { lineIndex } from '@tess/parser';
-import { BUILTIN_FUNCTIONS, OBJECT_PROPERTIES, STATE_VALUES, didYouMean } from '@tess/core';
-import type { Expr, Node } from '@tess/parser';
+import { lineIndex } from '@entropy/parser';
+import { BUILTIN_FUNCTIONS, OBJECT_PROPERTIES, STATE_VALUES, didYouMean } from '@entropy/core';
+import type { Expr, Node } from '@entropy/parser';
 import type {
   CompileCache, CompileDiagnostic, CompiledFunction, CompiledObject,
   CompileOptions, EntryBlock, EntryMessage, EntryParam, EntryScene, EntryTable,
@@ -111,7 +111,7 @@ export class Context {
     this.warnings = [];
     this.notices = [];
 
-    // Map block IDs back to Tess source positions for runtime diagnostics.
+    // Map block IDs back to Entropy source positions for runtime diagnostics.
     this.sourceMap = {};
     this.currentNode = null;
 

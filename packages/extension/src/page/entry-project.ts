@@ -1,5 +1,5 @@
 // Entry omits asset URLs from GraphQL, so derive them from stored filenames.
-import type { EntryProjectLike } from '../../../tessvm/src/runtime/engine.ts';
+import type { EntryProjectLike } from '../../../vm/src/runtime/engine.ts';
 
 const GRAPHQL_URL = '/graphql/SELECT_PROJECT';
 

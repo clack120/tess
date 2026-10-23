@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@tess/compiler';
-import { Vm, formatVmError } from '@tess/vm';
-import { blockOfError, runtimeValue, snapshotVm } from '../packages/tessvm/src/runtime/diagnostics.ts';
-import type { RawBlock } from '../packages/tessvm/src/compile/codegen.ts';
+import { compileProject } from '@entropy/compiler';
+import { Vm, formatVmError } from '@entropy/vm';
+import { blockOfError, runtimeValue, snapshotVm } from '../packages/vm/src/runtime/diagnostics.ts';
+import type { RawBlock } from '../packages/vm/src/compile/codegen.ts';
 
 function load(source: string, kernel = false) {
-  const compiled = compileProject(source, { path: 'runtime.tess' });
+  const compiled = compileProject(source, { path: 'runtime.etp' });
   assert.deepEqual(compiled.errors, []);
   assert.ok(compiled.project);
   const blocks: RawBlock[] = [];
@@ -56,7 +56,7 @@ end`, kernel);
     const error = vm.errors[0]!;
     assert.equal(error.blockId, blocks.find((block) => block.type === 'char_at')!.id);
     assert.equal(error.blockType, 'char_at');
-    assert.match(error.stack!, /tessvm-generated-\d+\.js(?:, <anonymous>)?:\d+:\d+/);
+    assert.match(error.stack!, /entropy-generated-\d+\.js(?:, <anonymous>)?:\d+:\d+/);
     assert.deepEqual(error.inputs, {
       text: { type: 'string', value: '🙂abc', length: 5, truncated: false },
       index: { type: 'number', value: 12 },
@@ -129,7 +129,7 @@ end`, kernel);
 });
 
 test('block-like comments inside work strings stay text and cannot forge trace sites', () => {
-  const text = '/*@tessvm:999999*/ "🙂" \\ /*@tessvm:0*/';
+  const text = '/*@entropy:999999*/ "🙂" \\ /*@entropy:0*/';
   const { vm, blocks } = load(`var text = ${JSON.stringify(text)}
 var index = 0
 object "actor":
@@ -238,17 +238,17 @@ test('runtime value snapshots bound text and preserve falsy and nonfinite values
 });
 
 test('Chrome, Firefox and Deno stack positions resolve consistently and unknown sources stay unknown', () => {
-  const trace = { sourceId: 'tessvm-generated-123.js', sites: [
+  const trace = { sourceId: 'entropy-generated-123.js', sites: [
     { line: 5, column: 2, blockId: 'statement', blockType: 'text_read' },
     { line: 6, column: 30, blockId: 'inner', blockType: 'char_at' },
   ] };
   for (const stack of [
-    'Error: bad\n    at Object.charAt (ops.js:100:2)\n    at F (tessvm-generated-123.js:6:31)',
-    'charAt@ops.js:100:2\nF@tessvm-generated-123.js:6:31',
-    'Error: bad\n    at Array.eval (tessvm-generated-123.js, <anonymous>:6:31)',
+    'Error: bad\n    at Object.charAt (ops.js:100:2)\n    at F (entropy-generated-123.js:6:31)',
+    'charAt@ops.js:100:2\nF@entropy-generated-123.js:6:31',
+    'Error: bad\n    at Array.eval (entropy-generated-123.js, <anonymous>:6:31)',
   ]) assert.equal(blockOfError(stack, trace)?.blockId, 'inner');
-  assert.equal(blockOfError('at F (tessvm-generated-123.js:6:29)', trace)?.blockId, 'statement');
-  assert.equal(blockOfError('at F (tessvm-generated-123.js:1:1)', trace), null);
+  assert.equal(blockOfError('at F (entropy-generated-123.js:6:29)', trace)?.blockId, 'statement');
+  assert.equal(blockOfError('at F (entropy-generated-123.js:1:1)', trace), null);
   assert.equal(blockOfError('at F (other.js:6:31)', trace), null);
   assert.equal(blockOfError(undefined, trace), null);
 });

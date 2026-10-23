@@ -1,36 +1,36 @@
-import type { TessVmHandle } from '../../../tessvm/src/web/boot.ts';
-import type { Entity, Target } from '../../../tessvm/src/runtime/model.ts';
+import type { EntropyHandle } from '../../../vm/src/web/boot.ts';
+import type { Entity, Target } from '../../../vm/src/runtime/model.ts';
 
 const HOST = '.css-hxgsd9.e1edvhig3';
 const ROW = 28;
 const STYLE = `
-.tessvm-inspector { box-sizing:border-box; width:100%; min-width:0; margin:0 0 8px; border:1px solid #aaa; background:#fff; color:#222; color-scheme:light; font:12px/1.4 system-ui,sans-serif; text-align:left; }
-.tessvm-inspector[hidden] { display:none!important; }
-.tessvm-inspector .ti-head { position:sticky; top:0; z-index:1; display:flex; align-items:center; gap:6px; padding:4px 6px; border-bottom:1px solid #ccc; background:#eee; cursor:grab; user-select:none; touch-action:none; }
-.tessvm-inspector .ti-head strong { flex:1; font-weight:600; }
-.tessvm-inspector summary { cursor:pointer; padding:4px 6px; overflow-wrap:anywhere; }
-.tessvm-inspector .ti-body { padding:0 6px 6px; }
-.tessvm-inspector .ti-tools { display:flex; flex-wrap:wrap; gap:4px; align-items:center; padding:5px 0; border-bottom:1px solid #ddd; }
-.tessvm-inspector button { padding:2px 5px; border:1px solid #bbb; border-radius:0; background:transparent; color:inherit; font:inherit; cursor:pointer; }
-.tessvm-inspector button:hover, .tessvm-inspector button[aria-pressed=true] { background:#e6e6e6; }
-.tessvm-inspector :focus-visible { outline:2px solid #b82168; outline-offset:1px; }
-.tessvm-inspector label { display:flex; align-items:center; gap:5px; cursor:pointer; }
-.tessvm-inspector input { margin:0; }
-.tessvm-inspector .ti-status { margin:4px 0; color:#666; font-variant-numeric:tabular-nums; }
-.tessvm-inspector .ti-tree { max-height:360px; overflow:auto; overscroll-behavior:contain; }
-.tessvm-inspector .ti-target { margin-left:12px; }
-.tessvm-inspector .ti-target > summary { display:flex; align-items:center; gap:4px; padding:0; }
-.tessvm-inspector .ti-target > summary::before { content:'▸'; width:12px; flex:none; }
-.tessvm-inspector .ti-target[open] > summary::before { content:'▾'; }
-.tessvm-inspector .ti-entity { flex:1; min-width:0; width:100%; height:28px; border:0; padding:2px 6px; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:transparent; }
-.tessvm-inspector .ti-entity[aria-pressed=true] { background:#ddd; }
-.tessvm-inspector .ti-clones { position:relative; max-height:224px; overflow:auto; margin-left:18px; overscroll-behavior:contain; }
-.tessvm-inspector .ti-clone-space { position:relative; }
-.tessvm-inspector .ti-clone-space > button { position:absolute; left:0; }
-.tessvm-inspector .ti-info { margin:6px 0 0; padding:6px 0 0; border-top:1px solid #ddd; max-height:180px; overflow:auto; font:11px/1.5 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
-.tessvm-inspector.ti-floating { position:absolute; right:8px; top:8px; z-index:20; width:min(320px,calc(100% - 16px)); margin:0; max-height:calc(100% - 16px); overflow:auto; }
-.tessvm-inspector.ti-detached { position:fixed; z-index:2147483646; width:min(320px,calc(100vw - 16px)); max-height:calc(100vh - 16px); }
-.tessvm-player.ti-picking canvas { cursor:crosshair!important; }
+.entropy-inspector { box-sizing:border-box; width:100%; min-width:0; margin:0 0 8px; border:1px solid #aaa; background:#fff; color:#222; color-scheme:light; font:12px/1.4 system-ui,sans-serif; text-align:left; }
+.entropy-inspector[hidden] { display:none!important; }
+.entropy-inspector .ti-head { position:sticky; top:0; z-index:1; display:flex; align-items:center; gap:6px; padding:4px 6px; border-bottom:1px solid #ccc; background:#eee; cursor:grab; user-select:none; touch-action:none; }
+.entropy-inspector .ti-head strong { flex:1; font-weight:600; }
+.entropy-inspector summary { cursor:pointer; padding:4px 6px; overflow-wrap:anywhere; }
+.entropy-inspector .ti-body { padding:0 6px 6px; }
+.entropy-inspector .ti-tools { display:flex; flex-wrap:wrap; gap:4px; align-items:center; padding:5px 0; border-bottom:1px solid #ddd; }
+.entropy-inspector button { padding:2px 5px; border:1px solid #bbb; border-radius:0; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.entropy-inspector button:hover, .entropy-inspector button[aria-pressed=true] { background:#e6e6e6; }
+.entropy-inspector :focus-visible { outline:2px solid #b82168; outline-offset:1px; }
+.entropy-inspector label { display:flex; align-items:center; gap:5px; cursor:pointer; }
+.entropy-inspector input { margin:0; }
+.entropy-inspector .ti-status { margin:4px 0; color:#666; font-variant-numeric:tabular-nums; }
+.entropy-inspector .ti-tree { max-height:360px; overflow:auto; overscroll-behavior:contain; }
+.entropy-inspector .ti-target { margin-left:12px; }
+.entropy-inspector .ti-target > summary { display:flex; align-items:center; gap:4px; padding:0; }
+.entropy-inspector .ti-target > summary::before { content:'▸'; width:12px; flex:none; }
+.entropy-inspector .ti-target[open] > summary::before { content:'▾'; }
+.entropy-inspector .ti-entity { flex:1; min-width:0; width:100%; height:28px; border:0; padding:2px 6px; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:transparent; }
+.entropy-inspector .ti-entity[aria-pressed=true] { background:#ddd; }
+.entropy-inspector .ti-clones { position:relative; max-height:224px; overflow:auto; margin-left:18px; overscroll-behavior:contain; }
+.entropy-inspector .ti-clone-space { position:relative; }
+.entropy-inspector .ti-clone-space > button { position:absolute; left:0; }
+.entropy-inspector .ti-info { margin:6px 0 0; padding:6px 0 0; border-top:1px solid #ddd; max-height:180px; overflow:auto; font:11px/1.5 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+.entropy-inspector.ti-floating { position:absolute; right:8px; top:8px; z-index:20; width:min(320px,calc(100% - 16px)); margin:0; max-height:calc(100% - 16px); overflow:auto; }
+.entropy-inspector.ti-detached { position:fixed; z-index:2147483646; width:min(320px,calc(100vw - 16px)); max-height:calc(100vh - 16px); }
+.entropy-player.ti-picking canvas { cursor:crosshair!important; }
 `;
 
 interface Branch {
@@ -43,16 +43,16 @@ interface Branch {
 }
 
 // Read runtime references only while visible; clone rows are recycled as the list scrolls.
-export function mountInspector(player: HTMLElement, live: TessVmHandle) {
+export function mountInspector(player: HTMLElement, live: EntropyHandle) {
   const { vm, renderer } = live;
   const panel = document.createElement('section');
   panel.hidden = true;
-  panel.className = 'tessvm-inspector';
+  panel.className = 'entropy-inspector';
   const style = document.createElement('style');
   style.textContent = STYLE;
   panel.appendChild(style);
   const title = document.createElement('header'); title.className = 'ti-head';
-  const name = document.createElement('strong'); name.textContent = 'TessVM'; title.appendChild(name);
+  const name = document.createElement('strong'); name.textContent = 'Entropy'; title.appendChild(name);
   panel.appendChild(title);
   const body = document.createElement('div'); body.className = 'ti-body'; panel.appendChild(body);
   const tools = document.createElement('div'); tools.className = 'ti-tools'; body.appendChild(tools);
@@ -191,7 +191,7 @@ export function mountInspector(player: HTMLElement, live: TessVmHandle) {
   }
 
   const pick = (event: PointerEvent) => {
-    if (!picking || !(event.target instanceof Element) || !event.target.closest('.tessvm-stage canvas')) return;
+    if (!picking || !(event.target instanceof Element) || !event.target.closest('.entropy-stage canvas')) return;
     if (event.type === 'pointerdown' && event.button !== 0) return;
     const rect = renderer.canvasRect();
     if (!rect.width || !rect.height) return;

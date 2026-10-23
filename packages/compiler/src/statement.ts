@@ -11,13 +11,13 @@ import {
   unknownFunctionError,
 } from "./expression.ts";
 import { requireSaveFunction, requireScaleSetter } from "./runtime.ts";
-import { BUILTIN_FUNCTIONS, didYouMean, orHint } from '@tess/core';
-import { caseValue } from '@tess/parser';
+import { BUILTIN_FUNCTIONS, didYouMean, orHint } from '@entropy/core';
+import { caseValue } from '@entropy/parser';
 import type {
   AssignNode, Expr, ExpressionStatementNode, ForNode, Identifier, IndexNode, PlaySoundNode,
   ListDeclNode, Node, ShowHideNode, Stmt, TableAddLineNode, TableRemoveLineNode,
   SwitchNode, VarDeclNode,
-} from '@tess/parser';
+} from '@entropy/parser';
 import type { Context } from './context.ts';
 import type {
   EntryBlock, EntryParam, EntryTable, EntryVariable, ResourceRef, VariableRef,
@@ -557,7 +557,7 @@ function compileSwitch(node: SwitchNode, ctx: Context): EntryBlock[] {
   if (!value) return [];
   const id = ctx.newId();
   // Branch labels are literals, so selection finishes before a body can yield or recurse.
-  ctx.variables.push({ id, name: '[Tess] switch', value: 0, visible: false,
+  ctx.variables.push({ id, name: '[Entropy] switch', value: 0, visible: false,
     variableType: 'variable', isCloud: false, isRealTime: false, cloudDate: false,
     object: ctx.object?.id ?? null, x: 0, y: 0 });
   let alternate = node.alternate ? compileStatements(node.alternate, ctx) : [];
@@ -609,7 +609,7 @@ function compileFor(node: ForNode, ctx: Context): EntryBlock[] {
       };
     };
     const counter = allocate(node.name, true);
-    const bound = allocate('[Tess] for end', false);
+    const bound = allocate('[Entropy] for end', false);
     const number = (value: EntryBlock) => ctx.block('calc_basic', [value, 'MULTI', ctx.number(1)]);
     const update = () => counter.write(ctx.block('calc_basic', [counter.read(), 'PLUS', ctx.number(node.step)]));
     const body = compileLoopBody(node.body, ctx, update);

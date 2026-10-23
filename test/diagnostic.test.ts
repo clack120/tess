@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@tess/compiler';
+import { compileProject } from '@entropy/compiler';
 import { codeFrame } from '../packages/parser/src/parser/frame.ts';
 
 const work = (body: string, declarations = '') => `${declarations}
@@ -23,19 +23,19 @@ test('compile diagnostics show the failing source for errors, warnings and notic
 
 test('included diagnostics use the included source, including missing use targets', () => {
   const files: Record<string, string> = {
-    'object.tess': 'when start do\n  say missing\nend',
+    'object.etp': 'when start do\n  say missing\nend',
   };
-  const result = compileProject('scene "s":\n  useobject "object.tess"\nend', {
-    path: 'main.tess',
+  const result = compileProject('scene "s":\n  useobject "object.etp"\nend', {
+    path: 'main.etp',
     readFile: file => files[file.split('/').pop()!]!,
   });
   const error = result.errors.find(item => item.message.includes("'missing'"))!;
-  assert.match(error.file!, /object\.tess$/);
+  assert.match(error.file!, /object\.etp$/);
   assert.match(error.detail!, /say missing/);
   assert.doesNotMatch(error.detail!, /useobject/);
 
-  const missing = compileProject('use "absent.tess"', { path: 'main.tess' });
-  assert.match(missing.errors[0]!.detail!, /use "absent\.tess"/);
+  const missing = compileProject('use "absent.etp"', { path: 'main.etp' });
+  assert.match(missing.errors[0]!.detail!, /use "absent\.etp"/);
 });
 
 test('code frames align tabs and Korean text and underline only the failing range', () => {
@@ -83,13 +83,13 @@ test('out-of-scope and used-before-declaration errors link local declarations in
     'hidden = 2\n  var hidden = 1\n  return hidden',
     'for hidden from 1 to 2:\n    say hidden\n  end\n  return hidden',
   ]) {
-    const result = compileProject('use "functions.tess"', {
-      path: 'main.tess', readFile: () => `function f() do\n  ${body}\nend`,
+    const result = compileProject('use "functions.etp"', {
+      path: 'main.etp', readFile: () => `function f() do\n  ${body}\nend`,
     });
     const error = result.errors.find(error => error.code === 'E0004')!;
     assert.match(error.help!, /블록/);
     assert.equal(error.related!.length, 1);
-    assert.match(error.related![0]!.file!, /functions\.tess$/);
+    assert.match(error.related![0]!.file!, /functions\.etp$/);
     assert.match(error.related![0]!.detail!, /var hidden = 1|for hidden from 1/);
     assert.ok(result.warnings.every(warning => warning.offset !== error.offset), 'one diagnostic per unresolved name');
   }
@@ -97,25 +97,25 @@ test('out-of-scope and used-before-declaration errors link local declarations in
 
 test('arity notes point to an included declaration for statement and value calls', () => {
   for (const statement of ['say f()', 'f()']) {
-    const result = compileProject(`use "functions.tess"\n${work(statement)}`, {
-      path: 'main.tess', readFile: () => 'function f(n) do\n  say n\nend',
+    const result = compileProject(`use "functions.etp"\n${work(statement)}`, {
+      path: 'main.etp', readFile: () => 'function f(n) do\n  say n\nend',
     });
     const error = result.errors.find(error => error.code === 'E0006')!;
-    assert.match(error.file!, /main\.tess$/);
-    assert.match(error.related![0]!.file!, /functions\.tess$/);
+    assert.match(error.file!, /main\.etp$/);
+    assert.match(error.related![0]!.file!, /functions\.etp$/);
     assert.match(error.related![0]!.detail!, /function f\(n\)/);
   }
 });
 
 test('duplicate declarations identify the first declaration even in another source file', () => {
-  const result = compileProject('var score = 0\nuse "shared.tess"', {
-    path: 'main.tess', readFile: () => 'var score = 1',
+  const result = compileProject('var score = 0\nuse "shared.etp"', {
+    path: 'main.etp', readFile: () => 'var score = 1',
   });
   const error = result.errors.find(item => item.code === 'E0001')!;
-  assert.match(error.file!, /shared\.tess$/);
+  assert.match(error.file!, /shared\.etp$/);
   assert.match(error.detail!, /var score = 1/);
   assert.equal(error.related!.length, 1);
-  assert.match(error.related![0]!.file!, /main\.tess$/);
+  assert.match(error.related![0]!.file!, /main\.etp$/);
   assert.match(error.related![0]!.detail!, /var score = 0/);
   assert.match(error.help!, /대입/);
 });

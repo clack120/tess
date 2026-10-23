@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stub } from './stub.ts';
 import { JSDOM } from 'jsdom';
-import { Vm } from '@tess/vm';
+import { Vm } from '@entropy/vm';
 import { mountInspector } from '../packages/extension/src/page/inspector.ts';
 
 function setup(t: any) {
-  const dom = new JSDOM('<!doctype html><div class="css-hxgsd9 e1edvhig3"><p>keep</p></div><div id="player"><div class="tessvm-stage"><canvas></canvas></div></div>', { pretendToBeVisual: true });
+  const dom = new JSDOM('<!doctype html><div class="css-hxgsd9 e1edvhig3"><p>keep</p></div><div id="player"><div class="entropy-stage"><canvas></canvas></div></div>', { pretendToBeVisual: true });
   const { window } = dom;
   const keys = ['document', 'window', 'Element', 'IntersectionObserver'];
   const scope = globalThis as Record<string, unknown>;
@@ -41,7 +41,7 @@ function setup(t: any) {
   t.after(() => { inspector.dispose(); window.close(); for (const [key, value] of previous) scope[key] = value; });
   return { window, vm, inspector, timers, calls, visibility: (visible: boolean) => visibility!([{ isIntersecting: visible }]),
     inspected: () => inspected, downloaded: () => downloaded,
-    panel: window.document.querySelector<HTMLElement>('.tessvm-inspector')! };
+    panel: window.document.querySelector<HTMLElement>('.entropy-inspector')! };
 }
 
 test('Entry inspector preserves its host and virtualizes live clones without idle polling', t => {
@@ -113,7 +113,7 @@ test('Entry inspector highlights hover, exposes diagnostics and sleeps offscreen
   window.document.dispatchEvent(new window.Event('visibilitychange'));
   assert.equal(timers.size, 1);
   inspector.dispose();
-  assert.equal(timers.size, 0); assert.equal(window.document.querySelector('.tessvm-inspector'), null);
+  assert.equal(timers.size, 0); assert.equal(window.document.querySelector('.entropy-inspector'), null);
 });
 
 test('Entry inspector follows fullscreen and falls back when the dock is replaced', t => {

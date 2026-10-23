@@ -1,0 +1,199 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Entropy",
+  "scopeName": "source.etp",
+  "patterns": [
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#string"
+    },
+    {
+      "include": "#color"
+    },
+    {
+      "include": "#number"
+    },
+    {
+      "include": "#declaration"
+    },
+    {
+      "include": "#function-call"
+    },
+    {
+      "include": "#keyword"
+    },
+    {
+      "include": "#operator"
+    },
+    {
+      "include": "#punctuation"
+    },
+    {
+      "include": "#identifier"
+    }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.etp",
+      "match": "#(?!(?:[0-9a-fA-F]+|(?i:turquoise|chocolate|lavender|magenta|fuchsia|crimson|skyblue|yellow|silver|maroon|purple|orange|indigo|violet|salmon|tomato|orchid|black|white|green|olive|brown|beige|ivory|khaki|coral|wheat|lime|blue|cyan|aqua|gray|grey|teal|navy|pink|gold|plum|snow|mint|검정색|검은색|하얀색|빨간색|주황색|노란색|연두색|초록색|청록색|하늘색|파란색|보라색|자주색|분홍색|자홍색|red|tan|검정|흑색|하양|흰색|백색|빨강|적색|주황|노랑|황색|연두|초록|녹색|청록|하늘|파랑|청색|남색|보라|분홍|자홍|갈색|밤색|회색|은색|금색))(?![\\p{L}0-9_])).*$"
+    },
+    "string": {
+      "name": "string.quoted.double.etp",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.etp",
+          "match": "\\\\(u[0-9a-fA-F]{4}|.)"
+        }
+      ]
+    },
+    "color": {
+      "name": "constant.other.color.etp",
+      "match": "#(?:[0-9a-fA-F]+|(?i:turquoise|chocolate|lavender|magenta|fuchsia|crimson|skyblue|yellow|silver|maroon|purple|orange|indigo|violet|salmon|tomato|orchid|black|white|green|olive|brown|beige|ivory|khaki|coral|wheat|lime|blue|cyan|aqua|gray|grey|teal|navy|pink|gold|plum|snow|mint|검정색|검은색|하얀색|빨간색|주황색|노란색|연두색|초록색|청록색|하늘색|파란색|보라색|자주색|분홍색|자홍색|red|tan|검정|흑색|하양|흰색|백색|빨강|적색|주황|노랑|황색|연두|초록|녹색|청록|하늘|파랑|청색|남색|보라|분홍|자홍|갈색|밤색|회색|은색|금색))(?![\\p{L}0-9_])"
+    },
+    "number": {
+      "name": "constant.numeric.etp",
+      "match": "(?<![A-Za-z0-9_])[0-9]+(\\.[0-9]+)?"
+    },
+    "declaration": {
+      "patterns": [
+        {
+          "match": "((?<![A-Za-z0-9_])(?:function)(?![A-Za-z0-9_]))\\s+([A-Za-z_\\p{L}][A-Za-z0-9_\\p{L}]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.etp"
+            },
+            "2": {
+              "name": "entity.name.function.etp"
+            }
+          }
+        },
+        {
+          "match": "((?<![A-Za-z0-9_])(?:table)(?![A-Za-z0-9_]))\\s+([A-Za-z_\\p{L}][A-Za-z0-9_\\p{L}]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.etp"
+            },
+            "2": {
+              "name": "entity.name.type.etp"
+            }
+          }
+        },
+        {
+          "match": "((?<![A-Za-z0-9_])(?:list|var)(?![A-Za-z0-9_]))\\s+([A-Za-z_\\p{L}][A-Za-z0-9_\\p{L}]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.etp"
+            },
+            "2": {
+              "name": "variable.other.etp"
+            }
+          }
+        },
+        {
+          "name": "keyword.declaration.etp",
+          "match": "(?<![A-Za-z0-9_])(?:useobject|function|project|usetext|object|scene|table|text|list|use|var)(?![A-Za-z0-9_])"
+        }
+      ]
+    },
+    "function-call": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.etp",
+          "match": "(?<![A-Za-z0-9_])(?:count_social_disaster_guideline|count_safety_accident_guideline|get_social_disaster_guideline|get_safety_accident_guideline|get_current_city_weather_data|get_today_city_temperature|count_lifeSafety_behavior|count_disaster_guideline|get_current_weather_data|count_disaster_behavior|get_lifeSafety_behavior|get_disaster_guideline|get_disaster_behavior|get_city_weather_data|get_today_temperature|get_time_weather_data|get_translated_string|count_disaster_alert|check_disaster_alert|get_cur_weather_data|get_day_weather_data|check_city_finedust|get_korea_area_code|get_disaster_alert|check_city_weather|check_cur_finddust|check_time_weather|get_festival_info|check_cur_weather|check_day_weather|get_weather_data|get_time_weather|get_cur_weather|get_day_weather|costume_number|sound_duration|count_festival|check_finedust|check_language|check_weather|text_content|random_color|column_count|get_cur_wind|block_count|starts_with|repeat_text|correlation|trim_start|factorial|ends_with|pad_start|uppercase|lowercase|row_count|key_down|touching|distance|index_of|trim_end|contains|from_hex|last_row|costume|pad_end|replace|reverse|average|maximum|minimum|random|length|to_hex|lookup|median|log10|floor|round|angle|slice|count|stdev|type|asin|acos|atan|log2|ceil|root|size|join|trim|sin|cos|tan|abs|min|max|way|now|sum|ln|x|y)(?![A-Za-z0-9_])(?=\\s*\\()"
+        },
+        {
+          "match": "([A-Za-z_\\p{L}][A-Za-z0-9_\\p{L}]*)(?=\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.etp"
+            }
+          }
+        }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "name": "constant.language.etp",
+          "match": "(?<![A-Za-z0-9_])(?:transparent|vertical|false|front|first|other|green|true|next|prev|back|last|this|them|free|none|blue|all|red|me)(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "variable.language.etp",
+          "match": "(?<![A-Za-z0-9_])(?:costume_number|block_count|mouse_down|boost_mode|touchable|nickname|can_save|clicked|user_id|device|answer|timer)(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "storage.modifier.etp",
+          "match": "(?<![A-Za-z0-9_])(?:realtime|default|shared|force|as|id)(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "keyword.control.etp",
+          "match": "(?<![A-Za-z0-9_])(?:continue|default|forever|restart|switch|repeat|return|while|until|break|else|case|then|wait|skip|stop|end|for|if|do)(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "keyword.control.event.etp",
+          "match": "(?<![A-Za-z0-9_])(?:cloned|signal|click|stage|start|when|key)(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "support.variable.property.etp",
+          "match": "(?<![A-Za-z0-9_])(?:text_strikethrough|effect_brightness|text_underline|effect_color|effect_alpha|sound_volume|text_content|sound_speed|text_italic|draw_color|draw_width|draw_alpha|fill_color|font_color|text_align|line_break|font_size|text_bold|rotation|bg_color|scale_x|scale_y|costume|angle|size|font|way|x|y)(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "keyword.other.command.etp",
+          "match": "(?<![A-Za-z0-9_])(?:description|columns|effects|forward|prepend|visible|append|bounce|bubble|center|clones|column|insert|remove|series|async|clear|clone|chart|order|pitch|reset|sound|speed|stamp|steer|store|think|timer|title|voice|write|call|draw|fill|flip|hide|jump|kill|lock|look|move|name|play|read|save|send|show|step|turn|add|ask|bgm|del|fps|row|say|tts|go)(?![A-Za-z0-9_])"
+        }
+      ]
+    },
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.assignment.etp",
+          "match": "\\*\\*=|[+\\-*/%]=|=(?!=)"
+        },
+        {
+          "name": "keyword.operator.comparison.etp",
+          "match": "==|!=|>=|<=|>|<"
+        },
+        {
+          "name": "keyword.operator.arithmetic.etp",
+          "match": "\\*\\*|//|[+\\-*/%]"
+        },
+        {
+          "name": "keyword.operator.word.etp",
+          "match": "(?<![A-Za-z0-9_])(?:from|and|not|for|or|in|at|to|up)(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "keyword.operator.optional.etp",
+          "match": "\\?"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.block.begin.etp",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.separator.comma.etp",
+          "match": ","
+        },
+        {
+          "name": "meta.brace.round.etp",
+          "match": "[()]"
+        },
+        {
+          "name": "meta.brace.square.etp",
+          "match": "[\\[\\]]"
+        }
+      ]
+    },
+    "identifier": {
+      "name": "variable.other.etp",
+      "match": "[A-Za-z_\\p{L}][A-Za-z0-9_\\p{L}]*"
+    }
+  }
+}

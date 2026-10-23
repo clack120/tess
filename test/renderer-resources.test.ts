@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { stripTypes } from '@tess/core/strip-types';
+import { stripTypes } from '@entropy/core/strip-types';
 
 function setup() {
   const cache = new Map<string, any>(), aliases = new Set<string>(), unloads: string[] = [];
@@ -30,7 +30,7 @@ function setup() {
     Color: class { alpha = 1; toNumber() { return 0; } }, svgSharpness: () => 2,
     stage: { scale: 1, worldWidth: 640, worldHeight: 360 }, MAX_SHARPNESS: 6,
   });
-  const source = stripTypes(fs.readFileSync(new URL('../packages/tessvm/src/render/renderer.ts', import.meta.url), 'utf8'))
+  const source = stripTypes(fs.readFileSync(new URL('../packages/vm/src/render/renderer.ts', import.meta.url), 'utf8'))
     .replace(/^import[\s\S]*?;\n/gm, '').replace(/^export /gm, '');
   vm.runInContext(`${source}\nthis.Engine=PixiRenderer;this.colors=colorCache;this.color=usableColor;`, context);
   const create = () => { const engine = new context.Engine(); engine.ready = true; return engine; };
@@ -85,9 +85,9 @@ test('dynamic pen colors have a bounded cache and reset drops queued entity refe
 
 test('reset releases owned Graphics contexts along with their containing entity tree', async () => {
   const { createRequire } = await import('node:module');
-  const require = createRequire(new URL('../packages/tessvm/package.json', import.meta.url));
+  const require = createRequire(new URL('../packages/vm/package.json', import.meta.url));
   const { Container, Graphics } = await import(require.resolve('pixi.js'));
-  const { PixiRenderer } = await import('../packages/tessvm/src/render/renderer.ts');
+  const { PixiRenderer } = await import('../packages/vm/src/render/renderer.ts');
   const renderer = new PixiRenderer();
   const root = new Container(), graphic = new Graphics();
   const context = graphic.context;

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parse } from '@tess/parser';
+import { parse } from '@entropy/parser';
 import { expr, stmt } from './helpers.ts';
-import type { ProgramNode } from '@tess/parser';
+import type { ProgramNode } from '@entropy/parser';
 
 function sexp(node: any): string {
   switch (node.type) {
@@ -166,7 +166,7 @@ test('stop 계열은 서로 다른 노드가 된다', () => {
 });
 
 test('노드에 소스 위치(loc)가 붙는다', async () => {
-  const { parse } = await import('@tess/parser');
+  const { parse } = await import('@entropy/parser');
   const { ast } = parse('var a = 1\n');
   assert.deepEqual((ast as ProgramNode).body[0]!.loc, { start: 0, end: 9 });
 });

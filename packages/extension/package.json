@@ -1,7 +1,7 @@
 {
-  "name": "@tess/extension",
+  "name": "@entropy/extension",
   "version": "0.3.53",
-  "description": "playentry.org 작품 실행 화면을 tessvm 실행기로 바꾸는 크롬·파이어폭스 확장",
+  "description": "playentry.org 작품 실행 화면을 Entropy 실행기로 바꾸는 크롬·파이어폭스 확장",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "watch": "bun watch.ts"
   },
   "dependencies": {
-    "@tess/vm": "workspace:*",
+    "@entropy/vm": "workspace:*",
     "dexie": "^4.4.6",
     "pixi.js": "^8.20.1"
   }

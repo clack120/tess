@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lineAndColumn, parse, validate } from '@tess/parser';
-import type { ProgramNode } from '@tess/parser';
+import { lineAndColumn, parse, validate } from '@entropy/parser';
+import type { ProgramNode } from '@entropy/parser';
 
 test('diagnostic positions use each included source and retain UTF-16 columns', () => {
   const sources = new Map([
-    ['one.tess', 'object "one":\nvar local_one = 0\nwhen start do\nwrite "x"\nclear text\nend\nend\nfunction f():\nreturn local_one\nend'],
-    ['two.tess', '# 😀\n\nobject "two":\nvar local_two = 0\nwhen start do\nwrite "😀"\nclear text\nend\nend\nfunction g():\nreturn local_two\nend'],
+    ['one.etp', 'object "one":\nvar local_one = 0\nwhen start do\nwrite "x"\nclear text\nend\nend\nfunction f():\nreturn local_one\nend'],
+    ['two.etp', '# 😀\n\nobject "two":\nvar local_two = 0\nwhen start do\nwrite "😀"\nclear text\nend\nend\nfunction g():\nreturn local_two\nend'],
   ]);
   const program: ProgramNode = { type: 'Program', body: [], loc: { start: 0, end: 0 } };
   for (const [file, source] of sources) {
@@ -259,7 +259,7 @@ end`);
 });
 
 test('use 가 있으면 이름 기반 경고를 끈다', () => {
-  const result = parse(`use "common/helpers.tess"
+  const result = parse(`use "common/helpers.etp"
 
 object "o":
   when start do

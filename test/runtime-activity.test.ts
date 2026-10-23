@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stub } from './stub.ts';
-import { Vm } from '@tess/vm';
-import { RuntimeDiagnostics } from '../packages/tessvm/src/web/diagnostics.ts';
+import { Vm } from '@entropy/vm';
+import { RuntimeDiagnostics } from '../packages/vm/src/web/diagnostics.ts';
 
 test('recent activity counts actual ticks, bounds history and retains partial failure intervals', (t) => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');

@@ -2,7 +2,7 @@ import { includesText, u16be, u16le, u32be } from './bytes.ts';
 import { EMPTY_HOST, basename, extname } from './host.ts';
 import { seedFrom } from './ids.ts';
 import { audioDuration } from './audio.ts';
-import type { Node } from '@tess/parser';
+import type { Node } from '@entropy/parser';
 import type { Context } from './context.ts';
 import type { EntryAsset } from './types.ts';
 

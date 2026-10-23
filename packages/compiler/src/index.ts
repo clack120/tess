@@ -5,15 +5,15 @@ import { buildCommentMap } from './comments.ts';
 import { makeAsset } from './assets.ts';
 import { compileStatements, compileStatement } from './statement.ts';
 import { compileValue } from './expression.ts';
-import { KEY_CODES, STORE_PREFIX, keyCodeOf } from '@tess/core';
-import { didYouMean } from '@tess/core';
-import { codeFrame, validate } from '@tess/parser';
-import { isAutoParamName } from '@tess/core';
+import { KEY_CODES, STORE_PREFIX, keyCodeOf } from '@entropy/core';
+import { didYouMean } from '@entropy/core';
+import { codeFrame, validate } from '@entropy/parser';
+import { isAutoParamName } from '@entropy/core';
 import type {
   AssignNode, CostumeNode, EventNode, FunctionDeclNode, Expr, ListDeclNode, Node, ObjectNode,
   ProgramNode, ReturnNode, SceneMember, SoundNode, Stmt, TableChartNode, TableDeclNode,
   TopLevelItem, VarDeclNode,
-} from '@tess/parser';
+} from '@entropy/parser';
 import type {
   CompiledFunction, CompiledObject, CompileDiagnostic, CompileOptions,
   CompileResult, EntryBlock, EntryEntity, EntryObject, EntryParam, EntryProject,
@@ -178,7 +178,7 @@ function collectGlobals(program: ProgramNode, ctx: Context) {
 
 const CHART_KINDS = new Set(['bar', 'line', 'pie', 'scatter']);
 
-// Entry chart columns start at zero; Tess columns start at one.
+// Entry chart columns start at zero; Entropy columns start at one.
 function chartSpec(
   chart: TableChartNode,
   node: TableDeclNode,
@@ -557,7 +557,7 @@ function compileFunctions(ctx: Context) {
       const id = ctx.newId();
       ctx.funcScope.returnId = id;
       // Entry's function-local reads turn empty strings and false into 0.
-      ctx.variables.push({ id, name: `[Tess] ${fn.name} return`, value: 0, visible: false,
+      ctx.variables.push({ id, name: `[Entropy] ${fn.name} return`, value: 0, visible: false,
         variableType: 'variable', isCloud: false, isRealTime: false, cloudDate: false,
         object: null, x: 0, y: 0 });
     }
@@ -725,7 +725,7 @@ function assemble(program: ProgramNode, ctx: Context, options: CompileOptions): 
     hardwareLiteBlocks: [],
     externalModules: [],
     externalModulesLite: [],
-    name: options.name ?? textField('title') ?? 'Tess 작품',
+    name: options.name ?? textField('title') ?? 'Entropy 작품',
     isPracticalCourse: false,
   };
 

@@ -1,7 +1,7 @@
 {
-  "name": "@tess/decompiler",
+  "name": "@entropy/decompiler",
   "version": "0.3.53",
-  "description": "이미 있는 엔트리 작품을 Tess 소스로 되돌린다",
+  "description": "이미 있는 엔트리 작품을 Entropy 소스로 되돌린다",
   "license": "MIT",
   "type": "module",
   "main": "index.ts",
@@ -13,8 +13,8 @@
     "src"
   ],
   "dependencies": {
-    "@tess/core": "workspace:*",
-    "@tess/parser": "workspace:*",
-    "@tess/player": "workspace:*"
+    "@entropy/core": "workspace:*",
+    "@entropy/parser": "workspace:*",
+    "@entropy/player": "workspace:*"
   }
 }
