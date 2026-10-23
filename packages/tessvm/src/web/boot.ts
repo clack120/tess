@@ -579,6 +579,14 @@ function bindInput(
       on(document, 'fullscreenchange', lockEscape);
       lockEscape();
       cleanups.push(() => keyboard.unlock?.());
+    } else if (grabEscape) {
+      // Firefox has no Keyboard Lock and Brave removes it, so say why Escape still leaves fullscreen.
+      let told = false;
+      on(document, 'fullscreenchange', () => {
+        if (told || !fullscreen()) return;
+        told = true;
+        console.warn('[tessvm] 이 브라우저는 Keyboard Lock 을 지원하지 않아 전체화면에서 Esc 를 잡을 수 없습니다');
+      });
     }
   }
   // Clear pressed keys on blur because the window may never receive their releases.
