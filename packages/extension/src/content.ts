@@ -1,5 +1,5 @@
 // Blank the original iframe before loading, but keep its layout box for the replacement player.
-import { api, readSettings, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY, ESCAPE_KEY } from './browser.ts';
+import { api, readSettings, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY, CACHE_CLEAR_KEY, ESCAPE_KEY } from './browser.ts';
 
 const IFRAME_MARK = '/iframe/';
 
@@ -16,6 +16,7 @@ interface Held {
 let enabled: boolean | null = null;
 let svg = true;
 let cache = false;
+let cacheClear = 0;
 let escape = true;
 let injected = false;
 const held: Held[] = [];
@@ -36,6 +37,7 @@ function inject(): void {
   const script = document.createElement('script');
   script.type = 'module';
   script.src = api.runtime.getURL('page/main.js');
+  script.onload = () => window.postMessage({ __entropy: 'scan', cache, clear: cacheClear }, location.origin);
   // Report a missing runner instead of leaving an unexplained empty player.
   script.onerror = () => {
     for (const item of held) {
@@ -59,6 +61,8 @@ function capture(item: Held): void {
 function mount(item: Held): void {
   capture(item);
   if (item.host?.isConnected) {
+    // A page update can clear the player while leaving its host attached.
+    if (!item.host.firstChild) window.postMessage({ __entropy: 'scan' }, location.origin);
     return;
   }
   const parent = item.frame.parentElement;
@@ -100,6 +104,7 @@ function release(item: Held): void {
 }
 
 function applyAll(): void {
+  if (enabled === null) return;
   let removed = false;
   for (let i = held.length - 1; i >= 0; i -= 1) {
     const item = held[i]!;
@@ -197,9 +202,19 @@ api.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') {
     return;
   }
-  if (SVG_KEY in changes || CACHE_KEY in changes || ESCAPE_KEY in changes) {
+  if (CACHE_CLEAR_KEY in changes) {
+    cacheClear = Number(changes[CACHE_CLEAR_KEY]?.newValue) || 0;
+    window.postMessage({ __entropy: 'scan', clear: cacheClear, live: true }, location.origin);
+  }
+  if (CACHE_KEY in changes) {
+    cache = changes[CACHE_KEY]?.newValue === true;
+    for (const item of held) {
+      if (item.host) item.host.dataset.entropyCache = cache ? '1' : '0';
+    }
+    window.postMessage({ __entropy: 'scan', cache }, location.origin);
+  }
+  if (SVG_KEY in changes || ESCAPE_KEY in changes) {
     if (SVG_KEY in changes) svg = changes[SVG_KEY]?.newValue !== false;
-    if (CACHE_KEY in changes) cache = changes[CACHE_KEY]?.newValue === true;
     if (ESCAPE_KEY in changes) escape = changes[ESCAPE_KEY]?.newValue !== false;
     // Rebuild players because they read this setting only when mounted.
     window.postMessage({ __entropy: 'unmount' }, location.origin);
@@ -220,6 +235,7 @@ void readSettings().then((settings) => {
   enabled = settings.enabled;
   svg = settings.svg;
   cache = settings.cache;
+  cacheClear = settings.cacheClear;
   escape = settings.escape;
   applyAll();
 });

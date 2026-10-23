@@ -1,4 +1,4 @@
-import { api, readSettings, write, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY } from '../browser.ts';
+import { api, readSettings, write, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY, CACHE_CLEAR_KEY } from '../browser.ts';
 import {
   clearWorks, exportAll, exportName, importAll, listWorks, removeWork, type SavedSummary,
 } from '../store-db.ts';
@@ -6,6 +6,8 @@ import {
 const power = document.getElementById('enabled') as HTMLButtonElement;
 const svg = document.getElementById('svg') as HTMLInputElement;
 const cache = document.getElementById('cache') as HTMLInputElement;
+const cacheClear = document.getElementById('cache-clear') as HTMLButtonElement;
+const cacheNote = document.getElementById('cache-note') as HTMLElement;
 const cacheSize = document.getElementById('cache-size') as HTMLElement;
 const saves = document.getElementById('saves') as HTMLElement;
 const savesEmpty = document.getElementById('saves-empty') as HTMLElement;
@@ -58,11 +60,10 @@ cache.addEventListener('change', () => {
   void write(CACHE_KEY, cache.checked);
 });
 
-// Pages report the size after loading a work, so this shows the last known value.
+// Cache writes arrive through extension storage while the popup is open.
 function paintCacheSize(value: unknown): void {
   const size = value as { count?: number; bytes?: number } | null;
-  cacheSize.hidden = !size?.count;
-  if (size?.count) cacheSize.textContent = `저장한 파일 ${size.count.toLocaleString('ko-KR')}개, ${byteText(size.bytes ?? 0)}`;
+  cacheSize.textContent = `저장한 파일 ${(size?.count ?? 0).toLocaleString('ko-KR')}개, ${byteText(size?.bytes ?? 0)}`;
 }
 
 function byteText(bytes: number): string {
@@ -71,9 +72,15 @@ function byteText(bytes: number): string {
   return mb < 1024 ? `${mb.toFixed(1)} MB` : `${(mb / 1024).toFixed(2)} GB`;
 }
 
-void api.storage.local.get({ [CACHE_SIZE_KEY]: null }).then((stored) => paintCacheSize(stored[CACHE_SIZE_KEY]));
+let cacheSizeUpdated = false;
+void api.storage.local.get({ [CACHE_SIZE_KEY]: null }).then((stored) => {
+  if (!cacheSizeUpdated) paintCacheSize(stored[CACHE_SIZE_KEY]);
+});
 api.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && CACHE_SIZE_KEY in changes) paintCacheSize(changes[CACHE_SIZE_KEY]?.newValue);
+  if (area === 'local' && CACHE_SIZE_KEY in changes) {
+    cacheSizeUpdated = true;
+    paintCacheSize(changes[CACHE_SIZE_KEY]?.newValue);
+  }
 });
 
 void readSettings().then((settings) => {
@@ -113,6 +120,19 @@ function confirmingButton(label: string, sure: string, run: () => void): HTMLBut
   button.addEventListener('blur', reset);
   return button;
 }
+
+const cacheDeleteButton = confirmingButton('파일 삭제', '정말 삭제', () => {
+  void api.storage.local.set({ [CACHE_CLEAR_KEY]: Date.now() }).then(() => {
+    cacheNote.textContent = '열린 엔트리 페이지에서 삭제합니다. 닫혀 있으면 다음에 열 때 삭제합니다.';
+    cacheNote.hidden = false;
+  }, () => {
+    cacheNote.textContent = '삭제하지 못했습니다. 다시 눌러 주세요.';
+    cacheNote.hidden = false;
+  });
+});
+cacheDeleteButton.id = 'cache-clear';
+cacheDeleteButton.className = 'link';
+cacheClear.replaceWith(cacheDeleteButton);
 
 function saveRow(saved: SavedSummary, again: () => void): HTMLLIElement {
   const row = document.createElement('li');

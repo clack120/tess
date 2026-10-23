@@ -10,12 +10,13 @@ import { JSDOM } from 'jsdom';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const POPUP = path.join(root, 'packages/extension/src/popup');
 
-async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknown[] = [], cacheSize: unknown = null) {
+async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknown[] = [], cacheSize: unknown = null,
+  initialSize?: Promise<Record<string, unknown>>) {
   const html = fs.readFileSync(path.join(POPUP, 'popup.html'), 'utf-8');
   const dom = new JSDOM(html, { pretendToBeVisual: true });
   t.after(() => dom.window.close());
 
-  const written: Array<[string, boolean]> = [];
+  const written: Array<[string, unknown]> = [];
   const dropped: string[] = [];
   let rows: any[] = saved.slice();
   const source = stripTypes(fs.readFileSync(path.join(POPUP, 'popup.ts'), 'utf-8'));
@@ -32,8 +33,10 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
     SVG_KEY: 'svg',
     CACHE_KEY: 'assetCache',
     CACHE_SIZE_KEY: 'assetCacheSize',
+    CACHE_CLEAR_KEY: 'assetCacheClear',
     api: { storage: {
-      local: { get: () => Promise.resolve({ assetCacheSize: cacheSize }) },
+      local: { get: () => initialSize ?? Promise.resolve({ assetCacheSize: cacheSize }),
+        set: async (values: Record<string, unknown>) => { written.push(...Object.entries(values)); } },
       onChanged: { addListener: (listener: (changes: any, area: string) => void) => sizeListeners.push(listener) },
     } },
     Intl: globalThis.Intl,
@@ -147,20 +150,48 @@ test('벡터 스위치는 저장된 값을 보여 주고, 바꾸면 그대로 �
 test('에셋 저장 스위치는 기본으로 꺼져 있고, 마지막으로 알린 용량을 보여 준다', async (t) => {
   const popup = await mountPopup(t, {});
   assert.equal((popup.find('cache') as HTMLInputElement).checked, false);
-  assert.equal(popup.find('cache-size').hidden, true);
+  assert.equal(popup.find('cache-size').textContent, '저장한 파일 0개, 0 B');
   popup.toggle('cache');
   assert.deepEqual(popup.written, [['assetCache', true]]);
   popup.reportSize({ count: 1234, bytes: 5 * 1024 * 1024 });
   assert.equal(popup.find('cache-size').hidden, false);
   assert.equal(popup.find('cache-size').textContent, '저장한 파일 1,234개, 5.0 MB');
   popup.reportSize({ count: 0, bytes: 0 });
-  assert.equal(popup.find('cache-size').hidden, true);
+  assert.equal(popup.find('cache-size').textContent, '저장한 파일 0개, 0 B');
 });
 
 test('열 때 이미 알려진 용량이 있으면 바로 보여 준다', async (t) => {
   const popup = await mountPopup(t, { cache: true }, [], { count: 3, bytes: 2048 });
   assert.equal((popup.find('cache') as HTMLInputElement).checked, true);
   assert.equal(popup.find('cache-size').textContent, '저장한 파일 3개, 2.0 KB');
+});
+
+test('공용 캐시 스위치는 실행기와 독립적이고 파일 삭제는 설정을 바꾸지 않는다', async t => {
+  const popup = await mountPopup(t, { enabled: false, cache: true }, [], { count: 3, bytes: 2048 });
+  assert.equal(popup.find('native-cache'), null);
+  assert.equal((popup.find('cache') as HTMLInputElement).checked, true);
+  popup.toggle('cache');
+  assert.deepEqual(popup.written, [['assetCache', false]]);
+  assert.equal(popup.find('cache-size').textContent, '저장한 파일 3개, 2.0 KB');
+  popup.click('cache-clear');
+  assert.equal(popup.written.length, 1);
+  popup.click('cache-clear');
+  await popup.settle();
+  assert.equal(popup.written[1]![0], 'assetCacheClear');
+  assert.equal(typeof popup.written[1]![1], 'number');
+  assert.equal(popup.on(), false);
+  assert.equal((popup.find('cache') as HTMLInputElement).checked, false);
+  assert.equal(popup.find('cache-note').hidden, false);
+});
+
+test('팝업을 여는 중 받은 최신 개수를 늦게 도착한 이전 값으로 덮지 않는다', async (t) => {
+  let finishRead!: (value: Record<string, unknown>) => void;
+  const initial = new Promise<Record<string, unknown>>(resolve => { finishRead = resolve; });
+  const popup = await mountPopup(t, { cache: true }, [], null, initial);
+  popup.reportSize({ count: 2, bytes: 2048 });
+  finishRead({ assetCacheSize: { count: 1, bytes: 1024 } });
+  await popup.settle();
+  assert.equal(popup.find('cache-size').textContent, '저장한 파일 2개, 2.0 KB');
 });
 
 const WORKS = [

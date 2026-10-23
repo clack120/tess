@@ -32,6 +32,12 @@
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": false
+    },
+    {
+      "matches": ["https://playentry.org/iframe/*"],
+      "js": ["native-content.js"],
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [

@@ -1,17 +1,21 @@
 import { mountPlayer, type MountedPlayer } from './player.ts';
+import { setAssetCache } from '../../../vm/src/web/fetch-retry.ts';
+import { applyCacheClear } from './cache.ts';
 
 const HOST_SELECTOR = '[data-entropy-project]';
 const players = new Map<HTMLElement, { player: MountedPlayer; key: string }>();
 
 function keyOf(host: HTMLElement): string {
-  return JSON.stringify([host.dataset.entropyProject, host.dataset.entropyGroup, host.dataset.entropySvg, host.dataset.entropyCache, host.dataset.entropyEscape]);
+  return JSON.stringify([host.dataset.entropyProject, host.dataset.entropyGroup, host.dataset.entropySvg, host.dataset.entropyEscape]);
 }
 
 function scan(): void {
   for (const [host, { player, key }] of players) {
-    if (!host.isConnected || !host.dataset.entropyProject || key !== keyOf(host)) {
+    if (!player.isConnected || !host.dataset.entropyProject || key !== keyOf(host)) {
       player.dispose();
       players.delete(host);
+    } else {
+      player.setAssetCache(host.dataset.entropyCache === '1');
     }
   }
   for (const host of document.querySelectorAll<HTMLElement>(HOST_SELECTOR)) {
@@ -44,11 +48,13 @@ window.addEventListener('message', (event) => {
   if (event.source !== window) {
     return;
   }
-  const data = event.data as { __entropy?: string } | null;
+  const data = event.data as { __entropy?: string; cache?: boolean; clear?: number; live?: boolean } | null;
   if (!data || typeof data !== 'object') {
     return;
   }
   if (data.__entropy === 'scan') {
+    if (data.clear) void applyCacheClear(data.clear, data.live);
+    if (typeof data.cache === 'boolean') setAssetCache(data.cache);
     scan();
   } else if (data.__entropy === 'unmount') {
     unmountAll();

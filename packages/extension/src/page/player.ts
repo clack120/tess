@@ -2,7 +2,7 @@ import { boot, type EntropyHandle } from "../../../vm/src/web/boot.ts";
 import { formatVmError } from "../../../vm/src/runtime/diagnostics.ts";
 import { ASK_FIELD_STYLE } from "../../../vm/src/web/ask-style.ts";
 import { CHART_WINDOW_STYLE } from "../../../vm/src/web/chart-view.ts";
-import { assetCacheSize } from "../../../vm/src/web/fetch-retry.ts";
+import { setAssetCache } from "../../../vm/src/web/fetch-retry.ts";
 import { EXTRAS_DIALOG_STYLE } from "../../../vm/src/web/extras.ts";
 import { fetchWork, thumbUrl } from "./entry-project.ts";
 import { bridgeSaveStore } from "./save-bridge.ts";
@@ -42,6 +42,8 @@ const nextFrame = () =>
   });
 
 export interface MountedPlayer {
+  readonly isConnected: boolean;
+  setAssetCache(on: boolean): void;
   dispose(): void;
 }
 
@@ -167,6 +169,7 @@ export function mountPlayer(
   cacheAssets = false,
   grabEscape = true,
 ): MountedPlayer {
+  setAssetCache(cacheAssets);
   ensureStageStyle();
   const root = el("div", "entropy-player is-idle", host);
   // Capture work keys only inside the player so page inputs remain usable.
@@ -357,7 +360,7 @@ export function mountPlayer(
         keyTarget: root,
         boost: true,
         svg,
-        cacheAssets,
+        get cacheAssets() { return cacheAssets; },
         grabEscape,
         user: signedInUser(),
         tableColumnName: (window as Window & { Lang?: { DataAnalytics?: { new_attribute?: string } } })
@@ -388,11 +391,6 @@ export function mountPlayer(
     startButton.hidden = false;
     reportUnsupported(handle);
     ready(handle);
-    // The popup cannot read this page's Cache Storage, so hand the size to the content script.
-    void assetCacheSize().then(
-      (size) => window.postMessage({ __entropy: "cache-size", ...size }, location.origin),
-      (error) => console.warn("[entropy] 에셋 캐시 용량을 읽지 못했습니다", error),
-    );
   }
 
   // Report unsupported blocks so skipped code cannot look like a broken project.
@@ -508,6 +506,11 @@ export function mountPlayer(
   }
 
   return {
+    get isConnected() { return !disposed && root.isConnected && root.parentElement === host; },
+    setAssetCache(on: boolean) {
+      cacheAssets = on;
+      setAssetCache(on);
+    },
     dispose,
   };
 }
