@@ -197,9 +197,15 @@ api.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') {
     return;
   }
-  if (SVG_KEY in changes || CACHE_KEY in changes || ESCAPE_KEY in changes) {
+  if (CACHE_KEY in changes) {
+    cache = changes[CACHE_KEY]?.newValue === true;
+    for (const item of held) {
+      if (item.host) item.host.dataset.entropyCache = cache ? '1' : '0';
+    }
+    window.postMessage({ __entropy: 'scan', cache }, location.origin);
+  }
+  if (SVG_KEY in changes || ESCAPE_KEY in changes) {
     if (SVG_KEY in changes) svg = changes[SVG_KEY]?.newValue !== false;
-    if (CACHE_KEY in changes) cache = changes[CACHE_KEY]?.newValue === true;
     if (ESCAPE_KEY in changes) escape = changes[ESCAPE_KEY]?.newValue !== false;
     // Rebuild players because they read this setting only when mounted.
     window.postMessage({ __entropy: 'unmount' }, location.origin);

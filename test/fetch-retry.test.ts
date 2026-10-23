@@ -40,15 +40,18 @@ test('aborting stops a pending retry', async t => {
 });
 
 test('the asset cache answers repeat requests without the network and is dropped when turned off', async t => {
-  const { fetchAsset, setAssetCache, assetCacheSize } = await import('../packages/vm/src/web/fetch-retry.ts');
+  const { fetchAsset, setAssetCache, assetCacheSize, onAssetCacheChange } = await import('../packages/vm/src/web/fetch-retry.ts');
   const stores = new Map<string, Map<string, Response>>();
+  let finishWrite!: () => void;
+  const writing = new Promise<void>(resolve => { finishWrite = resolve; });
+  let reads = 0;
   stub(t, globalThis, 'caches', {
     open: async (name: string) => {
       const entries = stores.get(name) ?? new Map<string, Response>();
       stores.set(name, entries);
       return {
-        match: async (key: string | Request) => entries.get(typeof key === 'string' ? key : key.url)?.clone(),
-        put: async (url: string, response: Response) => { entries.set(url, response); },
+        match: async (key: string | Request) => { reads++; return entries.get(typeof key === 'string' ? key : key.url)?.clone(); },
+        put: async (url: string, response: Response) => { await writing; entries.set(url, response); },
         keys: async () => [...entries.keys()].map(url => new Request(url)),
       };
     },
@@ -57,15 +60,63 @@ test('the asset cache answers repeat requests without the network and is dropped
   const seen = serve(t, []);
   setAssetCache(true);
   t.after(() => setAssetCache(false));
+  const reported: Array<Promise<{ count: number; bytes: number }>> = [];
+  const unsubscribe = onAssetCacheChange(() => { reported.push(assetCacheSize()); });
+  t.after(unsubscribe);
   assert.equal(await (await fetchAsset('https://playentry.org/uploads/a.png')).text(), 'ok');
+  assert.equal(reported.length, 0, 'incomplete writes do not update the popup');
+  finishWrite();
   await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(await Promise.all(reported), [{ count: 1, bytes: 2 }]);
   assert.equal(await (await fetchAsset('https://playentry.org/uploads/a.png')).text(), 'ok');
   assert.equal(seen.length, 1);
+  const readsBeforeSize = reads;
   assert.deepEqual(await assetCacheSize(), { count: 1, bytes: 2 });
+  assert.equal(reads, readsBeforeSize, 'unchanged file sizes do not read cached bodies again');
   await fetchAsset('data:text/plain,x');
   assert.equal(seen.length, 2, 'non-http URLs bypass the cache');
   setAssetCache(false);
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(stores.size, 0);
   assert.deepEqual(await assetCacheSize(), { count: 0, bytes: 0 });
+  assert.deepEqual(await reported.at(-1), { count: 0, bytes: 0 });
+});
+
+test('turning the cache off during a download prevents stale writes and a quick re-enable waits for deletion', async t => {
+  const { fetchAsset, setAssetCache } = await import('../packages/vm/src/web/fetch-retry.ts');
+  let finishDownload!: (value: Response) => void;
+  let finishDelete!: () => void;
+  const deleting = new Promise<void>(resolve => { finishDelete = resolve; });
+  let downloading!: () => void;
+  const beganDownload = new Promise<void>(resolve => { downloading = resolve; });
+  const writes: string[] = [];
+  let opens = 0;
+  stub(t, globalThis, 'caches', {
+    open: async () => {
+      opens++;
+      return { match: async () => undefined, put: async (url: string) => { writes.push(url); } };
+    },
+    delete: async () => { await deleting; return true; },
+  });
+  stub(t, globalThis, 'fetch', () => {
+    downloading();
+    return new Promise<Response>(resolve => { finishDownload = resolve; });
+  });
+  setAssetCache(true);
+  t.after(() => setAssetCache(false));
+  const stale = fetchAsset('https://playentry.org/old.png');
+  await beganDownload;
+  setAssetCache(false);
+  setAssetCache(true);
+  const fresh = fetchAsset('https://playentry.org/new.png');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(opens, 1, 'new requests wait until deletion finishes');
+  finishDownload(new Response('old'));
+  assert.equal(await (await stale).text(), 'old', 'the active load is allowed to finish');
+  assert.deepEqual(writes, []);
+  stub(t, globalThis, 'fetch', async () => new Response('new'));
+  finishDelete();
+  assert.equal(await (await fresh).text(), 'new');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(writes, ['https://playentry.org/new.png']);
 });

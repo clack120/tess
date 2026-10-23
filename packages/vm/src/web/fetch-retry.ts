@@ -43,12 +43,32 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 const CACHE_NAME = 'entropy-assets';
-let cacheOn = false;
+let cacheOn: boolean | undefined;
+let cacheVersion = 0;
+let cacheDeletion: Promise<unknown> = Promise.resolve();
+const cacheBytes = new Map<string, number>();
+const cacheListeners = new Set<() => void>();
+
+export function onAssetCacheChange(listener: () => void): () => void {
+  cacheListeners.add(listener);
+  return () => { cacheListeners.delete(listener); };
+}
+
+function cacheChanged(): void {
+  for (const listener of cacheListeners) listener();
+}
 
 // Entry gives every upload a new file name, so a stored copy is used without asking the server again.
 export function setAssetCache(on: boolean): void {
+  if (cacheOn === on) return;
   cacheOn = on;
-  if (!on) void globalThis.caches?.delete(CACHE_NAME).catch((error) => console.warn('[entropy] 에셋 캐시를 지우지 못했습니다', error));
+  cacheVersion++;
+  cacheBytes.clear();
+  if (!on) {
+    cacheDeletion = cacheDeletion.then(() => globalThis.caches?.delete(CACHE_NAME))
+      .catch((error) => console.warn('[entropy] 에셋 캐시를 지우지 못했습니다', error));
+  }
+  cacheChanged();
 }
 
 export function fetchAsset(url: string, signal?: AbortSignal): Promise<Response> {
@@ -56,15 +76,25 @@ export function fetchAsset(url: string, signal?: AbortSignal): Promise<Response>
 }
 
 async function fetchCached(url: string, signal?: AbortSignal): Promise<Response> {
+  const version = cacheVersion;
   const store = await openCache();
   const stored = await store?.match(url).catch((error) => console.warn('[entropy] 에셋 캐시를 읽지 못했습니다', url, error));
-  if (stored) return stored;
+  if (stored && cacheOn && version === cacheVersion) return stored;
   const response = await fetchRetry(url, signal);
-  if (store) void store.put(url, response.clone()).catch((error) => console.warn('[entropy] 에셋을 캐시에 넣지 못했습니다', url, error));
+  if (store && cacheOn && version === cacheVersion) {
+    void store.put(url, response.clone()).then(() => {
+      if (!cacheOn || version !== cacheVersion) return;
+      cacheBytes.delete(url);
+      cacheChanged();
+    }).catch((error) => console.warn('[entropy] 에셋을 캐시에 넣지 못했습니다', url, error));
+  }
   return response;
 }
 
-function openCache(): Promise<Cache | null> {
+async function openCache(): Promise<Cache | null> {
+  // A quick off/on must finish deleting the old cache before opening the new one.
+  await cacheDeletion;
+  if (!cacheOn) return null;
   return globalThis.caches?.open(CACHE_NAME).catch((error) => {
     console.warn('[entropy] 에셋 캐시를 열지 못했습니다', error);
     return null;
@@ -79,8 +109,17 @@ export async function assetCacheSize(): Promise<{ count: number; bytes: number }
   const keys = await store.keys();
   let bytes = 0;
   for (const key of keys) {
+    const known = cacheBytes.get(key.url);
+    if (known !== undefined) {
+      bytes += known;
+      continue;
+    }
     const stored = await store.match(key);
-    if (stored) bytes += Number(stored.headers.get('content-length')) || (await stored.blob()).size;
+    if (stored) {
+      const size = Number(stored.headers.get('content-length')) || (await stored.blob()).size;
+      cacheBytes.set(key.url, size);
+      bytes += size;
+    }
   }
   return { count: keys.length, bytes };
 }

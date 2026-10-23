@@ -58,7 +58,7 @@ cache.addEventListener('change', () => {
   void write(CACHE_KEY, cache.checked);
 });
 
-// Pages report the size after loading a work, so this shows the last known value.
+// Cache writes arrive through extension storage while the popup is open.
 function paintCacheSize(value: unknown): void {
   const size = value as { count?: number; bytes?: number } | null;
   cacheSize.hidden = !size?.count;
