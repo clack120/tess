@@ -20,5 +20,4 @@ export { verifyEntryProject } from "./src/verify.ts";
 export { BLOCK_PARAM_COUNTS } from "./src/block-params.ts";
 export { assetFilename, fileUrlFor, imageSize, makeAsset } from "./src/assets.ts";
 export { audioDuration } from "./src/audio.ts";
-export { makeThumbnail, THUMB_BOX } from "./src/thumbnail.ts";
 export type * from "./src/types.ts";

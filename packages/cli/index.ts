@@ -210,7 +210,7 @@ async function runBuild(file: string, options: CliOptions): Promise<number> {
 
   const asJson = outPath.endsWith(".json");
   const spin = out.working(
-    asJson ? "작품 내보내는 중" : "작품 묶는 중 (모양 미리보기까지)",
+    asJson ? "작품 내보내는 중" : "작품 묶는 중",
   );
   try {
     fs.writeFileSync(

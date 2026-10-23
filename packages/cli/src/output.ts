@@ -1,8 +1,5 @@
 import process from 'node:process';
 import path from 'node:path';
-import {
-  S_BAR, S_ERROR, S_STEP_SUBMIT, intro, log, note, outro,
-} from '@clack/prompts';
 import type { CompileDiagnostic, PhaseTiming } from '@tess/compiler';
 
 const COLORED = (() => {
@@ -22,6 +19,36 @@ export const yellow = wrap(33, 39);
 export const green = wrap(32, 39);
 export const cyan = wrap(36, 39);
 export const grey = wrap(90, 39);
+const blue = wrap(34, 39);
+
+const S_BAR = '│';
+const S_STEP_SUBMIT = '◇';
+const S_ERROR = '■';
+
+const print = (text: string) => process.stdout.write(`${text}\n`);
+// Continue multi-line messages under the left guide bar.
+const guided = (symbol: string, text: string) =>
+  `${grey(S_BAR)}\n${symbol}  ${text.split('\n').join(`\n${grey(S_BAR)}  `)}`;
+
+export const log = {
+  message: (text: string, { symbol = grey(S_BAR) }: { symbol?: string } = {}) => print(guided(symbol, text)),
+  info: (text: string) => log.message(text, { symbol: blue('●') }),
+  success: (text: string) => log.message(text, { symbol: green('◆') }),
+  warn: (text: string) => log.message(text, { symbol: yellow('▲') }),
+  error: (text: string) => log.message(text, { symbol: red(S_ERROR) }),
+};
+
+export function note(text: string, title = '') {
+  print(guided(green(S_STEP_SUBMIT), title ? `${title}\n${text}` : text));
+}
+
+export function outro(text: string) {
+  print(`${grey(S_BAR)}\n${grey('└')}  ${text}\n`);
+}
+
+function intro(text: string) {
+  print(`${grey('┌')}  ${text}`);
+}
 
 const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦]/;
 
@@ -75,8 +102,6 @@ export function working(title: string) {
     fail: (message: string) => finish(red(S_ERROR), message),
   };
 }
-
-export { log, note, outro };
 
 function diagnostic(label: string, item: CompileDiagnostic, muted = false): string {
   const file = item.file ?? label;

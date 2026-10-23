@@ -4,7 +4,6 @@ import { codeFrame } from './frame.ts';
 import { tokenize } from './tokens.ts';
 import { parser } from './parser.ts';
 import { toAst } from './visitor.ts';
-import { parseProgramWithTree } from '../tree/index.ts';
 import type { ParseRoot } from '../ast.ts';
 
 export type StartRule = 'Program' | 'SceneFragment' | 'ObjectFragment' | 'Statement' | 'Expr';
@@ -63,10 +62,6 @@ export function parseSource(
   options: { startRule?: StartRule } = {},
 ): { ok: boolean; ast: ParseRoot | null; errors: ParseFailure[] } {
   const rule = ruleFor(options.startRule);
-  if (rule === 'program') {
-    const ast = parseProgramWithTree(source);
-    if (ast) return { ok: true, ast, errors: [] };
-  }
   const { tokens, errors: lexErrors } = tokenize(source);
 
   if (lexErrors.length > 0) {

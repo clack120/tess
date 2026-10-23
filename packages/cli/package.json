@@ -28,7 +28,6 @@
     "@tess/decompiler": "workspace:*",
     "@tess/parser": "workspace:*",
     "@tess/player": "workspace:*",
-    "@tess/vm": "workspace:*",
-    "@clack/prompts": "^1.7.0"
+    "@tess/vm": "workspace:*"
   }
 }

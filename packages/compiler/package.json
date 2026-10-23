@@ -14,8 +14,6 @@
   ],
   "dependencies": {
     "@tess/core": "workspace:*",
-    "@tess/parser": "workspace:*",
-    "sharp": "^0.35.4",
-    "tar": "^7.5.22"
+    "@tess/parser": "workspace:*"
   }
 }
