@@ -21,7 +21,6 @@
   },
   "trustedDependencies": [
     "core-js",
-    "tree-sitter-cli",
     "esbuild"
   ],
   "devDependencies": {
@@ -36,7 +35,6 @@
     "@types/node": "^26.6.5",
     "jsdom": "^30.1.3",
     "tess": "workspace:*",
-    "tree-sitter-cli": "0.27.1",
     "typescript": "^7.0.2",
     "vscode-oniguruma": "^2.0.1",
     "vscode-textmate": "^9.3.2"

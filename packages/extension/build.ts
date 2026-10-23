@@ -16,7 +16,6 @@ const VENDOR = path.join(DIST, 'vendor');
 const VM_OUT = path.join(VENDOR, 'tessvm');
 const PIXI_OUT = path.join(VENDOR, 'pixi.mjs');
 const DEXIE_OUT = path.join(VENDOR, 'dexie.mjs');
-const DEXIE_IO_OUT = path.join(VENDOR, 'dexie-export-import.mjs');
 
 const ZIP = path.join(ROOT, 'tessvm-extension.zip');
 const CHROME_ZIP = path.join(ROOT, 'tessvm-extension-chrome.zip');
@@ -29,9 +28,9 @@ const CLASSIC_ENTRIES = ['content.ts'];
 const ICON_SIZES = [16, 32, 48, 128];
 
 const RELATIVE_IMPORT = /(['"])(\.\.?\/[^'"]*\.ts)\1/g;
-const PIXI_IMPORT = /(['"])pixi\.js\1/g;
-const DEXIE_IMPORT = /(['"])dexie\1/g;
-const DEXIE_IO_IMPORT = /(['"])dexie-export-import\1/g;
+// Match only import specifiers so string values such as a format name stay untouched.
+const PIXI_IMPORT = /(\bfrom\s*|\bimport\s*\(\s*)(['"])pixi\.js\2/g;
+const DEXIE_IMPORT = /(\bfrom\s*|\bimport\s*\(\s*)(['"])dexie\2/g;
 const IMPORT_STATEMENT = /^import\s[\s\S]*?from\s*['"][^'"]*['"];?[^\S\n]*$/gm;
 const BARE_IMPORT = /^import\s*['"][^'"]*['"];?[^\S\n]*$/gm;
 const EXPORT_KEYWORD = /^export\s+(?=(?:const|let|var|function|class|async)\b)/gm;
@@ -76,12 +75,8 @@ function emitModule(file: string): string[] {
       found.push(target);
       return `${quote}${link(out, outputFor(target))}${quote}`;
     })
-    .replace(PIXI_IMPORT, (_match, quote: string) => `${quote}${link(out, PIXI_OUT)}${quote}`)
-    .replace(DEXIE_IMPORT, (_match, quote: string) => `${quote}${link(out, DEXIE_OUT)}${quote}`)
-    .replace(
-      DEXIE_IO_IMPORT,
-      (_match, quote: string) => `${quote}${link(out, DEXIE_IO_OUT)}${quote}`,
-    );
+    .replace(PIXI_IMPORT, (_match, lead: string, quote: string) => `${lead}${quote}${link(out, PIXI_OUT)}${quote}`)
+    .replace(DEXIE_IMPORT, (_match, lead: string, quote: string) => `${lead}${quote}${link(out, DEXIE_OUT)}${quote}`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, code);
   return found;
@@ -213,7 +208,7 @@ function copyVendor(from: string, name: string, inside: string, out: string): vo
   const code = fs.readFileSync(source, 'utf-8')
     .replace(/\n?\/\/# sourceMappingURL=.*$/, '\n')
     // Rewrite bare library imports because the browser cannot resolve package names here.
-    .replace(DEXIE_IMPORT, (_match, quote: string) => `${quote}${link(out, DEXIE_OUT)}${quote}`);
+    .replace(DEXIE_IMPORT, (_match, lead: string, quote: string) => `${lead}${quote}${link(out, DEXIE_OUT)}${quote}`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, code);
 }
@@ -261,12 +256,6 @@ copyVendor(
   'dexie',
   'dist/modern/dexie.min.mjs',
   DEXIE_OUT,
-);
-copyVendor(
-  path.join(ROOT, 'package.json'),
-  'dexie-export-import',
-  'dist/dexie-export-import.mjs',
-  DEXIE_IO_OUT,
 );
 copy(path.join(SRC, 'player.css'), path.join(DIST, 'player.css'));
 copy(path.join(SRC, 'popup', 'popup.html'), path.join(DIST, 'popup', 'popup.html'));

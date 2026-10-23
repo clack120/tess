@@ -8,7 +8,8 @@ import { imageSize } from '@tess/compiler';
 import { audioDuration } from '@tess/compiler';
 import { compileProject } from '@tess/compiler';
 import { makeEntryBundle } from '@tess/compiler';
-import { makeThumbnail } from '@tess/compiler';
+import { makeTar } from '@tess/compiler';
+import zlib from 'node:zlib';
 import { readTar } from '@tess/decompiler';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -147,33 +148,7 @@ end`;
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('PNG 에서 96x96 안에 맞춘 미리보기를 만든다', async () => {
-  const bytes = fs.readFileSync(path.join(root, 'examples/cat_run.png'));
-  const original = imageSize(bytes);
-  const thumb = await makeThumbnail(bytes);
-  assert.ok(thumb, '미리보기를 만들어야 한다');
-
-  const size = imageSize(thumb);
-  assert.ok(size!.width <= 96 && size!.height <= 96, `96 안에 들어와야 한다: ${size!.width}x${size!.height}`);
-  assert.equal(Math.max(size!.width, size!.height), 96);
-
-  const before = original!.width / original!.height;
-  const after = size!.width / size!.height;
-  assert.ok(Math.abs(before - after) / before < 0.02, `비율이 달라졌다: ${before} -> ${after}`);
-  assert.ok(thumb.length < bytes.length, '미리보기가 원본보다 작아야 한다');
-});
-
-test('원본이 96 보다 작으면 늘리지 않는다', async () => {
-  const tiny = await makeThumbnail(fs.readFileSync(path.join(root, 'examples/cat_run.png')), 4096);
-  assert.equal(imageSize(tiny!)!.width, imageSize(fs.readFileSync(path.join(root, 'examples/cat_run.png')))!.width);
-});
-
-test('PNG 가 아닌 파일은 미리보기를 만들지 않는다 (엔트리도 SVG 는 안 만든다)', async () => {
-  assert.equal(await makeThumbnail(Buffer.from('<svg viewBox="0 0 10 10"></svg>')), null);
-  assert.equal(await makeThumbnail(Buffer.alloc(0)), null);
-});
-
-test('.ent 묶음에 image/ 와 나란히 thumb/ 가 들어간다', async () => {
+test('.ent 묶음에는 원본 그림만 담고 썸네일은 만들지 않는다', async () => {
   const source = `scene "s":
   object "o":
     default costume 달리기 "cat_run.png"
@@ -184,11 +159,27 @@ end`;
 
   const entries = await readTar(await makeEntryBundle(result.project!, result.assets));
   const names = entries.map((e) => e.name);
-  const image = names.find((n) => n.includes('/image/'));
+  const image = entries.find((e) => e.name.includes('/image/'));
   assert.ok(image, '그림이 담겨야 한다');
-  const thumb = image.replace('/image/', '/thumb/');
-  assert.ok(names.includes(thumb), `미리보기가 같이 담겨야 한다: ${thumb}`);
+  assert.deepEqual(Buffer.from(image.data), fs.readFileSync(path.join(root, 'examples/cat_run.png')));
+  assert.equal(names.some((n) => n.includes('/thumb/')), false);
+  assert.ok(names.includes('temp/project.json'));
+});
 
-  const thumbBytes = entries.find((e) => e.name === thumb)!.data;
-  assert.equal(Math.max(imageSize(thumbBytes)!.width, imageSize(thumbBytes)!.height), 96);
+test('TAR 은 긴 경로·gzip·pax 이름을 읽고 쓴다', async () => {
+  const long = `temp/${'a'.repeat(80)}/${'b'.repeat(60)}.png`;
+  const tar = makeTar([{ name: long, data: Buffer.from('x') }, { name: 'temp/한글.json', data: Buffer.alloc(513, 1) }]);
+  for (const bytes of [tar, zlib.gzipSync(tar)]) {
+    const entries = await readTar(bytes);
+    assert.deepEqual(entries.map((e) => [e.name, e.data.length]), [[long, 1], ['temp/한글.json', 513]]);
+  }
+  // A pax header names the following entry.
+  const record = (text: string) => { let n = text.length + 3; n = `${n} ${text}\n`.length; return `${n} ${text}\n`; };
+  const pax = Buffer.from(record(`path=${long}/c.png`));
+  const parts = makeTar([{ name: 'PaxHeader', data: pax }, { name: 'short', data: Buffer.from('y') }]);
+  parts[156] = 'x'.charCodeAt(0);
+  let sum = 0; parts.fill(0x20, 148, 156); for (const byte of parts.subarray(0, 512)) sum += byte;
+  parts.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 'ascii');
+  assert.deepEqual((await readTar(parts)).map((e) => e.name), [`${long}/c.png`]);
+  assert.throws(() => makeTar([{ name: `${'c'.repeat(200)}/x`, data: Buffer.alloc(0) }]), /너무 깁니다/);
 });

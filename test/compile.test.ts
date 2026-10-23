@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileProject } from '@tess/compiler';
@@ -874,10 +875,12 @@ for (const example of examples) {
   });
 }
 
-test('.ent 묶음은 temp/project.json 을 담은 tar 다', async () => {
+test('.ent 묶음은 temp/project.json 을 담은 tar.gz 다', async () => {
   const file = path.join(root, 'examples/all_blocks.tess');
   const { project } = compileProject(fs.readFileSync(file, 'utf-8'), { path: file });
-  const tar = await makeEntryBundle(project!, []);
+  const bundle = await makeEntryBundle(project!, []);
+  assert.deepEqual([...bundle.subarray(0, 2)], [0x1f, 0x8b]);
+  const tar = zlib.gunzipSync(bundle);
 
   assert.equal(tar.length % 512, 0);
   const name = tar.subarray(0, 100).toString('utf-8').replace(/\0+$/, '');

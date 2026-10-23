@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,7 +75,7 @@ test('작품 파일(.ent)을 내려받을 수 있다', async () => {
     const response = await fetch(server.url + encodeURIComponent(href));
     assert.equal(response.status, 200);
 
-    const bytes = Buffer.from(await response.arrayBuffer());
+    const bytes = zlib.gunzipSync(Buffer.from(await response.arrayBuffer()));
     assert.equal(bytes.length % 512, 0);
     assert.equal(bytes.subarray(0, 100).toString('utf-8').replace(/\0+$/, ''), 'temp/project.json');
   });
