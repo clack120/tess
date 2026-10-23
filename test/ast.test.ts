@@ -170,3 +170,22 @@ test('노드에 소스 위치(loc)가 붙는다', async () => {
   const { ast } = parse('var a = 1\n');
   assert.deepEqual((ast as ProgramNode).body[0]!.loc, { start: 0, end: 9 });
 });
+
+test('a size assignment after a costume line is the object property, not the costume size', () => {
+  const object = (source: string) => {
+    const result = parse(`scene "s":\n  object "o":\n${source}\n  end\nend`, { validate: false });
+    assert.ok(result.ok, JSON.stringify(result.errors));
+    return (result.ast as any).body[0].body[0].body as any[];
+  };
+  const [costume, size] = object('    default costume 기본 "cat.png"\n    size = 150');
+  assert.equal(costume.width, null);
+  assert.notEqual(size.type, costume.type);
+  const [sized] = object('    default costume a "cat.png" size 10 20');
+  assert.deepEqual([sized.width, sized.height], [10, 20]);
+});
+
+test('fragments parse with validation left on', () => {
+  for (const [source, startRule] of [['x += 1', 'Statement'], ['object "o":\nend', 'SceneFragment']] as const) {
+    assert.equal(parse(source, { startRule }).ok, true, startRule);
+  }
+});

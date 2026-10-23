@@ -393,10 +393,14 @@ export class TessParser extends CstParser {
       $.CONSUME(kw.costume);
       $.SUBRULE($.identifier, { LABEL: 'id' });
       $.CONSUME(StringLiteral, { LABEL: 'file' });
-      $.OPTION2(() => {
-        $.CONSUME(kw.size);
-        $.CONSUME(NumberLiteral, { LABEL: 'width' });
-        $.CONSUME2(NumberLiteral, { LABEL: 'height' });
+      // A following `size = …` line is the object's size property, not this costume's dimensions.
+      $.OPTION2({
+        GATE: () => $.LA(2).tokenType === NumberLiteral,
+        DEF: () => {
+          $.CONSUME(kw.size);
+          $.CONSUME(NumberLiteral, { LABEL: 'width' });
+          $.CONSUME2(NumberLiteral, { LABEL: 'height' });
+        },
       });
       $.OPTION4(() => $.SUBRULE($.displayName, { LABEL: 'displayName' }));
       $.OPTION3(() => $.SUBRULE($.forceId, { LABEL: 'forceId' }));

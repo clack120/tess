@@ -38,7 +38,8 @@ export function parse(source: string, options: ParseOptions = {}): ParseResult {
   }
 
   const ast = result.ast!;
-  if (!runValidation) {
+  // Validation checks whole programs; fragments have no top-level body to walk.
+  if (!runValidation || Array.isArray(ast) || ast.type !== 'Program') {
     return {
       ok: true, ast, errors: [], warnings: [],
     };
