@@ -19,7 +19,7 @@ function cli(...args: string[]) {
 }
 
 function project(t: any, files: Record<string, string>) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-cli-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-cli-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   for (const [name, content] of Object.entries(files)) {
     const file = path.join(dir, name);
@@ -31,7 +31,7 @@ function project(t: any, files: Record<string, string>) {
 
 test('check 는 문법만 맞으면 통과하는 코드도 컴파일 단계까지 검사한다', (t) => {
   const dir = project(t, {
-    'main.tess': `scene "s":
+    'main.etp': `scene "s":
   object "주인공":
     default costume 기본 "a.png" size 10 10
     when start do
@@ -41,7 +41,7 @@ test('check 는 문법만 맞으면 통과하는 코드도 컴파일 단계까�
 end`,
   });
 
-  const result = cli('check', path.join(dir, 'main.tess'));
+  const result = cli('check', path.join(dir, 'main.etp'));
   assert.equal(result.code, 1);
   assert.match(result.output, /없는장면/);
   assert.doesNotMatch(result.output, /OK/);
@@ -50,44 +50,44 @@ end`,
 test('check 는 useobject 로 불러오는 조각 파일 안까지 검사한다', (t) => {
   // Includes must be expanded before their statements can be checked.
   const dir = project(t, {
-    'main.tess': 'scene "s":\n  useobject "objects/주인공.tess"\nend',
-    'objects/주인공.tess': `default costume 기본 "a.png" size 10 10
+    'main.etp': 'scene "s":\n  useobject "objects/주인공.etp"\nend',
+    'objects/주인공.etp': `default costume 기본 "a.png" size 10 10
 
 when start do
   jump "없는장면"
 end`,
   });
 
-  const result = cli('check', path.join(dir, 'main.tess'));
+  const result = cli('check', path.join(dir, 'main.etp'));
   assert.equal(result.code, 1);
   // Report positions in the included file rather than the main file.
-  assert.match(result.output, /주인공\.tess:\d+:\d+/);
+  assert.match(result.output, /주인공\.etp:\d+:\d+/);
   assert.match(result.output, /없는장면/);
 });
 
 test('멀쩡한 작품은 check 가 OK 로 통과시킨다', () => {
-  const result = cli('check', path.join(root, 'examples/all_blocks.tess'));
+  const result = cli('check', path.join(root, 'examples/all_blocks.etp'));
   assert.equal(result.code, 0);
   assert.match(result.output, /OK/);
 });
 
 test('문법 에러는 그대로 위치와 함께 알려 준다', (t) => {
-  const dir = project(t, { 'main.tess': 'object "o":\n  when start do\n    x +=\n' });
-  const result = cli('check', path.join(dir, 'main.tess'));
+  const dir = project(t, { 'main.etp': 'object "o":\n  when start do\n    x +=\n' });
+  const result = cli('check', path.join(dir, 'main.etp'));
   assert.equal(result.code, 1);
-  assert.match(result.output, /main\.tess:\d+:\d+/);
+  assert.match(result.output, /main\.etp:\d+:\d+/);
 });
 
 test('진단은 오류 번호와 도움말, 처음 선언한 파일을 함께 보여준다', (t) => {
   const dir = project(t, {
-    'main.tess': 'var score = 0\nuse "nested/shared.tess"',
-    'nested/shared.tess': 'var score = 1',
+    'main.etp': 'var score = 0\nuse "nested/shared.etp"',
+    'nested/shared.etp': 'var score = 1',
   });
-  const result = cli('check', path.join(dir, 'main.tess'));
+  const result = cli('check', path.join(dir, 'main.etp'));
   assert.equal(result.code, 1);
   assert.match(result.output, /\[E0001\]/);
-  assert.match(result.output, /nested\/shared\.tess:1:1/);
-  assert.match(result.output, /main\.tess:1:1/);
+  assert.match(result.output, /nested\/shared\.etp:1:1/);
+  assert.match(result.output, /main\.etp:1:1/);
   assert.match(result.output, /var score = 0/);
   assert.match(result.output, /var score = 1/);
   assert.match(result.output, /도움말:.*대입/);
@@ -95,8 +95,8 @@ test('진단은 오류 번호와 도움말, 처음 선언한 파일을 함께 �
 
 test('여덟 개를 넘는 오류도 위치와 코드를 모두 보여준다', (t) => {
   const names = Array.from({ length: 10 }, (_, at) => `missing_${at}`);
-  const dir = project(t, { 'main.tess': `object "o":\n  when start do\n${names.map(name => `    say ${name}`).join('\n')}\n  end\nend` });
-  const result = cli('check', path.join(dir, 'main.tess'));
+  const dir = project(t, { 'main.etp': `object "o":\n  when start do\n${names.map(name => `    say ${name}`).join('\n')}\n  end\nend` });
+  const result = cli('check', path.join(dir, 'main.etp'));
   assert.equal(result.code, 1);
   assert.match(result.output, /에러 10개/);
   for (const name of names) assert.ok(result.output.includes(`'${name}'`));
@@ -114,10 +114,10 @@ const LOOSE_PROJECT = `scene "s":
 end`;
 
 test('build 는 에러가 있어도 그 문장만 빼고 내보낸다', (t) => {
-  const dir = project(t, { 'main.tess': LOOSE_PROJECT });
+  const dir = project(t, { 'main.etp': LOOSE_PROJECT });
   const outPath = path.join(dir, 'out.json');
 
-  const result = cli('build', path.join(dir, 'main.tess'), '-o', outPath);
+  const result = cli('build', path.join(dir, 'main.etp'), '-o', outPath);
   assert.equal(result.code, 0);
   assert.match(result.output, /--strict 를 붙이면 여기서 멈춥니다/);
 
@@ -128,10 +128,10 @@ test('build 는 에러가 있어도 그 문장만 빼고 내보낸다', (t) => {
 });
 
 test('--strict 는 에러가 있으면 아무것도 내보내지 않는다', (t) => {
-  const dir = project(t, { 'main.tess': LOOSE_PROJECT });
+  const dir = project(t, { 'main.etp': LOOSE_PROJECT });
   const outPath = path.join(dir, 'out.json');
 
-  const result = cli('build', path.join(dir, 'main.tess'), '-o', outPath, '--strict');
+  const result = cli('build', path.join(dir, 'main.etp'), '-o', outPath, '--strict');
   assert.equal(result.code, 1);
   assert.match(result.output, /내보낼 수 없습니다/);
   assert.equal(fs.existsSync(outPath), false);
@@ -147,15 +147,15 @@ const MISSING_COSTUME = `scene "s":
 end`;
 
 test('없는 모양은 주의로 알리고 check 를 통과시킨다', (t) => {
-  const dir = project(t, { 'main.tess': MISSING_COSTUME });
+  const dir = project(t, { 'main.etp': MISSING_COSTUME });
 
-  const loose = cli('check', path.join(dir, 'main.tess'));
+  const loose = cli('check', path.join(dir, 'main.etp'));
   assert.equal(loose.code, 0);
   assert.match(loose.output, /주의 1개/);
   assert.doesNotMatch(loose.output, /경고 1개/);
 
   // Strict mode promotes notices to warnings without turning them into errors.
-  const strict = cli('check', path.join(dir, 'main.tess'), '--strict');
+  const strict = cli('check', path.join(dir, 'main.etp'), '--strict');
   assert.equal(strict.code, 0);
   assert.match(strict.output, /경고 1개/);
   assert.doesNotMatch(strict.output, /주의 1개/);

@@ -1,7 +1,7 @@
-# Tess 언어 가이드
+# Entropy 언어 가이드
 
-Tess는 엔트리(playentry.org)의 블록 코드를 텍스트로 작성하기 위한 프로그래밍 언어입니다.
-이 문서는 Tess로 작품을 만드는 방법을 다룹니다.
+Entropy는 엔트리(playentry.org)의 블록 코드를 텍스트로 작성하기 위한 프로그래밍 언어입니다.
+이 문서는 Entropy로 작품을 만드는 방법을 다룹니다.
 
 _(설치 및 실행 방법은 [README.md](./README.md)를 참고하세요.)_
 
@@ -9,9 +9,9 @@ _(설치 및 실행 방법은 [README.md](./README.md)를 참고하세요.)_
 
 ## 1. 시작하기
 
-다음은 Tess로 작성된 간단한 작품 예제입니다.
+다음은 Entropy로 작성된 간단한 작품 예제입니다.
 
-```tess
+```entropy
 project:
   title "내 첫 작품"
   fps 60
@@ -51,7 +51,7 @@ end
 
 변수와 리스트는 선언한 위치에 따라 **전역**과 **지역**으로 나뉩니다.
 
-```tess
+```entropy
 # Top-level declarations are global.
 var 점수 = 0
 list 인벤토리 = ["검", "방패"]
@@ -78,7 +78,7 @@ end
 
 `switch`는 선택할 값을 한 번 계산하고, 리터럴을 적은 첫 `case`만 실행합니다. 여러 값은 쉼표로 묶고, 어떤 값도 맞지 않을 때 실행할 `default`는 마지막에 둡니다. 다음 분기로 이어지지 않으므로 `break`는 필요 없습니다. 분기 안의 `break`·`continue`는 감싸고 있는 반복문에 적용됩니다.
 
-```tess
+```entropy
 switch 점수:
 case 0:
   say "아직 시작 전"
@@ -89,7 +89,7 @@ default:
 end
 ```
 
-```tess
+```entropy
 when start do
   # Conditions.
   if 점수 >= 100:
@@ -123,7 +123,7 @@ end
 
 ## 4. 움직임과 생김새
 
-```tess
+```entropy
 when start do
   # Movement.
   x = 100               # x 좌표를 100으로 위치하기
@@ -153,7 +153,7 @@ end
 
 ## 5. 이벤트와 신호
 
-```tess
+```entropy
 when start do              # 시작하기 버튼을 클릭했을 때
 when click do              # 오브젝트를 클릭했을 때
 when key "space" do        # 스페이스 키를 눌렀을 때
@@ -178,7 +178,7 @@ end
 
 자신이나 다른 오브젝트의 상태를 읽거나 수학 계산을 할 수 있습니다. 대상의 이름을 생략하면 '자기 자신'을 의미합니다.
 
-```tess
+```entropy
 when start do
   # Object state.
   var 내위치 = x
@@ -212,7 +212,7 @@ end
 
 일반 `object` 대신 `text` 키워드를 사용하면 글상자를 만들 수 있습니다.
 
-```tess
+```entropy
 # Text boxes.
 text "점수판":
   font_color = #ff0000
@@ -247,7 +247,7 @@ end
 
 함수의 `var`는 호출마다 독립된 지역 변수입니다. 중첩 블록에서 같은 이름으로 선언하면 그 블록에서만 바깥 변수를 가립니다. 같은 범위에서 같은 이름을 다시 선언하면 오류입니다. Entry 지역 변수의 규칙상 빈 문자열과 `false`를 지역 변수로 읽으면 0이 됩니다.
 
-```tess
+```entropy
 object "플레이어":
   # A function called as a statement.
   function 이동하기(속도):
@@ -277,18 +277,18 @@ end
 
 작품이 커지면 오브젝트별로 파일을 나누어 관리할 수 있습니다. `use` 키워드는 지정한 파일의 코드를 그 자리에 그대로 붙여 넣습니다.
 
-**`main.tess`**
+**`main.etp`**
 
-```tess
+```entropy
 scene "게임화면":
-  use "objects/player.tess"
-  useobject "objects/enemy.tess" # useobject를 사용할 경우 파일에서 object "":...end 를 생략할 수 있습니다.
+  use "objects/player.etp"
+  useobject "objects/enemy.etp" # useobject를 사용할 경우 파일에서 object "":...end 를 생략할 수 있습니다.
 end
 ```
 
-**`objects/player.tess`**
+**`objects/player.etp`**
 
-```tess
+```entropy
 object "플레이어":
   x = -100
   when start do

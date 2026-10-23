@@ -100,7 +100,7 @@ const syncPanelWidth = () => {
     "--debug-panel-width",
     width + "px",
   );
-  window.tessLayoutCanvas();
+  window.entropyLayoutCanvas();
 };
 const setOpen = (open: boolean, tab?: string) => {
   state.open = open;
@@ -212,13 +212,13 @@ const entryRuntime = {
     if (!blocks) return;
     const wrap = (type: string, forced: (args: any[]) => any) => {
       const spec = blocks[type];
-      if (!spec || typeof spec.func !== "function" || spec.tessWrapped) return;
+      if (!spec || typeof spec.func !== "function" || spec.entropyWrapped) return;
       const original = spec.func;
       spec.func = function (this: any, ...args: any[]) {
         const value = forced(args);
         return value === null ? original.apply(this, args) : value;
       };
-      spec.tessWrapped = true;
+      spec.entropyWrapped = true;
     };
     wrap("is_boost_mode", () => choice(env.boost));
     wrap("is_touch_supported", () => choice(env.touch));
@@ -245,7 +245,7 @@ const entryRuntime = {
 
 export type DebugRuntime = typeof entryRuntime;
 
-const rt = (): DebugRuntime => window.tessRuntime ?? entryRuntime;
+const rt = (): DebugRuntime => window.entropyRuntime ?? entryRuntime;
 
 // Runtime errors must not take down the debug panel.
 const guard = <T,>(what: string, fallback: T, action: () => T): T => {
@@ -265,7 +265,7 @@ const engineState = () => {
   }
 };
 
-const failed = (what: string, error: any) => window.tessReportError(what, error);
+const failed = (what: string, error: any) => window.entropyReportError(what, error);
 
 const control = (action: () => void) => {
   guard("실행 제어", undefined, action);
@@ -283,7 +283,7 @@ const choice = (value: any) => (value === "" ? null : value === "true");
 
 const realBoostLabel = () => (state.realBoost ? "켜짐 (WebGL)" : "꺼짐 (2D)");
 
-window.tessPatchEnvironmentBlocks = function patchEnvironmentBlocks() {
+window.entropyPatchEnvironmentBlocks = function patchEnvironmentBlocks() {
   state.realBoost = guard("실행 환경 읽기", null, () => rt().realBoost());
   guard("실행 환경 흉내내기", undefined, () => rt().patchEnvironment(state.env));
 };
@@ -785,7 +785,7 @@ function RunTab() {
           onChange: (event: any) => {
             state.env[id.replace("env-", "")] = event.target.value;
             // Push environment changes into runtimes that do not read the shared object directly.
-            window.tessPatchEnvironmentBlocks();
+            window.entropyPatchEnvironmentBlocks();
           },
         },
         options.map(([v, text]: [string, string]) =>
@@ -805,7 +805,7 @@ function RunTab() {
         placeholder,
         onInput: (event: any) => {
           state.env[id.replace("env-", "")] = event.target.value;
-          window.tessPatchEnvironmentBlocks();
+          window.entropyPatchEnvironmentBlocks();
         },
       }),
     ]);
@@ -878,7 +878,7 @@ function RunTab() {
           ["true", "켜짐 (참)"],
           ["false", "꺼짐 (거짓)"],
         ]),
-        // tessvm always uses WebGL, so it has no boost renderer state to display.
+        // entropy always uses WebGL, so it has no boost renderer state to display.
         state.realBoost === null
           ? h(
               "p",
@@ -1455,7 +1455,7 @@ toggleBtn.addEventListener("click", () =>
   state.open ? closePanel() : openPanel(),
 );
 
-window.tessDebugSink((item) => {
+window.entropyDebugSink((item) => {
   state.errors.unshift({
     key: item.time + "-" + state.errors.length,
     at: new Date(item.time).toLocaleTimeString("ko-KR", { hour12: false }),
@@ -1480,7 +1480,7 @@ const indexBlocks = (node: any, object: any) => {
   for (const branch of node.statements || []) indexBlocks(branch, object);
 };
 
-window.tessRenderProjectDebug = function renderProjectDebug(loaded) {
+window.entropyRenderProjectDebug = function renderProjectDebug(loaded) {
   project = loaded;
   const nameById = new Map(
     project.objects.map((object: any) => [object.id, object.name]),
@@ -1544,7 +1544,7 @@ window.tessRenderProjectDebug = function renderProjectDebug(loaded) {
 };
 
 // Include nested value IDs because the failing block may be inside an input.
-window.tessCollectParamIds = function collectParamIds(node, out) {
+window.entropyCollectParamIds = function collectParamIds(node, out) {
   out = out || [];
   if (!node || typeof node !== "object" || !node.id) return out;
   out.push(node.id);
@@ -1555,13 +1555,13 @@ window.tessCollectParamIds = function collectParamIds(node, out) {
   return out;
 };
 
-window.tessBlockDataById = blockById;
+window.entropyBlockDataById = blockById;
 
-window.tessHighlightBlock = function highlightBlock(blockId) {
+window.entropyHighlightBlock = function highlightBlock(blockId) {
   const owner = blockOwner.get(blockId);
   if (!owner) return;
   if (state.currentId !== owner.id) showObject(owner);
-  highlighted = window.tessCollectParamIds(blockById.get(blockId), []);
+  highlighted = window.entropyCollectParamIds(blockById.get(blockId), []);
   touch();
   openPanel("objects");
   requestAnimationFrame(() => {
@@ -1587,7 +1587,7 @@ const selectObjectById = (objectId: string) => {
   });
 };
 
-window.tessSelectObjectById = selectObjectById;
+window.entropySelectObjectById = selectObjectById;
 
 function inspectIcon() {
   return h(
@@ -1738,7 +1738,7 @@ function objectAtPoint(clientX: number, clientY: number) {
 // Install stage-pick listeners only once.
 let stagePicksArmed = false;
 
-window.tessWatchStagePicks = function watchStagePicks() {
+window.entropyWatchStagePicks = function watchStagePicks() {
   if (stagePicksArmed) return;
   stagePicksArmed = true;
 
@@ -1798,7 +1798,7 @@ window.tessWatchStagePicks = function watchStagePicks() {
 };
 
 // Add the list name and length to Entry's generic index error.
-window.tessDescribeListIndexError = function describeListIndexError(
+window.entropyDescribeListIndexError = function describeListIndexError(
   reportedBlockId,
   err,
 ) {
@@ -1864,11 +1864,11 @@ const scaleInputFieldToBuffer = (bufferW: any) => {
   if (!stage || typeof stage.showInputField !== "function" || ratio === 1)
     return;
   const showInputField = stage.showInputField;
-  stage.showInputField = function tessShowInputField(this: any, ...args: any[]) {
+  stage.showInputField = function entropyShowInputField(this: any, ...args: any[]) {
     showInputField.apply(this, args);
     const field = this.inputField;
-    if (!field || field.tessScaled || typeof field.width !== "function") return;
-    field.tessScaled = true;
+    if (!field || field.entropyScaled || typeof field.width !== "function") return;
+    field.entropyScaled = true;
     // Set dimensions before positions because the last setter redraws; setters cannot be chained.
     for (const name of [
       "fontSize",
@@ -1953,10 +1953,10 @@ const entryLayoutCanvas = function layoutCanvas() {
   setCanvasResolution();
   refreshBoundRect();
 };
-window.tessLayoutCanvas = function tessLayoutCanvas() {
+window.entropyLayoutCanvas = function entropyLayoutCanvas() {
   guard("무대 배치", undefined, () => rt().layoutCanvas());
 };
-window.addEventListener("resize", () => window.tessLayoutCanvas());
+window.addEventListener("resize", () => window.entropyLayoutCanvas());
 
 // Wait for the panel transition to finish before measuring the stage's final position.
 document
@@ -1969,6 +1969,6 @@ setInterval(() => {
   state.runState = engineState();
   if (state.open && (state.tab === "data" || state.tab === "objects"))
     state.tick += 1;
-  window.tessWatchStagePicks?.();
+  window.entropyWatchStagePicks?.();
   guard("무대 위치 재기", undefined, () => rt().refreshRect());
 }, 400);

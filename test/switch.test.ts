@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject, verifyEntryProject } from '@tess/compiler';
-import { decompileProject } from '@tess/decompiler';
-import { Vm } from '@tess/vm';
+import { compileProject, verifyEntryProject } from '@entropy/compiler';
+import { decompileProject } from '@entropy/decompiler';
+import { Vm } from '@entropy/vm';
 
 const work = (body: string, declarations = '') => `var out = 0\n${declarations}\nobject "o":\n  when start do\n${body.split('\n').map(line => `    ${line}`).join('\n')}\n  end\nend`;
 

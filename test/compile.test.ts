@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compileProject } from '@tess/compiler';
-import { verifyEntryProject } from '@tess/compiler';
-import { makeEntryBundle } from '@tess/compiler';
+import { compileProject } from '@entropy/compiler';
+import { verifyEntryProject } from '@entropy/compiler';
+import { makeEntryBundle } from '@entropy/compiler';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -20,7 +20,7 @@ ${body.split('\n').map((line: any) => `      ${line}`).join('\n')}
     end
   end
 end`;
-  const result = compileProject(source, { path: path.join(root, 'test.tess') });
+  const result = compileProject(source, { path: path.join(root, 'test.etp') });
   assert.deepEqual(result.errors, [], result.errors.map((e) => `${e.line}: ${e.message}`).join('\n'));
   const object = result.project!.objects.find((o) => o.name === 'o');
   return { project: result.project, thread: JSON.parse(object!.script)[0], result };
@@ -72,7 +72,7 @@ scene "s":
     end
   end
 end`;
-  const result = compileProject(source, { path: path.join(root, 'test.tess') });
+  const result = compileProject(source, { path: path.join(root, 'test.etp') });
   assert.deepEqual(result.errors, [], result.errors.map((e) => e.message).join('\n'));
 
   const object = result.project!.objects.find((o) => o.name === 'o');
@@ -153,7 +153,7 @@ scene "s":
     end
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const global = project!.variables.find((v) => v.name === '전역');
   const local = project!.variables.find((v) => v.name === '로컬');
   assert.equal(global!.object, null);
@@ -161,7 +161,7 @@ end`;
 });
 
 test('리스트 초기값이 array 로 들어간다', () => {
-  const { project } = compileProject('list 기록 = [1, "둘", 3]', { path: 'x.tess' });
+  const { project } = compileProject('list 기록 = [1, "둘", 3]', { path: 'x.etp' });
   const list = project!.variables.find((v) => v.name === '기록');
   assert.equal(list!.variableType, 'list');
   assert.deepEqual(list!.array, [{ data: 1 }, { data: '둘' }, { data: 3 }]);
@@ -177,7 +177,7 @@ scene "s":
       x = depth
     end
   end
-end`, { path: 'main.tess' });
+end`, { path: 'main.etp' });
   assert.equal(result.errors.length, 0, result.errors[0]?.message);
   const depth = result.project!.variables.find((item) => item.name === 'depth')!;
   assert.equal(depth.variableType, 'slide');
@@ -197,7 +197,7 @@ scene "s":
       x = depth
     end
   end
-end`, { path: 'main.tess' });
+end`, { path: 'main.etp' });
   assert.ok(result.errors.some((error) => /슬라이더/.test(error.message)), '숫자가 아니면 알린다');
 });
 
@@ -214,7 +214,7 @@ test('신호를 messages 로 모으고 같은 id 를 쓴다', () => {
     end
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   assert.equal(project!.messages.length, 1);
   const id = project!.messages[0].id;
   const [a, b] = project!.objects.map((o) => JSON.parse(o.script)[0]);
@@ -232,7 +232,7 @@ test('jump 가 장면 id 를 가리킨다', () => {
 end
 scene "둘":
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const thread = JSON.parse(project!.objects[0].script)[0];
   assert.equal(thread[1].type, 'start_scene');
   assert.equal(thread[1].params[0], project!.scenes[1].id);
@@ -255,7 +255,7 @@ scene "s":
     end
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const [normal, value] = project!.functions;
   assert.equal(normal.type, 'normal');
   assert.equal(value.type, 'value');
@@ -281,7 +281,7 @@ scene "s":
     end
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const create = JSON.parse(project!.functions[0].content)[0][0];
   const first = create.params[0].params[1];
   const second = first.params[1];
@@ -307,7 +307,7 @@ scene "s":
     end
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const fn = project!.functions[0];
   assert.equal(fn.localVariables.length, 1);
   assert.equal(fn.localVariables[0].name, '총합');
@@ -335,7 +335,7 @@ test('오브젝트 속성이 entity 로 들어간다', () => {
     rotation vertical
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const object = project!.objects[0];
   assert.equal(object.name, '주인공');
   assert.equal(object.objectType, 'sprite');
@@ -362,7 +362,7 @@ test('글상자는 textBox 로, 글꼴 정보가 entity 에 들어간다', () =>
     text_align = left
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const object = project!.objects[0];
   assert.equal(object.objectType, 'textBox');
   assert.equal(object.text, '점수');
@@ -382,7 +382,7 @@ test('글상자의 size 가로 세로 가 entity 크기가 된다', () => {
     size 65.49 104.65
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const { entity } = project!.objects[0];
   assert.equal(entity.width, 65.49);
   assert.equal(entity.height, 104.65);
@@ -395,7 +395,7 @@ test('size 가로 세로 가 없으면 글자 수로 어림잡은 크기를 쓴�
     font_size = 20
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const { entity } = project!.objects[0];
   assert.equal(entity.width, 3 * 20 * 0.85);
   assert.equal(entity.height, 22);
@@ -409,7 +409,7 @@ test('size = 배율과 size 가로 세로 는 서로 다른 것을 정한다', (
     size = 150
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const { entity } = project!.objects[0];
   assert.equal(entity.width, 80);
   assert.equal(entity.height, 30);
@@ -503,7 +503,7 @@ scene "s":
     costume 둘 "b.png" size 1 1 force id "qio1"
   end
 end`;
-  const result = compileProject(source, { path: path.join(root, 'test.tess') });
+  const result = compileProject(source, { path: path.join(root, 'test.etp') });
   assert.equal(result.ok, false);
   assert.match(result.errors[0].message, /이미 다른/);
 });
@@ -521,7 +521,7 @@ scene "s":
     end
   end
 end`;
-  const result = compileProject(source, { path: path.join(root, 'test.tess') });
+  const result = compileProject(source, { path: path.join(root, 'test.etp') });
   assert.deepEqual(result.errors, [], result.errors.map((e) => e.message).join('\n'));
   const object = result.project!.objects.find((o) => o.name === 'o');
   const thread = JSON.parse(object!.script)[0];
@@ -530,20 +530,20 @@ end`;
 
 test('use 가 파일을 그 자리에 펼친다', () => {
   const files = {
-    '/p/main.tess': `var 점수 = 0
+    '/p/main.etp': `var 점수 = 0
 scene "s":
-  use "hero.tess"
+  use "hero.etp"
 end`,
-    '/p/hero.tess': `object "주인공":
+    '/p/hero.etp': `object "주인공":
   name "주인공"
-  use "hero_script.tess"
+  use "hero_script.etp"
 end`,
-    '/p/hero_script.tess': `when start do
+    '/p/hero_script.etp': `when start do
   점수 += 1
 end`,
   };
-  const result = compileProject(files['/p/main.tess'], {
-    path: '/p/main.tess',
+  const result = compileProject(files['/p/main.etp'], {
+    path: '/p/main.etp',
     readFile: (target: string) => {
       const text = (files as Record<string, string>)[target];
       if (!text) throw new Error('없음');
@@ -566,7 +566,7 @@ test('키를 뗐을 때 이벤트는 감시 스크립트로 바뀐다', () => {
     end
   end
 end`;
-  const result = compileProject(source, { path: 'x.tess' });
+  const result = compileProject(source, { path: 'x.etp' });
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.warnings, []);
   const thread = JSON.parse(result.project!.objects[0].script)[0];
@@ -597,7 +597,7 @@ scene "s":
       var a = 2 ** n
     end
   end
-end`, { path: 'x.tess' });
+end`, { path: 'x.etp' });
   assert.equal(bad.ok, false);
   assert.match(bad.errors[0].message, /지수는 숫자로 정해져 있어야/);
 });
@@ -609,7 +609,7 @@ test('random 이 든 값은 지수가 밑을 여러 번 쓸 때 막는다', () =
       var a = random(1, 10) ** 3
     end
   end
-end`, { path: 'x.tess' });
+end`, { path: 'x.etp' });
   assert.equal(bad.ok, false);
   assert.match(bad.errors[0].message, /random/);
 
@@ -619,7 +619,7 @@ end`, { path: 'x.tess' });
       var a = random(1, 10) ** 0.5
     end
   end
-end`, { path: 'x.tess' });
+end`, { path: 'x.etp' });
   assert.deepEqual(fine.errors, []);
 });
 
@@ -630,7 +630,7 @@ test('딱 떨어지지 않는 지수만 다듬기 함수를 부른다', () => {
       var a = 4 ** 0.75
     end
   end
-end`, { path: 'x.tess' });
+end`, { path: 'x.etp' });
   assert.equal(exact.project!.functions.length, 0);
 
   const inexact = compileProject(`scene "s":
@@ -639,7 +639,7 @@ end`, { path: 'x.tess' });
       var a = 27 ** (1/3)
     end
   end
-end`, { path: 'x.tess' });
+end`, { path: 'x.etp' });
   const refiner = inexact.project!.functions[0];
   assert.ok(refiner.content.includes('거듭제곱 다듬기'));
   assert.equal(refiner.type, 'value');
@@ -660,7 +660,7 @@ test('엔트리에 없는 오브젝트 · 장면은 에러로 알려 준다', ()
     ['jump "없는장면"', /장면이 없습니다/],
   ];
   for (const [code, pattern] of cases) {
-    const result = compileProject(inObject(code), { path: 'x.tess' });
+    const result = compileProject(inObject(code), { path: 'x.etp' });
     assert.equal(result.ok, false, code);
     assert.match(result.errors[0]!.message, pattern, code);
   }
@@ -668,7 +668,7 @@ test('엔트리에 없는 오브젝트 · 장면은 에러로 알려 준다', ()
 
 test('되돌린 작품의 지워진 오브젝트 참조는 아이디를 그대로 들고 간다', () => {
   // Restore missing object IDs from placeholder names and report a notice.
-  const result = compileProject(inObject('go "_missing_object_7o00"'), { path: 'x.tess' });
+  const result = compileProject(inObject('go "_missing_object_7o00"'), { path: 'x.etp' });
   assert.equal(result.ok, true);
   assert.equal(result.errors.length, 0);
   assert.match(result.notices[0]!.message, /'7o00' 오브젝트가 작품에 없습니다/);
@@ -685,7 +685,7 @@ test('없는 모양 · 소리 이름은 주의로 알려 준다', () => {
     ['say sound_duration("없는소리")', /'없는소리' 소리가 이 오브젝트에 없습니다/],
   ];
   for (const [code, pattern] of cases) {
-    const result = compileProject(inObject(code), { path: 'x.tess' });
+    const result = compileProject(inObject(code), { path: 'x.etp' });
     assert.equal(result.ok, true, code);
     assert.match(result.notices[0]!.message, pattern, code);
   }
@@ -693,8 +693,8 @@ test('없는 모양 · 소리 이름은 주의로 알려 준다', () => {
 
 test('strict 는 주의를 경고로 올려서 알려 준다', () => {
   const source = inObject('costume = "없는모양"');
-  const loose = compileProject(source, { path: 'x.tess' });
-  const strict = compileProject(source, { path: 'x.tess', strict: true });
+  const loose = compileProject(source, { path: 'x.etp' });
+  const strict = compileProject(source, { path: 'x.etp', strict: true });
 
   assert.equal(strict.ok, true);
   assert.deepEqual(strict.notices, []);
@@ -714,7 +714,7 @@ test('함수 중간의 return 은 값을 기록하고 함수 실행만 끝낸다
   end
   return 2
 end`;
-  const result = compileProject(source, { path: 'x.tess' });
+  const result = compileProject(source, { path: 'x.etp' });
   assert.equal(result.ok, true);
   assert.deepEqual(result.errors, []);
   assert.match(result.project!.functions[0]!.content, /stop_object/);
@@ -747,7 +747,7 @@ test('이벤트 위의 주석은 이벤트 블록에 붙는다', () => {
     end
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const thread = JSON.parse(project!.objects[0].script)[0];
   assert.equal(thread[0].type, 'when_run_button_click');
   assert.equal(thread[0].comment.value, '시작할 때 하는 일');
@@ -768,19 +768,19 @@ scene "s":
     name "이름"
   end
 end`;
-  const { project, errors } = compileProject(source, { path: 'x.tess' });
+  const { project, errors } = compileProject(source, { path: 'x.etp' });
   assert.deepEqual(errors, []);
   assert.equal(project!.objects[0].name, '이름');
 });
 
 test('useobject 는 불러온 조각을 오브젝트로 감싼다', () => {
   const files = {
-    '/p/main.tess': 'scene "무대":\n  useobject "objects/치로.tess"\n  usetext "objects/점수판.tess"\nend',
-    '/p/objects/치로.tess': 'name "치로"\ncostume 기본 "c.png" size 40 60\nx = -100\n\nwhen start do\n  say "안녕"\nend',
-    '/p/objects/점수판.tess': 'text_content = "점수: 0"\nfont_size = 24',
+    '/p/main.etp': 'scene "무대":\n  useobject "objects/치로.etp"\n  usetext "objects/점수판.etp"\nend',
+    '/p/objects/치로.etp': 'name "치로"\ncostume 기본 "c.png" size 40 60\nx = -100\n\nwhen start do\n  say "안녕"\nend',
+    '/p/objects/점수판.etp': 'text_content = "점수: 0"\nfont_size = 24',
   };
-  const result = compileProject(files['/p/main.tess'], {
-    path: '/p/main.tess',
+  const result = compileProject(files['/p/main.etp'], {
+    path: '/p/main.etp',
     readFile: (target: string) => {
       const text = (files as Record<string, string>)[target];
       if (!text) throw new Error('없음');
@@ -801,12 +801,12 @@ test('useobject 는 불러온 조각을 오브젝트로 감싼다', () => {
 
 test('useobject 로 만든 오브젝트는 파일 이름으로 서로를 가리킨다', () => {
   const files = {
-    '/p/main.tess': 'scene "무대":\n  useobject "objects/주인공.tess"\n  useobject "objects/적.tess"\nend',
-    '/p/objects/주인공.tess': 'costume 기본 "a.png" size 10 10\n\nwhen start do\n  if touching("적"):\n    say "앗"\n  end\nend',
-    '/p/objects/적.tess': 'costume 기본 "b.png" size 10 10',
+    '/p/main.etp': 'scene "무대":\n  useobject "objects/주인공.etp"\n  useobject "objects/적.etp"\nend',
+    '/p/objects/주인공.etp': 'costume 기본 "a.png" size 10 10\n\nwhen start do\n  if touching("적"):\n    say "앗"\n  end\nend',
+    '/p/objects/적.etp': 'costume 기본 "b.png" size 10 10',
   };
-  const result = compileProject(files['/p/main.tess'], {
-    path: '/p/main.tess',
+  const result = compileProject(files['/p/main.etp'], {
+    path: '/p/main.etp',
     readFile: (target: string) => (files as Record<string, string>)[target]!,
   });
   assert.deepEqual(result.errors, []);
@@ -822,7 +822,7 @@ test('크기·길이를 적어 두면 파일이 없어도 알리지 않는다', 
     costume 기본 "a.png" size 200 100
     sound 점프 "j.mp3" for 1.5
   end
-end`, { path: 'x.tess' });
+end`, { path: 'x.etp' });
   assert.deepEqual(declared.warnings, []);
   const object = declared.project!.objects[0];
   assert.deepEqual(object.sprite.pictures[0].dimension, { width: 200, height: 100 });
@@ -832,7 +832,7 @@ end`, { path: 'x.tess' });
   object "o":
     costume 기본 "a.png"
   end
-end`, { path: 'x.tess' });
+end`, { path: 'x.etp' });
   assert.equal(bare.warnings.length, 1);
   assert.match(bare.warnings[0].message, /찾지 못했습니다/);
 });
@@ -859,12 +859,12 @@ scene "s":
       f()
     end
   end
-end`, { path: 'x.tess' });
+end`, { path: 'x.etp' });
   assert.equal(result.ok, false);
   assert.match(result.errors[0].message, /함수 안에서 할 수 없습니다/);
 });
 
-const examples = ['examples/all_blocks.tess', 'examples/functions.tess'];
+const examples = ['examples/all_blocks.etp', 'examples/functions.etp'];
 for (const example of examples) {
   test(`예제 컴파일: ${example}`, () => {
     const file = path.join(root, example);
@@ -876,7 +876,7 @@ for (const example of examples) {
 }
 
 test('.ent 묶음은 temp/project.json 을 담은 tar.gz 다', async () => {
-  const file = path.join(root, 'examples/all_blocks.tess');
+  const file = path.join(root, 'examples/all_blocks.etp');
   const { project } = compileProject(fs.readFileSync(file, 'utf-8'), { path: file });
   const bundle = await makeEntryBundle(project!, []);
   assert.deepEqual([...bundle.subarray(0, 2)], [0x1f, 0x8b]);
@@ -891,8 +891,8 @@ test('.ent 묶음은 temp/project.json 을 담은 tar.gz 다', async () => {
 });
 
 test('같은 소스는 항상 같은 결과로 컴파일된다', () => {
-  const source = fs.readFileSync(path.join(root, 'examples/all_blocks.tess'), 'utf-8');
-  const options = { path: path.join(root, 'examples/all_blocks.tess') };
+  const source = fs.readFileSync(path.join(root, 'examples/all_blocks.etp'), 'utf-8');
+  const options = { path: path.join(root, 'examples/all_blocks.etp') };
   const first = compileProject(source, options).project;
   const second = compileProject(source, options).project;
   assert.equal(JSON.stringify(first), JSON.stringify(second));
@@ -911,11 +911,11 @@ object "주인공":
 end`;
 
 test('에러가 있어도 만들다 만 작품을 그대로 돌려주고, strict 를 주면 null 이다', () => {
-  const strict = compileProject(LOOSE_SOURCE, { path: 'x.tess', strict: true });
+  const strict = compileProject(LOOSE_SOURCE, { path: 'x.etp', strict: true });
   assert.equal(strict.ok, false);
   assert.equal(strict.project, null);
 
-  const loose = compileProject(LOOSE_SOURCE, { path: 'x.tess' });
+  const loose = compileProject(LOOSE_SOURCE, { path: 'x.etp' });
   assert.equal(loose.ok, false); // Loose mode still reports errors.
   assert.deepEqual(loose.errors.map((e) => e.message), strict.errors.map((e) => e.message));
   assert.ok(loose.project);
@@ -926,7 +926,7 @@ test('에러가 있어도 만들다 만 작품을 그대로 돌려주고, strict
 });
 
 test('문법 에러는 작품 자체가 안 만들어져서 느슨한 실행으로도 내보낼 게 없다', () => {
-  const result = compileProject('object "주인공":\n  when start do\n    x +=\n', { path: 'x.tess' });
+  const result = compileProject('object "주인공":\n  when start do\n    x +=\n', { path: 'x.etp' });
   assert.equal(result.ok, false);
   assert.equal(result.project, null);
 });
@@ -945,16 +945,16 @@ function fieldChain(project: any, index = 0) {
 }
 
 test('자동 이름 매개변수는 라벨 없이, 이름 붙인 매개변수는 라벨을 달고 나간다', () => {
-  const plain = compileProject('function 스폰(a, b):\n  say a\nend', { path: 'x.tess' });
+  const plain = compileProject('function 스폰(a, b):\n  say a\nend', { path: 'x.etp' });
   assert.deepEqual(fieldChain(plain.project), ['label:스폰', 'param:stringParam', 'param:stringParam']);
 
-  const named = compileProject('function 스폰(a, 체력):\n  say 체력\nend', { path: 'x.tess' });
+  const named = compileProject('function 스폰(a, 체력):\n  say 체력\nend', { path: 'x.etp' });
   assert.deepEqual(fieldChain(named.project),
     ['label:스폰', 'param:stringParam', 'label:체력', 'param:stringParam']);
 });
 
 function firstBlocks(source: string) {
-  const { project } = compileProject(`scene "s":\n  object "o":\n${source}\n  end\nend`, { path: 'x.tess' });
+  const { project } = compileProject(`scene "s":\n  object "o":\n${source}\n  end\nend`, { path: 'x.etp' });
   return { project, thread: JSON.parse(project!.objects[0].script)[0] };
 }
 
@@ -1021,7 +1021,7 @@ scene "s":
     end
   end
 end`;
-  const result = compileProject(source, { path: 'x.tess' });
+  const result = compileProject(source, { path: 'x.etp' });
   assert.deepEqual(result.errors, [], result.errors.map((e) => e.message).join('\n'));
   assert.deepEqual(verifyEntryProject(result.project!), []);
 
@@ -1063,7 +1063,7 @@ object "hero2":
   costume c2 "${path.join(root, 'assets', 'a.png')}"
   var 체력 = 50
 end`;
-  const result = compileProject(source, { path: path.join(root, 'test.tess') });
+  const result = compileProject(source, { path: path.join(root, 'test.etp') });
   assert.deepEqual(result.errors, [], result.errors.map((e) => e.message).join('\n'));
 
   const 체력 = result.project!.variables.find((v) => v.name === '체력');
@@ -1087,7 +1087,7 @@ end
 function 세기():
   힘 += 1
 end`;
-  const result = compileProject(source, { path: path.join(root, 'test.tess') });
+  const result = compileProject(source, { path: path.join(root, 'test.etp') });
   assert.ok(result.errors.some((e) => /a, b 가 저마다 가진 지역 변수/.test(e.message)));
 });
 
@@ -1111,7 +1111,7 @@ function 바꾸기():
   costume = "점프"
   play sound "점프음"
 end`;
-  const result = compileProject(source, { path: path.join(root, 'test.tess') });
+  const result = compileProject(source, { path: path.join(root, 'test.etp') });
   assert.deepEqual(result.errors, [], result.errors.map((e) => e.message).join('\n'));
 
   const hero = result.project!.objects.find((o) => o.name === 'hero');
@@ -1133,7 +1133,7 @@ end
 function 바꾸기():
   costume = "점프"
 end`;
-  const result = compileProject(source, { path: path.join(root, 'test.tess') });
+  const result = compileProject(source, { path: path.join(root, 'test.etp') });
   assert.deepEqual(result.errors, []);
   // Keep the resource name because Entry resolves it on the calling object.
   const [fn] = result.project!.functions;
@@ -1153,7 +1153,7 @@ test('continue 는 이번 반복 건너뛰기, skip 은 판단 자리에 넣은 
     end
   end
 end`;
-  const { project, errors } = compileProject(source, { path: 'x.tess' });
+  const { project, errors } = compileProject(source, { path: 'x.etp' });
   assert.deepEqual(errors, []);
 
   const script = JSON.parse(project!.objects[0]!.script);

@@ -4,13 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { imageSize } from '@tess/compiler';
-import { audioDuration } from '@tess/compiler';
-import { compileProject } from '@tess/compiler';
-import { makeEntryBundle } from '@tess/compiler';
-import { makeTar } from '@tess/compiler';
+import { imageSize } from '@entropy/compiler';
+import { audioDuration } from '@entropy/compiler';
+import { compileProject } from '@entropy/compiler';
+import { makeEntryBundle } from '@entropy/compiler';
+import { makeTar } from '@entropy/compiler';
 import zlib from 'node:zlib';
-import { readTar } from '@tess/decompiler';
+import { readTar } from '@entropy/decompiler';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -49,7 +49,7 @@ test('크기를 전혀 알 수 없는 SVG 는 null 을 돌려준다 (makeAsset �
 });
 
 test('실제로 디컴파일한 배경 SVG(새그림1.svg, 800x490)에서도 정확히 읽힌다', () => {
-  const file = path.join(root, 'temp/dd_tess/assets/image/새그림1.svg');
+  const file = path.join(root, 'temp/dd_entropy/assets/image/새그림1.svg');
   if (!fs.existsSync(file)) return; // Skip only this asset check when the optional example directory is absent.
   const bytes = fs.readFileSync(file);
   assert.deepEqual(imageSize(bytes), { width: 800, height: 490 });
@@ -123,9 +123,9 @@ test('소리가 아닌/깨진 파일은 null 을 돌려준다 (makeAsset 이 1�
 });
 
 test('컴파일러는 for 를 안 적어도 소리 파일에서 길이를 재서 넣는다', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-duration-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-duration-'));
   fs.writeFileSync(path.join(dir, 'click.wav'), wavFixture(2.5));
-  const main = path.join(dir, 'main.tess');
+  const main = path.join(dir, 'main.etp');
   const source = `scene "s":
   object "o":
     default costume 기본 "없음.png" size 10 10
@@ -154,7 +154,7 @@ test('.ent 묶음에는 원본 그림만 담고 썸네일은 만들지 않는다
     default costume 달리기 "cat_run.png"
   end
 end`;
-  const result = compileProject(source, { path: path.join(root, 'x.tess'), assetDirs: [path.join(root, 'examples')] });
+  const result = compileProject(source, { path: path.join(root, 'x.etp'), assetDirs: [path.join(root, 'examples')] });
   assert.deepEqual(result.errors, []);
 
   const entries = await readTar(await makeEntryBundle(result.project!, result.assets));

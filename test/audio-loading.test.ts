@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stub } from './stub.ts';
-import { WebAudioEngine } from '../packages/tessvm/src/audio/sound.ts';
+import { WebAudioEngine } from '../packages/vm/src/audio/sound.ts';
 
 function setup(t: any, fetchFile: (input?: unknown, options?: RequestInit) => Promise<Response>) {
   const contexts: any[] = [];

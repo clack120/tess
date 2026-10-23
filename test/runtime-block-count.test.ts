@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Vm } from '@tess/vm';
+import { Vm } from '@entropy/vm';
 import fs from 'node:fs';
-import { ENTRY_SCHEMA_VERSION } from '../packages/tessvm/src/compile/block-shapes.ts';
-import { Codegen } from '../packages/tessvm/src/compile/codegen.ts';
-import type { FunctionEntry, RawBlock } from '../packages/tessvm/src/compile/codegen.ts';
+import { ENTRY_SCHEMA_VERSION } from '../packages/vm/src/compile/block-shapes.ts';
+import { Codegen } from '../packages/vm/src/compile/codegen.ts';
+import type { FunctionEntry, RawBlock } from '../packages/vm/src/compile/codegen.ts';
 
 let nextId = 0;
 const block = (type: string, params: unknown[] = [], statements?: RawBlock[][]): RawBlock => ({

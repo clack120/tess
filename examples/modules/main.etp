@@ -1,0 +1,13 @@
+# Split a project with use declarations.
+use "common/settings.etp"
+use "common/math_helper.etp"
+
+project:
+  title "모듈화 예제"
+  fps 60
+end
+
+scene "stage1":
+  use "objects/hero.etp"
+  use "objects/monster.etp"
+end

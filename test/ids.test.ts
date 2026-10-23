@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createIdFactory } from '../packages/compiler/src/ids.ts';
-import { compileProject } from '@tess/compiler';
-import { Vm } from '@tess/vm';
+import { compileProject } from '@entropy/compiler';
+import { Vm } from '@entropy/vm';
 
 test('generated asset IDs never take precedence over numeric costume selection', () => {
   const next = createIdFactory(12345);

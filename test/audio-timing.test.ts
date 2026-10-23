@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Vm } from '@tess/vm';
+import { Vm } from '@entropy/vm';
 
 const block = (type: string, ...params: unknown[]) => ({ type, params });
 const hat = block('when_run_button_click');

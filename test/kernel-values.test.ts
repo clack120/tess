@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@tess/compiler';
-import { Vm } from '@tess/vm';
+import { compileProject } from '@entropy/compiler';
+import { Vm } from '@entropy/vm';
 
 function pair(source: string): [Vm, Vm] {
-  const compiled = compileProject(source, { path: 'values.tess' });
+  const compiled = compileProject(source, { path: 'values.etp' });
   assert.deepEqual(compiled.errors, []);
   assert.ok(compiled.project);
   return [false, true].map((kernel) => {

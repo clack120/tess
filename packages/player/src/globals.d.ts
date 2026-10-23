@@ -11,7 +11,7 @@ interface EntryRuntime {
   [key: string]: any;
 }
 
-interface TessLogItem {
+interface EntropyLogItem {
   kind: string;
   message: string;
   stack?: string;
@@ -32,25 +32,25 @@ declare global {
     createjs?: any;
 
     // Set before the debug panel loads so early errors can retain block positions.
-    tessSourceMap?: Record<string, any>;
+    entropySourceMap?: Record<string, any>;
 
     // Use the supplied runtime adapter, or fall back to window.Entry.
-    tessRuntime?: any;
+    entropyRuntime?: any;
 
     // Replay errors that arrived before the panel registered its callback.
-    tessDebugSink(receive: (item: TessLogItem) => void): void;
-    tessReportError(kind: string, error: unknown): void;
+    entropyDebugSink(receive: (item: EntropyLogItem) => void): void;
+    entropyReportError(kind: string, error: unknown): void;
 
-    tessPatchEnvironmentBlocks(): void;
-    tessRenderProjectDebug(project: any): void;
-    tessWatchStagePicks(): void;
-    tessLayoutCanvas(): void;
-    tessHighlightBlock(blockId: string): void;
-    tessSelectObjectById(id: string): void;
-    tessBlockDataById: Map<string, any>;
-    tessCollectParamIds(node: any, out?: string[]): string[];
+    entropyPatchEnvironmentBlocks(): void;
+    entropyRenderProjectDebug(project: any): void;
+    entropyWatchStagePicks(): void;
+    entropyLayoutCanvas(): void;
+    entropyHighlightBlock(blockId: string): void;
+    entropySelectObjectById(id: string): void;
+    entropyBlockDataById: Map<string, any>;
+    entropyCollectParamIds(node: any, out?: string[]): string[];
     // Return null for unrelated errors; otherwise add the list name and length.
-    tessDescribeListIndexError(reportedBlockId: string, error: any): string | null;
+    entropyDescribeListIndexError(reportedBlockId: string, error: any): string | null;
   }
 }
 

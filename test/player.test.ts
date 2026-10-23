@@ -5,13 +5,13 @@ import zlib from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compileProject } from '@tess/compiler';
-import { serveProject, findLocalRuntime } from '@tess/player';
-import { assetRoutes } from '@tess/player';
+import { compileProject } from '@entropy/compiler';
+import { serveProject, findLocalRuntime } from '@entropy/player';
+import { assetRoutes } from '@entropy/player';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-function compileExample(name = 'examples/all_blocks.tess') {
+function compileExample(name = 'examples/all_blocks.etp') {
   const file = path.join(root, name);
   const result = compileProject(fs.readFileSync(file, 'utf-8'), { path: file });
   assert.deepEqual(result.errors, []);
@@ -82,7 +82,7 @@ test('작품 파일(.ent)을 내려받을 수 있다', async () => {
 });
 
 test('리소스를 디스크에 있는 그대로의 주소로 내보낸다', async () => {
-  await withServer({ example: 'examples/cat_run.tess' }, async (server: any, result: any) => {
+  await withServer({ example: 'examples/cat_run.etp' }, async (server: any, result: any) => {
     const project = await (await fetch(`${server.url}project.json`)).json();
     const pictures = project.objects.flatMap((object: any) => object.sprite.pictures);
     const cat = pictures.find((picture: any) => picture.fileurl.endsWith('cat_idle.png'));
@@ -140,7 +140,7 @@ test('설치된 entryjs 가 없으면 CDN 을 가리킨다', async () => {
 });
 
 test('설치된 entryjs 가 있으면 그것을 내보낸다', async (t) => {
-  const fake = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-runtime-'));
+  const fake = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-runtime-'));
   const dist = path.join(fake, 'node_modules', '@entrylabs', 'entry', 'dist');
   fs.mkdirSync(dist, { recursive: true });
   fs.writeFileSync(path.join(dist, 'entry.min.js'), 'window.Entry = {};');
@@ -160,7 +160,7 @@ test('설치된 entryjs 가 있으면 그것을 내보낸다', async (t) => {
 });
 
 test('lib 바깥 파일은 주지 않는다', async (t) => {
-  const fake = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-runtime-'));
+  const fake = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-runtime-'));
   const dist = path.join(fake, 'node_modules', '@entrylabs', 'entry', 'dist');
   fs.mkdirSync(dist, { recursive: true });
   fs.writeFileSync(path.join(dist, 'entry.min.js'), 'x');
@@ -200,7 +200,7 @@ test('캔버스 그리기 해상도는 처음 한 번만 정하고, 그 뒤에�
     assert.match(ui, /if \(resolutionFixed\)\s*return;/);
     assert.match(ui, /resolutionFixed = true;/);
 
-    const layout = ui.slice(ui.indexOf('function layoutCanvas()'), ui.indexOf('window.tessLayoutCanvas ='));
+    const layout = ui.slice(ui.indexOf('function layoutCanvas()'), ui.indexOf('window.entropyLayoutCanvas ='));
     assert.match(layout, /canvas\.style\.width/);
     assert.match(layout, /canvas\.style\.height/);
     assert.doesNotMatch(layout, /canvasEl\.width\s*=/);
@@ -269,7 +269,7 @@ test('run --boost 는 엔트리를 부스트 모드(WebGL 렌더러)로 띄운�
 
 test('부스트 모드는 실행기가 CDN 이어도 기본 그림을 같은 origin 으로 내보낸다', async () => {
   // Proxy default images through the local origin because Entry omits crossOrigin for WebGL textures.
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-boost-'));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-boost-'));
   try {
     await withServer({ cwd, boost: true }, async (server: any) => {
       const page = await (await fetch(server.url)).text();

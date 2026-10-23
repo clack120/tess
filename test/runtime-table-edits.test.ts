@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Table, Vm } from '@tess/vm';
-import type { RawBlock } from '../packages/tessvm/src/compile/codegen.ts';
+import { Table, Vm } from '@entropy/vm';
+import type { RawBlock } from '../packages/vm/src/compile/codegen.ts';
 
 const initial = () => Table.from({ id: 't', name: 'table', fields: ['X', 'Y'], data: [[1, 2], [3, 4]] });
 

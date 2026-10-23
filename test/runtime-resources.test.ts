@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stub } from './stub.ts';
 import { CloudClient } from '../packages/extension/src/page/cloud.ts';
-import { SpeechSynthesisEngine, EntryTtsEngine } from '../packages/tessvm/src/audio/sound.ts';
+import { SpeechSynthesisEngine, EntryTtsEngine } from '../packages/vm/src/audio/sound.ts';
 
 function global(t: any, key: string, value: unknown) {
   const original = Object.getOwnPropertyDescriptor(globalThis, key);

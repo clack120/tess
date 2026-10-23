@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-export { crc32 } from '@tess/vm';
-import { zipFiles } from '@tess/vm';
+export { crc32 } from '@entropy/vm';
+import { zipFiles } from '@entropy/vm';
 
 function walk(dir: string, prefix = ''): string[] {
   const found: string[] = [];

@@ -1,6 +1,6 @@
 import process from 'node:process';
 import path from 'node:path';
-import type { CompileDiagnostic, PhaseTiming } from '@tess/compiler';
+import type { CompileDiagnostic, PhaseTiming } from '@entropy/compiler';
 
 const COLORED = (() => {
   if (process.env.NO_COLOR) return false;
@@ -67,7 +67,7 @@ export function duration(ms: number): string {
 const STEP_LABEL_WIDTH = 18;
 
 export function begin(command: string, file: string) {
-  intro(`${bold(cyan('tess'))} ${command}${file ? ` ${dim(path.basename(file))}` : ''}`);
+  intro(`${bold(cyan('entropy'))} ${command}${file ? ` ${dim(path.basename(file))}` : ''}`);
 }
 
 export function step({ label, ms }: PhaseTiming) {

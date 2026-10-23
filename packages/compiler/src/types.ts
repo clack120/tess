@@ -1,4 +1,4 @@
-import type { Diagnostic, Expr, FunctionDeclNode, ObjectNode, ParseRoot } from '@tess/parser';
+import type { Diagnostic, Expr, FunctionDeclNode, ObjectNode, ParseRoot } from '@entropy/parser';
 import type { CompilerHost } from './host.ts';
 
 export type EntryParam = EntryBlock | string | number | boolean | null;

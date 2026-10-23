@@ -8,14 +8,14 @@ export interface ParseOptions {
   startRule?: StartRule;
 }
 
-export class TessParseError extends Error {
+export class EntropyParseError extends Error {
   errors: Diagnostic[];
 
   warnings: Diagnostic[];
 
   constructor(message: string, errors: Diagnostic[], warnings: Diagnostic[]) {
     super(message);
-    this.name = 'TessParseError';
+    this.name = 'EntropyParseError';
     this.errors = errors;
     this.warnings = warnings;
   }
@@ -55,7 +55,7 @@ export function parseOrThrow(source: string, options: ParseOptions = {}): ParseR
   const result = parse(source, options);
   if (!result.ok) {
     const first = result.errors[0]!;
-    throw new TessParseError(
+    throw new EntropyParseError(
       first.detail ?? `${first.line}:${first.column} ${first.message}`,
       result.errors,
       result.warnings,

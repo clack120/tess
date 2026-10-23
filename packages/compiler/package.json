@@ -1,8 +1,8 @@
 {
-  "name": "@tess/compiler",
+  "name": "@entropy/compiler",
   "version": "0.3.53",
-  "description": "Tess AST 를 엔트리 작품(project.json · .ent) 으로 컴파일한다",
-  "license": "ISC",
+  "description": "Entropy AST 를 엔트리 작품(project.json · .ent) 으로 컴파일한다",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "main": "index.ts",
   "exports": {
@@ -13,7 +13,7 @@
     "src"
   ],
   "dependencies": {
-    "@tess/core": "workspace:*",
-    "@tess/parser": "workspace:*"
+    "@entropy/core": "workspace:*",
+    "@entropy/parser": "workspace:*"
   }
 }

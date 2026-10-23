@@ -1,14 +1,14 @@
-export { parse, parseOrThrow, check, validate } from "@tess/parser";
+export { parse, parseOrThrow, check, validate } from "@entropy/parser";
 export {
   compileProject,
   createCompileCache,
   makeEntryBundle,
   makeTar,
   verifyEntryProject,
-} from "@tess/compiler";
-export { serveProject } from "@tess/player";
-export { decompileEnt, decompileProject } from "@tess/decompiler";
-export * as builtins from "@tess/core/builtins";
+} from "@entropy/compiler";
+export { serveProject } from "@entropy/player";
+export { decompileEnt, decompileProject } from "@entropy/decompiler";
+export * as builtins from "@entropy/core/builtins";
 
 import fs from "node:fs";
 import path from "node:path";
@@ -20,9 +20,9 @@ import type {
   CompileOptions,
   EntryProject,
   SourceMap,
-} from "@tess/compiler";
-import type { RunningServer as EntryServer } from "@tess/player";
-import type { RunningServer as VmServer } from "@tess/vm";
+} from "@entropy/compiler";
+import type { RunningServer as EntryServer } from "@entropy/player";
+import type { RunningServer as VmServer } from "@entropy/vm";
 
 type RunningServer = (EntryServer | VmServer) & {
   update(next: {
@@ -52,43 +52,43 @@ interface CliOptions {
   cache?: CompileCache;
 }
 import { spawn } from "node:child_process";
-import { parse } from "@tess/parser";
+import { parse } from "@entropy/parser";
 import {
   compileProject,
   createCompileCache,
   makeEntryBundle,
-} from "@tess/compiler";
-import { serveProject } from "@tess/player";
-import { serveVm } from "@tess/vm";
+} from "@entropy/compiler";
+import { serveProject } from "@entropy/player";
+import { serveVm } from "@entropy/vm";
 import * as out from "./src/output.ts";
 
 const USAGE = `사용법
-  node index.ts check      <파일.tess>          문법 및 의미 검사 (컴파일 테스트 포함)
-  node index.ts build      <파일.tess> [-o 출력] 엔트리 작품으로 컴파일
-  node index.ts run        <파일.tess>          컴파일 후 브라우저에서 실행 (tessvm)
-  node index.ts ast        <파일.tess>          AST 구조 출력
-  node index.ts decompile  <파일.ent> [-o 폴더]  기존 엔트리 작품을 Tess 소스로 디컴파일
+  node index.ts check      <파일.etp>          문법 및 의미 검사 (컴파일 테스트 포함)
+  node index.ts build      <파일.etp> [-o 출력] 엔트리 작품으로 컴파일
+  node index.ts run        <파일.etp>          컴파일 후 브라우저에서 실행 (entropy)
+  node index.ts ast        <파일.etp>          AST 구조 출력
+  node index.ts decompile  <파일.ent> [-o 폴더]  기존 엔트리 작품을 Entropy 소스로 디컴파일
 
 옵션
   -o, --out <경로>   출력 파일 또는 폴더를 지정합니다.
                      - build 명령 시: 확장자가 .json이면 project.json으로,
                        .ent이면 tar 묶음으로 저장합니다.
-                     - decompile 명령 시: 폴더를 생성하여 main.tess와 에셋을 저장합니다.
-                       (기본값: <파일 이름>_tess/)
+                     - decompile 명령 시: 폴더를 생성하여 main.entropy와 에셋을 저장합니다.
+                       (기본값: <파일 이름>_entropy/)
   --assets <폴더>    모양 및 소리 파일을 검색할 폴더를 지정합니다. (여러 번 지정 가능)
   --name <이름>      작품 이름을 지정합니다. (기본값: project 블록의 title)
   --port <번호>      run 명령 시 사용할 포트 번호를 지정합니다.
-                     (기본값: tessvm 2014 · 엔트리 실행기 2013,
+                     (기본값: Entropy 2014 · 엔트리 실행기 2013,
                       사용 중인 경우 빈 포트 자동 할당)
   --no-open          run 명령 시 브라우저를 자동으로 열지 않도록 설정합니다.
   --no-reload        run 명령 시 소스가 변경되어도 자동 새로고침을 하지 않습니다.
   --entry            run 명령을 엔트리 실행기(entryjs)로 돌립니다.
-                     (기본값은 tessvm 입니다 — 같은 규칙으로 훨씬 빠르게 돕니다.)
-  --quality <배수>   run 명령 시 화질 배수 1 · 2 · 4 (tessvm 전용, 기본 1)
-  --stage <가로x세로> run 명령 시 무대 크기 (tessvm 전용, 기본 480x270)
-  --fps <값>         run 명령 시 틱 속도 (tessvm 전용, 기본은 작품이 정한 speed)
+                     (기본값은 Entropy 입니다 — 같은 규칙으로 훨씬 빠르게 돕니다.)
+  --quality <배수>   run 명령 시 화질 배수 1 · 2 · 4 (Entropy 전용, 기본 1)
+  --stage <가로x세로> run 명령 시 무대 크기 (Entropy 전용, 기본 480x270)
+  --fps <값>         run 명령 시 틱 속도 (Entropy 전용, 기본은 작품이 정한 speed)
   --boost            엔트리 실행기(--entry)를 WebGL 렌더러로 돌립니다.
-                     tessvm 은 늘 WebGL 이라 '부스트 모드인가?' 가 언제나 참이고,
+                     Entropy는 늘 WebGL 이라 '부스트 모드인가?' 가 언제나 참이고,
                      이 옵션과 상관이 없습니다. (build 명령에는 적용되지 않습니다.)
   --strict           느슨한 실행을 끕니다. 컴파일 에러가 하나라도 있으면 build/run을
                      중단하고, '주의'로 알리던 것을 '경고'로 올려서 보여줍니다.
@@ -205,7 +205,7 @@ async function runBuild(file: string, options: CliOptions): Promise<number> {
     );
   }
 
-  const outPath = options.out ?? `${file.replace(/\.tess$/, "")}.ent`;
+  const outPath = options.out ?? `${file.replace(/\.etp$/, "")}.ent`;
   fs.mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true });
 
   const asJson = outPath.endsWith(".json");
@@ -324,7 +324,7 @@ async function runProject(
       reload ? "켜짐  " + out.dim("--no-reload 로 끌 수 있습니다") : "꺼짐",
     ],
   ];
-  // Only Entry changes renderers with boost; tessvm always uses WebGL.
+  // Only Entry changes renderers with boost; Entropy always uses WebGL.
   if (options.boost && options.entry) {
     rows.push(["부스트", "켜짐  " + out.dim("WebGL 렌더러")]);
   }
@@ -478,7 +478,7 @@ async function runDecompile(
   file: string,
   options: CliOptions,
 ): Promise<number> {
-  const { decompileEnt } = await import("@tess/decompiler");
+  const { decompileEnt } = await import("@entropy/decompiler");
   const label = path.basename(file);
   const bytes = fs.readFileSync(file);
 
@@ -498,10 +498,10 @@ async function runDecompile(
   }
   reading.done("작품 읽기");
 
-  const outDir = options.out ?? `${file.replace(/\.ent$/i, "")}_tess`;
+  const outDir = options.out ?? `${file.replace(/\.ent$/i, "")}_entropy`;
   const writing = out.working("소스와 에셋 쓰는 중");
   fs.mkdirSync(outDir, { recursive: true });
-  const mainFile = path.join(outDir, "main.tess");
+  const mainFile = path.join(outDir, "main.etp");
   fs.writeFileSync(mainFile, result.source);
   for (const asset of result.assets) {
     const target = path.join(outDir, asset.path);
@@ -511,7 +511,7 @@ async function runDecompile(
   writing.done("파일 쓰기");
 
   const fragmentCount = result.assets.filter((asset) =>
-    asset.path.endsWith(".tess"),
+    asset.path.endsWith(".etp"),
   ).length;
 
   const rows: Array<[string, string]> = [
@@ -582,14 +582,14 @@ async function main(argv: string[]): Promise<number | null> {
     if (command !== "decompile" && ext === ".ent") {
       console.error(
         `${path.basename(file)}: .ent 파일을 바로 실행하거나 확인할 수 없습니다.` +
-          ` 'decompile ${file}' 명령어로 Tess 소스로 변환하세요.`,
+          ` 'decompile ${file}' 명령어로 Entropy 소스로 변환하세요.`,
       );
       process.exit(2);
     }
-    if (command === "decompile" && ext === ".tess") {
+    if (command === "decompile" && ext === ".etp") {
       console.error(
         `${path.basename(file)}: decompile 명령어는 .ent 파일을 인수로 받습니다.` +
-          " Tess 소스를 엔트리 작품으로 만들려면 build 명령어를 사용하세요.",
+          " Entropy 소스를 엔트리 작품으로 만들려면 build 명령어를 사용하세요.",
       );
       process.exit(2);
     }

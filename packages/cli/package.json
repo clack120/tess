@@ -1,33 +1,33 @@
 {
-  "name": "tess",
+  "name": "entropy",
   "version": "0.3.53",
-  "description": "Tess 언어(엔트리 블록 코드로 변환되는 텍스트 언어) — 라이브러리와 CLI",
-  "license": "MIT",
+  "description": "Entropy 언어(엔트리 블록 코드로 변환되는 텍스트 언어) — 라이브러리와 CLI",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "main": "index.ts",
   "exports": {
     ".": "./index.ts"
   },
   "bin": {
-    "tess": "./index.ts"
+    "entropy": "./index.ts"
   },
   "files": [
     "index.ts",
     "src"
   ],
   "keywords": [
-    "tess",
+    "entropy",
     "chevrotain",
     "parser",
     "grammar",
     "entry"
   ],
   "dependencies": {
-    "@tess/compiler": "workspace:*",
-    "@tess/core": "workspace:*",
-    "@tess/decompiler": "workspace:*",
-    "@tess/parser": "workspace:*",
-    "@tess/player": "workspace:*",
-    "@tess/vm": "workspace:*"
+    "@entropy/compiler": "workspace:*",
+    "@entropy/core": "workspace:*",
+    "@entropy/decompiler": "workspace:*",
+    "@entropy/parser": "workspace:*",
+    "@entropy/player": "workspace:*",
+    "@entropy/vm": "workspace:*"
   }
 }

@@ -1,5 +1,5 @@
-import { BUILTIN_NAMES } from '@tess/core';
-import { UNUSABLE_AS_NAME } from '@tess/parser';
+import { BUILTIN_NAMES } from '@entropy/core';
+import { UNUSABLE_AS_NAME } from '@entropy/parser';
 import type { DecompileContext, ResourceInfo } from './types.ts';
 
 const IDENT_START = /[\p{L}_]/u;
@@ -35,7 +35,7 @@ const STRING_ESCAPE: Record<string, string> = {
   '\u2029': '\\u2029',
 };
 
-export function tessString(value: unknown): string {
+export function entropyString(value: unknown): string {
   const escaped = String(value)
     .replaceAll('\\', '\\\\')
     .replaceAll('"', '\\"')
@@ -44,25 +44,25 @@ export function tessString(value: unknown): string {
   return `"${escaped}"`;
 }
 
-// Escape line breaks so project text cannot end a comment and become Tess code.
-export function tessComment(text: unknown): string {
+// Escape line breaks so project text cannot end a comment and become Entropy code.
+export function entropyComment(text: unknown): string {
   return `# ${String(text).replace(LINE_BREAK, ' ')}`.trimEnd();
 }
 
-export function tessCommentLines(text: unknown): string[] {
-  return String(text).split(LINE_BREAK).map((line) => tessComment(line));
+export function entropyCommentLines(text: unknown): string[] {
+  return String(text).split(LINE_BREAK).map((line) => entropyComment(line));
 }
 
-// Keep the Entry name with as when the Tess identifier differs; runtime lookups need it.
+// Keep the Entry name with as when the Entropy identifier differs; runtime lookups need it.
 export function displayNamePart(identifier: string, entryName: unknown): string {
   const name = String(entryName ?? '');
-  return name && name !== identifier ? ` as ${tessString(name)}` : '';
+  return name && name !== identifier ? ` as ${entropyString(name)}` : '';
 }
 
-// Tess numeric literals exclude exponent notation, leading plus signs, and leading zeros.
+// Entropy numeric literals exclude exponent notation, leading plus signs, and leading zeros.
 const PLAIN_DECIMAL = /^-?\d+(\.\d+)?$/;
 
-// Expand exponent notation into a decimal literal Tess can parse.
+// Expand exponent notation into a decimal literal Entropy can parse.
 function expandExponent(text: string): string {
   const parts = /^(-?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(text);
   if (!parts) return text;
@@ -74,7 +74,7 @@ function expandExponent(text: string): string {
   return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
 }
 
-export function tessNumber(value: unknown): string {
+export function entropyNumber(value: unknown): string {
   if (!Number.isFinite(value)) return '0';
   return expandExponent(String(value));
 }
@@ -82,7 +82,7 @@ export function tessNumber(value: unknown): string {
 // Use a number only when converting it back preserves every character.
 export function isExactNumber(literal: string): boolean {
   const value = Number(literal);
-  // NaN, Infinity, and exponent notation must stay strings because Tess has no matching literals.
+  // NaN, Infinity, and exponent notation must stay strings because Entropy has no matching literals.
   return literal !== '' && Number.isFinite(value)
     && String(value) === literal && PLAIN_DECIMAL.test(literal);
 }
@@ -92,12 +92,12 @@ export function ownsResource(ctx: DecompileContext, info: ResourceInfo | undefin
   return Boolean(ctx.functionOwnerId) && info?.owner?.id === ctx.functionOwnerId;
 }
 
-export function tessLiteral(value: unknown): string {
-  if (typeof value === 'number') return tessNumber(value);
+export function entropyLiteral(value: unknown): string {
+  if (typeof value === 'number') return entropyNumber(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   const text = String(value ?? '');
   if (isExactNumber(text)) return text;
-  return tessString(text);
+  return entropyString(text);
 }
 
 // Push items separately to avoid the engine's argument limit on large projects.

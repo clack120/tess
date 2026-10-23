@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSegment, quadIndices, writeQuads } from '../packages/tessvm/src/render/segment-geometry.ts';
-import type { Stroke } from '../packages/tessvm/src/runtime/model.ts';
+import { isSegment, quadIndices, writeQuads } from '../packages/vm/src/render/segment-geometry.ts';
+import type { Stroke } from '../packages/vm/src/runtime/model.ts';
 
 const line = (points: number[], extra: Partial<Stroke> = {}): Stroke => ({
   color: '#000000', thickness: 1, opacity: 0, points, fill: false, ...extra,
@@ -54,9 +54,9 @@ test('사각형마다 삼각형 두 개가 같은 차례로 나온다', () => {
 
 test('segment meshes release their private geometry and buffers when resized or removed', async () => {
   const { createRequire } = await import('node:module');
-  const require = createRequire(new URL('../packages/tessvm/package.json', import.meta.url));
+  const require = createRequire(new URL('../packages/vm/package.json', import.meta.url));
   const { Container } = await import(require.resolve('pixi.js'));
-  const { SegmentBatch } = await import('../packages/tessvm/src/render/segments.ts');
+  const { SegmentBatch } = await import('../packages/vm/src/render/segments.ts');
   const parent = new Container();
   const batch = new SegmentBatch(parent);
   const strokes = Array.from({ length: 600 }, (_, i) => line([i, 0, i + 1, 0]));

@@ -1,8 +1,8 @@
 {
-  "name": "@tess/player",
+  "name": "@entropy/player",
   "version": "0.3.53",
   "description": "컴파일한 작품을 브라우저에서 돌리는 실행 서버와 디버그 패널",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "main": "index.ts",
   "exports": {
@@ -13,7 +13,7 @@
     "src"
   ],
   "dependencies": {
-    "@tess/compiler": "workspace:*",
+    "@entropy/compiler": "workspace:*",
     "preact": "^11.0.1"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
-# tessvm for Entry
+# Entropy for Entry
 
-엔트리 작품 페이지(`playentry.org/project/…`)의 실행기를 tessvm 으로 바꾸는 확장입니다.
+엔트리 작품 페이지(`playentry.org/project/…`)의 실행기를 Entropy로 바꾸는 확장입니다.
 
 ```bash
 bun run build:extension                   # dist 폴더와 zip 생성
@@ -11,12 +11,12 @@ bun packages/extension/build.ts --crx      # crx 까지 함께 생성
 | 파일                            | 쓰는 곳                                  |
 | ------------------------------- | ---------------------------------------- |
 | `dist/`                         | 크롬·파이어폭스 121 이상에 직접 로드     |
-| `tessvm-extension.zip`          | 파이어폭스                               |
-| `tessvm-extension-chrome.zip`   | **크롬 웹스토어에 올리는 파일**          |
-| `tessvm-extension.crx`          | 웹스토어를 거치지 않고 직접 배포할 때    |
+| `entropy-extension.zip`          | 파이어폭스                               |
+| `entropy-extension-chrome.zip`   | **크롬 웹스토어에 올리는 파일**          |
+| `entropy-extension.crx`          | 웹스토어를 거치지 않고 직접 배포할 때    |
 
 - 크롬: `chrome://extensions` → 개발자 모드 → **압축해제된 확장 프로그램을 로드** → `dist`
-- 파이어폭스: `about:debugging#/runtime/this-firefox` → **임시 부가 기능 로드** → `dist/manifest.json` 또는 `tessvm-extension.zip`
+- 파이어폭스: `about:debugging#/runtime/this-firefox` → **임시 부가 기능 로드** → `dist/manifest.json` 또는 `entropy-extension.zip`
 
 툴바 아이콘의 창에서 켜고 끄며, 다음을 설정합니다.
 
@@ -27,7 +27,7 @@ bun packages/extension/build.ts --crx      # crx 까지 함께 생성
 실행 중인 작품이 포커스를 가지면 Esc 도 작품이 가져갑니다. 요소 전체화면에서는 크롬 계열에서 Esc 를 길게 눌러야 빠져나오고, 파이어폭스는 Esc 를 막을 수 없어 바로 빠져나옵니다.
 아직 창에 스위치가 없으므로, 끄려면 확장 창의 개발자 도구 콘솔에서 `chrome.storage.local.set({ grabEscape: false })` 를 실행합니다.
 
-실행 화면 우클릭 메뉴의 `TessVM 디버그 켜기`로 장면별 오브젝트와 클론을 보는 패널을 엽니다.
+실행 화면 우클릭 메뉴의 `Entropy 디버그 켜기`로 장면별 오브젝트와 클론을 보는 패널을 엽니다.
 대상을 가리키면 분홍색 경계를 표시하고, 클릭하면 선택을 고정해 위치·모양·실행 스레드를 확인합니다. `화면에서 선택`을 누르면 실행 화면에서 직접 고를 수 있습니다.
 패널은 제목을 끌어 옮기고 `↩`로 원래 자리에 돌려놓습니다. `전체 경계`는 현재 장면의 모든 대상 경계를 표시하며 기본으로 꺼져 있습니다.
 패널을 닫거나 화면 밖으로 스크롤하면 갱신을 멈춥니다.

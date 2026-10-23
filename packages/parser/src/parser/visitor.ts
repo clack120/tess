@@ -1,5 +1,5 @@
 import type { CstNode, IToken } from 'chevrotain';
-import { normalizeColor } from '@tess/core';
+import { normalizeColor } from '@entropy/core';
 import { parser } from './parser.ts';
 import { decodeString } from './strings.ts';
 
@@ -61,7 +61,7 @@ const numberNode = (token: IToken): NumberNode => ({
   loc: tokenLoc(token),
 });
 
-export class TessAstVisitor extends BaseVisitor {
+export class EntropyAstVisitor extends BaseVisitor {
   sourceLength: number;
 
   constructor() {
@@ -885,7 +885,7 @@ export class TessAstVisitor extends BaseVisitor {
   }
 }
 
-export const visitor = new TessAstVisitor();
+export const visitor = new EntropyAstVisitor();
 
 export function toAst(cst: CstNode, sourceLength: number): ParseRoot {
   visitor.sourceLength = sourceLength;

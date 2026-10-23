@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-const require = createRequire(new URL('../packages/tessvm/package.json', import.meta.url));
+const require = createRequire(new URL('../packages/vm/package.json', import.meta.url));
 const { setProgramName, createIdFromString } = await import(require.resolve('pixi.js'));
 const browser = await import(path.resolve(path.dirname(require.resolve('pixi.js')), '../dist/pixi.mjs'));
 

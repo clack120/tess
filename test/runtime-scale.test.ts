@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@tess/compiler';
+import { compileProject } from '@entropy/compiler';
 
 interface EntitySpec {
   width: number;
@@ -105,7 +105,7 @@ function scaleSetter(property: string, ratio: number) {
     end
   end
 end`;
-  const { project, errors } = compileProject(source, { path: 'x.tess' });
+  const { project, errors } = compileProject(source, { path: 'x.etp' });
   assert.deepEqual(errors, []);
 
   const call = JSON.parse(project!.objects[0]!.script)[0][1];
@@ -158,7 +158,7 @@ test('시작 배율이 100%가 아니어도 원본 기준으로 맞춘다', () =
     end
   end
 end`;
-  const { project } = compileProject(source, { path: 'x.tess' });
+  const { project } = compileProject(source, { path: 'x.etp' });
   const call = JSON.parse(project!.objects[0]!.script)[0][1];
   assert.equal(Number(call.params[1].params[0]), 1.5);
 
@@ -199,8 +199,8 @@ test('가로와 세로를 이어서 정하면 둘 다 목표대로 된다', () =
 });
 
 test('만들어진 함수는 사람이 읽을 수 있는 이름을 가진다', () => {
-  assert.equal(scaleSetter('scale_x', 50).label, '[Tess] 가로 비율 정하기');
-  assert.equal(scaleSetter('scale_y', 50).label, '[Tess] 세로 비율 정하기');
+  assert.equal(scaleSetter('scale_x', 50).label, '[Entropy] 가로 비율 정하기');
+  assert.equal(scaleSetter('scale_y', 50).label, '[Entropy] 세로 비율 정하기');
 });
 
 test('쓰지 않으면 함수를 만들지 않는다', () => {
@@ -210,6 +210,6 @@ test('쓰지 않으면 함수를 만들지 않는다', () => {
       size = 120
     end
   end
-end`, { path: 'x.tess' });
+end`, { path: 'x.etp' });
   assert.equal(project!.functions.length, 0);
 });

@@ -1,4 +1,4 @@
-import type { VariableStore } from '../../../tessvm/src/runtime/engine.ts';
+import type { VariableStore } from '../../../vm/src/runtime/engine.ts';
 
 export class CloudClient implements VariableStore {
   private ws: WebSocket | null = null;
@@ -8,8 +8,8 @@ export class CloudClient implements VariableStore {
   private values = new Map<string, any>();
   private onRemoteChange?: () => void;
   private readonly csrfToken: string;
-  private tessIdToEntryId: Map<string, string>;
-  private entryIdToTessId: Map<string, string>;
+  private entropyIdToEntryId: Map<string, string>;
+  private entryIdToEntropyId: Map<string, string>;
   private variableMongoIds: Map<string, string>;
   private readonly controller = new AbortController();
 
@@ -17,24 +17,24 @@ export class CloudClient implements VariableStore {
     projectId: string,
     csrfToken: string,
     initialVariables: any[],
-    tessIdToEntryId: Map<string, string>,
-    entryIdToTessId: Map<string, string>,
+    entropyIdToEntryId: Map<string, string>,
+    entryIdToEntropyId: Map<string, string>,
     variableMongoIds: Map<string, string>
   ) {
     this.projectId = projectId;
     this.csrfToken = csrfToken;
-    this.tessIdToEntryId = tessIdToEntryId;
-    this.entryIdToTessId = entryIdToTessId;
+    this.entropyIdToEntryId = entropyIdToEntryId;
+    this.entryIdToEntropyId = entryIdToEntropyId;
     this.variableMongoIds = variableMongoIds;
 
     for (const v of initialVariables) {
       if (v.id) {
-        const tessId = this.entryIdToTessId.get(String(v.id));
-        if (tessId) {
+        const entropyId = this.entryIdToEntropyId.get(String(v.id));
+        if (entropyId) {
           if (v.variableType === 'list') {
-            this.values.set(tessId, Array.isArray(v.array) ? v.array : []);
+            this.values.set(entropyId, Array.isArray(v.array) ? v.array : []);
           } else {
-            this.values.set(tessId, v.value ?? 0);
+            this.values.set(entropyId, v.value ?? 0);
           }
         }
       }
@@ -139,17 +139,17 @@ export class CloudClient implements VariableStore {
     const vars = payload.variables || [];
     for (const v of vars) {
       const entryId = String(v.id);
-      const tessId = this.entryIdToTessId.get(entryId);
-      if (!tessId) continue;
+      const entropyId = this.entryIdToEntropyId.get(entryId);
+      if (!entropyId) continue;
       
       if (v.variableType === 'list') {
         const list = (Array.isArray(v.list) ? v.list : []).map((item: any) => ({
           data: item.data,
           key: item.key || this.generateKey()
         }));
-        this.values.set(tessId, list);
+        this.values.set(entropyId, list);
       } else {
-        this.values.set(tessId, v.value);
+        this.values.set(entropyId, v.value);
       }
     }
     this.onRemoteChange?.();
@@ -157,19 +157,19 @@ export class CloudClient implements VariableStore {
 
   private handleAction(action: any) {
     const entryId = String(action.id);
-    const tessId = this.entryIdToTessId.get(entryId);
-    if (!tessId) return;
+    const entropyId = this.entryIdToEntropyId.get(entryId);
+    if (!entropyId) return;
     
     if (action.variableType === 'variable') {
       if (action.type === 'set') {
-        this.values.set(tessId, action.data);
+        this.values.set(entropyId, action.data);
         this.onRemoteChange?.();
       }
     } else if (action.variableType === 'list') {
-      let arr = this.values.get(tessId) as any[] | undefined;
+      let arr = this.values.get(entropyId) as any[] | undefined;
       if (!arr) {
         arr = [];
-        this.values.set(tessId, arr);
+        this.values.set(entropyId, arr);
       }
       if (action.type === 'insert') {
         arr.splice(action.index, 0, { data: action.data, key: action.key });
@@ -245,10 +245,10 @@ export class CloudClient implements VariableStore {
     }
   }
 
-  private sendAction(tessId: string, variableType: string, actionData: any) {
+  private sendAction(entropyId: string, variableType: string, actionData: any) {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      const entryId = this.tessIdToEntryId.get(tessId);
-      const _id = this.variableMongoIds.get(tessId);
+      const entryId = this.entropyIdToEntryId.get(entropyId);
+      const _id = this.variableMongoIds.get(entropyId);
       if (!entryId || !_id) return;
 
       const payload = '42' + (this.msgId++) + JSON.stringify(["action", {

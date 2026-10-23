@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@tess/compiler';
-import { Vm, Variable, Table, cast } from '@tess/vm';
-import { columnIndex } from '../packages/tessvm/src/runtime/table.ts';
+import { compileProject } from '@entropy/compiler';
+import { Vm, Variable, Table, cast } from '@entropy/vm';
+import { columnIndex } from '../packages/vm/src/runtime/table.ts';
 
 test('numeric text and stored variables follow Entry including exponent edge cases', () => {
   const variable = new Variable('v', 'v', null, 'variable');

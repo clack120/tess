@@ -1,6 +1,6 @@
 // Serve original asset URLs and readable aliases; rewrite only unambiguous paths.
 import path from 'node:path';
-import type { AssetFile, EntryProject } from '@tess/compiler';
+import type { AssetFile, EntryProject } from '@entropy/compiler';
 
 export interface AssetRoutes {
   files: Map<string, string>;

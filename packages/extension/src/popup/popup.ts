@@ -21,13 +21,13 @@ const note = document.getElementById('note') as HTMLElement;
 const TEXT = {
   on: {
     chip: '켜짐',
-    state: 'tessvm 으로 실행 중',
-    note: ['작품 페이지의 실행 화면을 tessvm 이 대신합니다.', '눌러서 끌 수 있습니다.'],
+    state: 'entropy로 실행 중',
+    note: ['작품 페이지의 실행 화면을 Entropy가 대신합니다.', '눌러서 끌 수 있습니다.'],
   },
   off: {
     chip: '꺼짐',
     state: '엔트리 기본 실행기',
-    note: ['작품 페이지를 원래대로 둡니다.', '눌러서 tessvm 실행기를 켭니다.'],
+    note: ['작품 페이지를 원래대로 둡니다.', '눌러서 Entropy 실행기를 켭니다.'],
   },
 };
 
@@ -151,7 +151,7 @@ clearAll.replaceWith(clearButton);
 
 async function paintSaves(): Promise<void> {
   const rows = await listWorks().catch((error) => {
-    console.warn('[tessvm] 저장된 작품 목록을 읽지 못했습니다', error);
+    console.warn('[entropy] 저장된 작품 목록을 읽지 못했습니다', error);
     return [];
   });
   saves.replaceChildren(...rows.map((row) => saveRow(row, () => void paintSaves())));

@@ -3,17 +3,17 @@ import { api } from './browser.ts';
 import { readWork, writeWork, type StoredValue } from './store-db.ts';
 
 export interface StoreRequest {
-  __tessvm: 'store-read' | 'store-write';
+  __entropy: 'store-read' | 'store-write';
   work: string;
   title?: string;
   values?: Record<string, StoredValue>;
 }
 
 export function answer(message: StoreRequest): Promise<unknown> | undefined {
-  if (message?.__tessvm === 'store-read') {
+  if (message?.__entropy === 'store-read') {
     return readWork(message.work).then((values) => ({ values }));
   }
-  if (message?.__tessvm === 'store-write') {
+  if (message?.__entropy === 'store-write') {
     return writeWork(message.work, message.title ?? '', message.values ?? {}).then(() => ({
       ok: true,
     }));

@@ -6,9 +6,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 test('extension watch rebuilds VM and extension edits, ignores output, and recovers after failure', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-watch-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-watch-'));
   const extension = path.join(dir, 'packages/extension');
-  for (const source of ['extension/src', 'tessvm/src', 'core/src']) {
+  for (const source of ['extension/src', 'vm/src', 'core/src']) {
     fs.mkdirSync(path.join(dir, 'packages', source), { recursive: true });
   }
   fs.copyFileSync(new URL('../packages/extension/watch.ts', import.meta.url), path.join(extension, 'watch.ts'));
@@ -43,7 +43,7 @@ test('extension watch rebuilds VM and extension edits, ignores output, and recov
   const builds = () => output.split('test-build').length - 1;
   await waitFor(() => output.includes('Ctrl+C'));
   assert.equal(builds(), 1);
-  fs.writeFileSync(path.join(dir, 'packages/tessvm/src/engine.ts'), 'vm edit');
+  fs.writeFileSync(path.join(dir, 'packages/vm/src/engine.ts'), 'vm edit');
   await waitFor(() => builds() === 2);
   fs.writeFileSync(path.join(extension, 'src/fail'), 'broken edit');
   await waitFor(() => output.includes('빌드 실패'));

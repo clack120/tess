@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@tess/compiler';
-import { decompileProject } from '@tess/decompiler';
-import { Vm } from '@tess/vm';
+import { compileProject } from '@entropy/compiler';
+import { decompileProject } from '@entropy/decompiler';
+import { Vm } from '@entropy/vm';
 
 test('strings, call results, parenthesized values and list items support chained indexing', () => {
   const source = `var literal = 0

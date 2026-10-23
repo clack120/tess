@@ -18,9 +18,9 @@
   "exclude": [
     "**/node_modules",
     "packages/player/src/debug-ui.ts",
-    "packages/tessvm/src/web/**/*.ts",
-    "packages/tessvm/src/render/**/*.ts",
-    "packages/tessvm/src/audio/**/*.ts",
+    "packages/vm/src/web/**/*.ts",
+    "packages/vm/src/render/**/*.ts",
+    "packages/vm/src/audio/**/*.ts",
     "packages/extension/src/**/*.ts"
   ]
 }

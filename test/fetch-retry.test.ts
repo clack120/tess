@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stub } from './stub.ts';
-import { fetchRetry } from '../packages/tessvm/src/web/fetch-retry.ts';
+import { fetchRetry } from '../packages/vm/src/web/fetch-retry.ts';
 
 function serve(t: any, statuses: number[]) {
   const seen: number[] = [];
@@ -40,7 +40,7 @@ test('aborting stops a pending retry', async t => {
 });
 
 test('the asset cache answers repeat requests without the network and is dropped when turned off', async t => {
-  const { fetchAsset, setAssetCache, assetCacheSize } = await import('../packages/tessvm/src/web/fetch-retry.ts');
+  const { fetchAsset, setAssetCache, assetCacheSize } = await import('../packages/vm/src/web/fetch-retry.ts');
   const stores = new Map<string, Map<string, Response>>();
   stub(t, globalThis, 'caches', {
     open: async (name: string) => {

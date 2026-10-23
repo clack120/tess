@@ -2,7 +2,7 @@ import {
   STORE_FLAG_VARIABLE,
   STORE_SAVE_ASYNC_FUNCTION,
   STORE_SAVE_FUNCTION,
-} from '@tess/core';
+} from '@entropy/core';
 import type { Context } from './context.ts';
 import type {
   CompiledFunction, EntryBlock, EntryParam, EntryVariable, FuncLocalVariable,
@@ -10,8 +10,8 @@ import type {
 
 const MEASURE = 100000;
 const AXES: Record<string, { setter: string; probe: string; label: string }> = {
-  scale_x: { setter: 'WIDTH', probe: 'HEIGHT', label: '[Tess] 가로 비율 정하기' },
-  scale_y: { setter: 'HEIGHT', probe: 'WIDTH', label: '[Tess] 세로 비율 정하기' },
+  scale_x: { setter: 'WIDTH', probe: 'HEIGHT', label: '[Entropy] 가로 비율 정하기' },
+  scale_y: { setter: 'HEIGHT', probe: 'WIDTH', label: '[Entropy] 세로 비율 정하기' },
 };
 
 // Select numeric parameters once without arithmetic that could overflow.
@@ -29,11 +29,11 @@ export function requireMinMax(kind: 'min' | 'max', ctx: Context): CompiledFuncti
       [[ctx.block('set_func_variable', [local, numeric('b'), null])]]),
   ];
   const field = ctx.block('function_field_label', [
-    `[Tess] ${kind}`,
+    `[Entropy] ${kind}`,
     params.reduceRight<EntryParam>((next, name) => ctx.block('function_field_string', [ctx.block(paramTypes.get(name)!, []), next]), null),
   ]);
   const create = ctx.block('function_create_value', [field, null, null, ctx.block('get_func_variable', [local, null])], [body]);
-  const fn: CompiledFunction = { id, name: `[Tess] ${kind}`, params, paramTypes,
+  const fn: CompiledFunction = { id, name: `[Entropy] ${kind}`, params, paramTypes,
     isValue: true, generated: true, type: 'value',
     localVariables: [{ id: local, name: 'result', value: 0 }], content: [[create]] };
   ctx.functions.push(fn);
@@ -161,7 +161,7 @@ export function requirePowerRefiner(ctx: Context): CompiledFunction {
   );
 
   const field = ctx.block('function_field_label', [
-    '[Tess] 거듭제곱 다듬기',
+    '[Entropy] 거듭제곱 다듬기',
     params.reduceRight<EntryParam>(
       (next, name) => ctx.block('function_field_string', [ctx.block(paramTypes.get(name)!, []), next]),
       null,
@@ -174,7 +174,7 @@ export function requirePowerRefiner(ctx: Context): CompiledFunction {
 
   const fn = {
     id,
-    name: '[Tess] 거듭제곱 다듬기',
+    name: '[Entropy] 거듭제곱 다듬기',
     generated: true,
     type: 'value',
     params,

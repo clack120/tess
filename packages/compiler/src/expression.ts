@@ -1,13 +1,13 @@
 // Indices are one-based, slices include both ends, and failed searches return zero.
-import { KEY_CODES, keyCodeOf } from '@tess/core';
-import { didYouMean, orHint } from '@tess/core';
+import { KEY_CODES, keyCodeOf } from '@entropy/core';
+import { didYouMean, orHint } from '@entropy/core';
 import { requireMinMax, requirePowerRefiner, requireStoreFlag } from './runtime.ts';
 import { requireStringHelper } from './string-functions.ts';
-import { BUILTIN_FUNCTIONS, OPTION_KEYWORDS, STATE_VALUES, STORE_FLAG_ON } from '@tess/core';
-import { expansionBlock } from '@tess/core';
+import { BUILTIN_FUNCTIONS, OPTION_KEYWORDS, STATE_VALUES, STORE_FLAG_ON } from '@entropy/core';
+import { expansionBlock } from '@entropy/core';
 import type {
   BinaryNode, CallNode, Expr, IndexNode, Node, UnaryNode,
-} from '@tess/parser';
+} from '@entropy/parser';
 import type { Context } from './context.ts';
 import type {
   CompiledFunction, EntryBlock, EntryParam, EntryVariable,

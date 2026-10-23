@@ -3,23 +3,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { stripTypes } from '@tess/core/strip-types';
+import { stripTypes } from '@entropy/core/strip-types';
 import { fileURLToPath } from 'node:url';
 import { icon } from './icons.ts';
 import { crxIdText, packCrx, publicKeyOf, signingKey, zipDirectory } from './pack.ts';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const SRC = path.join(ROOT, 'src');
-const VM_SRC = path.resolve(ROOT, '../tessvm/src');
+const VM_SRC = path.resolve(ROOT, '../vm/src');
 const DIST = path.join(ROOT, 'dist');
 const VENDOR = path.join(DIST, 'vendor');
-const VM_OUT = path.join(VENDOR, 'tessvm');
+const VM_OUT = path.join(VENDOR, 'entropy');
 const PIXI_OUT = path.join(VENDOR, 'pixi.mjs');
 const DEXIE_OUT = path.join(VENDOR, 'dexie.mjs');
 
-const ZIP = path.join(ROOT, 'tessvm-extension.zip');
-const CHROME_ZIP = path.join(ROOT, 'tessvm-extension-chrome.zip');
-const CRX = path.join(ROOT, 'tessvm-extension.crx');
+const ZIP = path.join(ROOT, 'entropy-extension.zip');
+const CHROME_ZIP = path.join(ROOT, 'entropy-extension-chrome.zip');
+const CRX = path.join(ROOT, 'entropy-extension.crx');
 // The signing key determines the extension ID, so keep it stable.
 const CRX_KEY = path.join(ROOT, 'crx-key.pem');
 
@@ -249,10 +249,10 @@ for (const entry of CLASSIC_ENTRIES) {
 }
 execFileSync(process.execPath, ['build', path.join(SRC, 'background.ts'), '--target=browser',
   '--format=iife', '--minify', `--outfile=${path.join(DIST, 'background.js')}`]);
-execFileSync(process.execPath, ['build', path.join(packageDir(path.join(ROOT, '../tessvm/package.json'), 'pixi.js'),
+execFileSync(process.execPath, ['build', path.join(packageDir(path.join(ROOT, '../vm/package.json'), 'pixi.js'),
   'dist/pixi.mjs'), '--target=browser', '--format=esm', '--minify', `--outfile=${PIXI_OUT}`]);
 copyVendor(
-  path.join(ROOT, '../tessvm/package.json'),
+  path.join(ROOT, '../vm/package.json'),
   'dexie',
   'dist/modern/dexie.min.mjs',
   DEXIE_OUT,
@@ -260,6 +260,8 @@ copyVendor(
 copy(path.join(SRC, 'player.css'), path.join(DIST, 'player.css'));
 copy(path.join(SRC, 'popup', 'popup.html'), path.join(DIST, 'popup', 'popup.html'));
 copy(path.join(SRC, 'popup', 'popup.css'), path.join(DIST, 'popup', 'popup.css'));
+// Ship the licenses with the build: AGPL for Entropy, MIT for the parts from Tess.
+for (const file of ['LICENSE', 'LICENSE-TESS']) copy(path.resolve(ROOT, '../..', file), path.join(DIST, file));
 writeIcons();
 checkLinks();
 

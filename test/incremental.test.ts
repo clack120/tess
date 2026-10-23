@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { compileProject, createCompileCache } from '@tess/compiler';
+import { compileProject, createCompileCache } from '@entropy/compiler';
 
 const MAIN = `scene "s":
-  useobject "objects/가.tess"
-  useobject "objects/나.tess"
+  useobject "objects/가.etp"
+  useobject "objects/나.etp"
 end`;
 
 const FRAGMENT = (message: string) => `default costume 기본 "a.png" size 10 10
@@ -16,16 +16,16 @@ when start do
 end`;
 
 function makeProject() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-incremental-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-incremental-'));
   fs.mkdirSync(path.join(dir, 'objects'));
-  fs.writeFileSync(path.join(dir, 'main.tess'), MAIN);
-  fs.writeFileSync(path.join(dir, 'objects/가.tess'), FRAGMENT('가'));
-  fs.writeFileSync(path.join(dir, 'objects/나.tess'), FRAGMENT('나'));
+  fs.writeFileSync(path.join(dir, 'main.etp'), MAIN);
+  fs.writeFileSync(path.join(dir, 'objects/가.etp'), FRAGMENT('가'));
+  fs.writeFileSync(path.join(dir, 'objects/나.etp'), FRAGMENT('나'));
   return dir;
 }
 
 function build(dir: any, cache: any) {
-  const mainFile = path.join(dir, 'main.tess');
+  const mainFile = path.join(dir, 'main.etp');
   return compileProject(fs.readFileSync(mainFile, 'utf-8'), {
     path: mainFile, assetDirs: [dir], cache,
   });
@@ -62,7 +62,7 @@ test('한 파일만 고치면 그 파일만 다시 파싱한다', () => {
   const cache = createCompileCache();
 
   build(dir, cache);
-  fs.writeFileSync(path.join(dir, 'objects/가.tess'), FRAGMENT('바뀐 인사'));
+  fs.writeFileSync(path.join(dir, 'objects/가.etp'), FRAGMENT('바뀐 인사'));
 
   const before = cache.parsed;
   const result = build(dir, cache);
@@ -72,12 +72,12 @@ test('한 파일만 고치면 그 파일만 다시 파싱한다', () => {
   assert.match(object!.script, /바뀐 인사/);
 });
 
-test('main.tess 를 고치면 조각 파일은 그대로 다시 쓴다', () => {
+test('main.etp 를 고치면 조각 파일은 그대로 다시 쓴다', () => {
   const dir = makeProject();
   const cache = createCompileCache();
 
   build(dir, cache);
-  fs.writeFileSync(path.join(dir, 'main.tess'), `${MAIN}\n`);
+  fs.writeFileSync(path.join(dir, 'main.etp'), `${MAIN}\n`);
 
   const before = { parsed: cache.parsed, reused: cache.reused };
   build(dir, cache);
@@ -88,7 +88,7 @@ test('main.tess 를 고치면 조각 파일은 그대로 다시 쓴다', () => {
 test('문법 에러가 난 파일은 캐시에 남지 않고 매번 다시 알려준다', () => {
   const dir = makeProject();
   const cache = createCompileCache();
-  const broken = path.join(dir, 'objects/가.tess');
+  const broken = path.join(dir, 'objects/가.etp');
 
   build(dir, cache);
   fs.writeFileSync(broken, 'when start do\n  say (\nend');
@@ -107,11 +107,11 @@ test('문법 에러가 난 파일은 캐시에 남지 않고 매번 다시 알�
 
 test('두 오브젝트가 같은 조각을 use 하면 한 번만 파싱한다', () => {
   const dir = makeProject();
-  fs.writeFileSync(path.join(dir, 'objects/공통.tess'), 'when start do\n  say "공통"\nend');
+  fs.writeFileSync(path.join(dir, 'objects/공통.etp'), 'when start do\n  say "공통"\nend');
   for (const name of ['가', '나']) {
     fs.writeFileSync(
-      path.join(dir, `objects/${name}.tess`),
-      `default costume 기본 "a.png" size 10 10\nuse "공통.tess"`,
+      path.join(dir, `objects/${name}.etp`),
+      `default costume 기본 "a.png" size 10 10\nuse "공통.etp"`,
     );
   }
 
@@ -126,7 +126,7 @@ test('두 오브젝트가 같은 조각을 use 하면 한 번만 파싱한다', 
 // Missing includes must report errors instead of silently removing an object.
 test('불러올 파일이 없으면 에러로 알려준다', () => {
   const dir = makeProject();
-  fs.writeFileSync(path.join(dir, 'main.tess'), 'scene "s":\n  useobject "objects/없는파일.tess"\nend');
+  fs.writeFileSync(path.join(dir, 'main.etp'), 'scene "s":\n  useobject "objects/없는파일.etp"\nend');
 
   const result = build(dir, createCompileCache());
   assert.equal(result.ok, false);

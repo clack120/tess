@@ -1,11 +1,11 @@
 /* Scope styles to the player so they do not affect the host page. */
 /* Keep the original iframe's layout box so page sizing rules still apply. */
-.tessvm-host {
+.entropy-host {
   position: absolute;
   inset: 0;
 }
 
-.tessvm-player {
+.entropy-player {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -19,17 +19,17 @@
   outline: none;
 }
 
-.tessvm-player *,
-.tessvm-player *::before,
-.tessvm-player *::after {
+.entropy-player *,
+.entropy-player *::before,
+.entropy-player *::after {
   box-sizing: border-box;
 }
 
-.tessvm-player [hidden] {
+.entropy-player [hidden] {
   display: none !important;
 }
 
-.tessvm-view {
+.entropy-view {
   position: relative;
   flex: 1;
   min-height: 0;
@@ -38,7 +38,7 @@
   overflow: hidden;
 }
 
-.tessvm-player .tessvm-stage {
+.entropy-player .entropy-stage {
   position: relative;
   display: grid;
   place-items: center;
@@ -46,17 +46,17 @@
   height: 100%;
 }
 
-.tessvm-player .tessvm-frame {
+.entropy-player .entropy-frame {
   position: relative;
   line-height: 0;
 }
 
-.tessvm-player .tessvm-stage canvas {
+.entropy-player .entropy-stage canvas {
   display: block;
 }
 
 /* Keep the cover above the canvas even though the canvas is inserted later. */
-.tessvm-cover {
+.entropy-cover {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -68,11 +68,11 @@
   background: #eef0f3 center / cover no-repeat;
 }
 
-.tessvm-player:not(.is-idle) .tessvm-cover {
+.entropy-player:not(.is-idle) .entropy-cover {
   display: none;
 }
 
-.tessvm-start {
+.entropy-start {
   width: 76px;
   height: 76px;
   padding: 0;
@@ -87,18 +87,18 @@
   transition: transform 0.12s ease-out;
 }
 
-.tessvm-start:hover {
+.entropy-start:hover {
   transform: scale(1.06);
 }
 
-.tessvm-start svg {
+.entropy-start svg {
   width: 34px;
   height: 34px;
   margin-left: 4px;
   fill: currentColor;
 }
 
-.tessvm-status {
+.entropy-status {
   padding: 4px 12px;
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.55);
@@ -106,11 +106,11 @@
   font-size: 12px;
 }
 
-.tessvm-status:empty {
+.entropy-status:empty {
   display: none;
 }
 
-.tessvm-bar {
+.entropy-bar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -121,18 +121,18 @@
   border-top: 1px solid #f2f2f2;
 }
 
-.tessvm-bar-side {
+.entropy-bar-side {
   display: flex;
   align-items: center;
   gap: 6px;
   flex: none;
 }
 
-.tessvm-bar-right {
+.entropy-bar-right {
   gap: 10px;
 }
 
-.tessvm-btn {
+.entropy-btn {
   display: grid;
   place-items: center;
   width: 28px;
@@ -145,18 +145,18 @@
   cursor: pointer;
 }
 
-.tessvm-btn:hover {
+.entropy-btn:hover {
   background: #f2f4f6;
   color: #16191d;
 }
 
-.tessvm-btn svg {
+.entropy-btn svg {
   width: 16px;
   height: 16px;
   fill: currentColor;
 }
 
-.tessvm-btn svg.stroke {
+.entropy-btn svg.stroke {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
@@ -165,12 +165,12 @@
 }
 
 /* Hide stop and pause until the work is running, matching Entry. */
-.tessvm-player.is-idle .tessvm-stop,
-.tessvm-player.is-idle .tessvm-pause {
+.entropy-player.is-idle .entropy-stop,
+.entropy-player.is-idle .entropy-pause {
   visibility: hidden;
 }
 
-.tessvm-coords {
+.entropy-coords {
   flex: 1;
   min-width: 0;
   text-align: center;
@@ -182,7 +182,7 @@
   text-overflow: ellipsis;
 }
 
-.tessvm-boost {
+.entropy-boost {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -191,12 +191,12 @@
   user-select: none;
 }
 
-.tessvm-boost-text {
+.entropy-boost-text {
   color: #62666a;
   font-size: 12px;
 }
 
-.tessvm-boost input {
+.entropy-boost input {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -204,7 +204,7 @@
   pointer-events: none;
 }
 
-.tessvm-switch {
+.entropy-switch {
   position: relative;
   display: block;
   width: 34px;
@@ -214,7 +214,7 @@
   transition: background 0.15s ease-out;
 }
 
-.tessvm-switch::after {
+.entropy-switch::after {
   content: '';
   position: absolute;
   top: 2px;
@@ -227,20 +227,20 @@
   transition: transform 0.15s ease-out;
 }
 
-.tessvm-boost input:checked + .tessvm-switch {
+.entropy-boost input:checked + .entropy-switch {
   background: #16d799;
 }
 
-.tessvm-boost input:checked + .tessvm-switch::after {
+.entropy-boost input:checked + .entropy-switch::after {
   transform: translateX(16px);
 }
 
-.tessvm-boost input:focus-visible + .tessvm-switch {
+.entropy-boost input:focus-visible + .entropy-switch {
   outline: 2px solid #16d799;
   outline-offset: 2px;
 }
 
-.tessvm-error {
+.entropy-error {
   flex: none;
   padding: 4px 14px;
   border-top: 1px solid #f2f2f2;
@@ -254,31 +254,31 @@
   overflow: auto;
 }
 
-.tessvm-error.is-notice {
+.entropy-error.is-notice {
   background: #fffaf0;
   color: #8a6116;
 }
 
-.tessvm-player:fullscreen,
-.tessvm-player.is-full {
+.entropy-player:fullscreen,
+.entropy-player.is-full {
   width: 100vw;
   height: 100vh;
   background: #000;
 }
 
-.tessvm-player:fullscreen .tessvm-view,
-.tessvm-player.is-full .tessvm-view {
+.entropy-player:fullscreen .entropy-view,
+.entropy-player.is-full .entropy-view {
   background: #000;
 }
 
-.tessvm-player:fullscreen .tessvm-bar,
-.tessvm-player.is-full .tessvm-bar {
+.entropy-player:fullscreen .entropy-bar,
+.entropy-player.is-full .entropy-bar {
   display: none;
 }
 
 /* Overlay messages in fullscreen so they do not shrink the stage. */
-.tessvm-player:fullscreen .tessvm-error,
-.tessvm-player.is-full .tessvm-error {
+.entropy-player:fullscreen .entropy-error,
+.entropy-player.is-full .entropy-error {
   position: absolute;
   right: 0;
   bottom: 0;
@@ -289,14 +289,14 @@
   color: #ff9f92;
 }
 
-.tessvm-player:fullscreen .tessvm-error.is-notice,
-.tessvm-player.is-full .tessvm-error.is-notice {
+.entropy-player:fullscreen .entropy-error.is-notice,
+.entropy-player.is-full .entropy-error.is-notice {
   background: rgba(40, 30, 4, 0.82);
   color: #ffd479;
 }
 
 /* Use readable pixel sizes and override the host page's button resets. */
-.tessvm-menu {
+.entropy-menu {
   position: absolute;
   z-index: 6;
   min-width: 168px;
@@ -311,11 +311,11 @@
   color: #2c313d;
 }
 
-.tessvm-menu[hidden] {
+.entropy-menu[hidden] {
   display: none !important;
 }
 
-.tessvm-menu button {
+.entropy-menu button {
   display: block;
   width: 100%;
   margin: 0;
@@ -330,16 +330,16 @@
   cursor: pointer;
 }
 
-.tessvm-menu button:hover:not(:disabled) {
+.entropy-menu button:hover:not(:disabled) {
   background: #f2f4f6;
 }
 
-.tessvm-menu button:disabled {
+.entropy-menu button:disabled {
   color: #b6bac1;
   cursor: default;
 }
 
-.tessvm-menu hr {
+.entropy-menu hr {
   margin: 5px 6px;
   border: 0;
   border-top: 1px solid #e4e6eb;

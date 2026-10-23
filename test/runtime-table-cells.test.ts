@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Table, Vm } from '@tess/vm';
+import { Table, Vm } from '@entropy/vm';
 
 function tableVm(value: unknown, header = false) {
   const vm = new Vm({ renderer: null, audio: null });

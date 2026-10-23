@@ -1,11 +1,11 @@
 import { imageSize } from '../../compiler/src/assets.ts';
-import { append, safeIdentifier, tessString, tessNumber, tessLiteral, tessComment, displayNamePart } from './ident.ts';
-import { autoParamName } from '@tess/core';
+import { append, safeIdentifier, entropyString, entropyNumber, entropyLiteral, entropyComment, displayNamePart } from './ident.ts';
+import { autoParamName } from '@entropy/core';
 import { blocksToLines, commentLines, indent, functionDeclarationLines, colorExpr } from './stmt.ts';
 import {
   KEY_CODES, STORE_PREFIX, STORE_SAVE_ASYNC_FUNCTION, STORE_SAVE_FUNCTION,
   tableRowCells, tableRows,
-} from '@tess/core';
+} from '@entropy/core';
 import type {
   CollectedAsset, DecompileContext, DecompileOptions, DecompileResult,
   FunctionField, FunctionInfo, FunctionLocal, ObjectInfo, RawBlock, RawEntity,
@@ -140,9 +140,9 @@ export function decompileProject(
   }
 
   lines.push('project:');
-  lines.push(`  title ${tessString(project.name ?? 'Tess 작품')}`);
-  if (project.description) lines.push(`  description ${tessString(project.description)}`);
-  lines.push(`  fps ${tessNumber(project.speed ?? 60)}`);
+  lines.push(`  title ${entropyString(project.name ?? 'Entropy 작품')}`);
+  if (project.description) lines.push(`  description ${entropyString(project.description)}`);
+  lines.push(`  fps ${entropyNumber(project.speed ?? 60)}`);
   lines.push('end');
   lines.push('');
 
@@ -443,7 +443,7 @@ function buildContext(
   for (const entry of project.variables ?? []) {
     if (entry.variableType === 'timer' || entry.variableType === 'answer') continue;
     const isList = entry.variableType === 'list';
-    // Store restores the @ prefix when recompiling the stripped Tess name.
+    // Store restores the @ prefix when recompiling the stripped Entropy name.
     const store = !entry.object && String(entry.name ?? '').startsWith(STORE_PREFIX);
     const label = store ? String(entry.name).slice(STORE_PREFIX.length) : entry.name;
     const identifier = safeIdentifier(label, usedNames, isList ? 'list' : 'var');
@@ -602,11 +602,11 @@ function buildContext(
   return ctx;
 }
 
-// Convert zero-based Entry chart columns to one-based Tess columns.
+// Convert zero-based Entry chart columns to one-based Entropy columns.
 function chartLine(chart: RawEntity): string {
   const column = (value: unknown) => Number(value ?? -1) + 1;
   const parts = [`chart ${String(chart.type ?? 'bar')}`];
-  if (chart.title) parts.push(tessString(chart.title));
+  if (chart.title) parts.push(entropyString(chart.title));
   if (column(chart.xIndex) > 0) parts.push(`x ${column(chart.xIndex)}`);
   if (column(chart.yIndex) > 0) parts.push(`y ${column(chart.yIndex)}`);
   const series = (chart.categoryIndexes ?? [])
@@ -618,7 +618,7 @@ function chartLine(chart: RawEntity): string {
 
 function tableLines(info: TableInfo, withRows = true): string[] {
   const table = info.source;
-  const cells = (row: unknown[]) => row.map((cell) => tessLiteral(cell)).join(', ');
+  const cells = (row: unknown[]) => row.map((cell) => entropyLiteral(cell)).join(', ');
   const lines = [`table ${info.identifier}${displayNamePart(info.identifier, table.name)}:`];
   lines.push(`  columns ${cells(tableRowCells(table.fields))}`);
   if (withRows) {
@@ -647,26 +647,26 @@ function declarationLine(info: VarInfo, indentLevel = 0, positions = false): str
   const named = displayNamePart(info.identifier, entryName);
   const shown = source.visible ? ' visible' : '';
   const at = positions
-    ? ` at ${tessNumber(Number(source.x) || 0)} ${tessNumber(Number(source.y) || 0)}`
+    ? ` at ${entropyNumber(Number(source.x) || 0)} ${entropyNumber(Number(source.y) || 0)}`
     : '';
   if (info.isList) {
-    const items = (source.array ?? []).map((item: { data: unknown }) => tessLiteral(item.data));
+    const items = (source.array ?? []).map((item: { data: unknown }) => entropyLiteral(item.data));
     // Preserve resized boxes and omit the default 100 by 120 size.
     const width = Number(source.width ?? 100);
     const height = Number(source.height ?? 120);
-    const size = width !== 100 || height !== 120 ? ` size ${tessNumber(width)} ${tessNumber(height)}` : '';
+    const size = width !== 100 || height !== 120 ? ` size ${entropyNumber(width)} ${entropyNumber(height)}` : '';
     return [`${pad}${scope}list ${info.identifier}${named} = [${items.join(', ')}]${shown}${at}${size}`];
   }
   const range = source.variableType === 'slide'
-    ? ` from ${tessNumber(Number(source.minValue) || 0)} to ${tessNumber(Number(source.maxValue) || 0)}`
+    ? ` from ${entropyNumber(Number(source.minValue) || 0)} to ${entropyNumber(Number(source.maxValue) || 0)}`
     : '';
-  return [`${pad}${scope}var ${info.identifier}${named} = ${tessLiteral(source.value)}${range}${shown}${at}`];
+  return [`${pad}${scope}var ${info.identifier}${named} = ${entropyLiteral(source.value)}${range}${shown}${at}`];
 }
 
 function sceneLines(scene: RawEntity, project: RawEntity, ctx: DecompileContext): string[] {
   const info = ctx.scenesById.get(scene.id)!;
-  const lines = [`scene ${tessString(info.identifier)}:`];
-  if (info.identifier !== info.displayName) lines.push(`  name ${tessString(info.displayName)}`);
+  const lines = [`scene ${entropyString(info.identifier)}:`];
+  if (info.identifier !== info.displayName) lines.push(`  name ${entropyString(info.displayName)}`);
 
   for (const object of project.objects ?? []) {
     if (object.scene !== scene.id) continue;
@@ -684,16 +684,16 @@ function useObjectLine(object: RawEntity, ctx: DecompileContext, sceneIdentifier
   const fragment = objectFragmentLines(object, ctx, isText);
   // Inline output has no fragment files, so write each object inside its scene.
   if (ctx.inline) {
-    const head = `  ${isText ? 'text' : 'object'} ${tessString(info.identifier)}:`;
+    const head = `  ${isText ? 'text' : 'object'} ${entropyString(info.identifier)}:`;
     return [head, ...indent(indent(fragment)), '  end'];
   }
   const dir = ctx.multiScene ? `objects/${sceneIdentifier}` : 'objects';
-  const relativePath = `${dir}/${info.identifier}.tess`;
+  const relativePath = `${dir}/${info.identifier}.etp`;
   ctx.collectedAssets.push({
     path: relativePath,
     data: encodeText(`${fragment.join('\n').trimEnd()}\n`),
   });
-  return [`  ${isText ? 'usetext' : 'useobject'} ${tessString(relativePath)}`];
+  return [`  ${isText ? 'usetext' : 'useobject'} ${entropyString(relativePath)}`];
 }
 
 function sameSize(ctx: DecompileContext, path: string, dimension: { width?: number; height?: number } | undefined): boolean {
@@ -706,7 +706,7 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
   const info = ctx.objectsById.get(object.id)!;
   const lines: string[] = [];
 
-  if (info.identifier !== info.displayName) lines.push(`name ${tessString(info.displayName)}`);
+  if (info.identifier !== info.displayName) lines.push(`name ${entropyString(info.displayName)}`);
 
   for (const picture of object.sprite?.pictures ?? []) {
     const picInfo = ctx.picturesById.get(picture.id);
@@ -717,21 +717,21 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
       sameSize(ctx, picInfo.relativePath, picture.dimension);
     const sizePart = measurable
       ? ''
-      : ` size ${tessNumber(picture.dimension?.width ?? 100)} ${tessNumber(picture.dimension?.height ?? 100)}`;
+      : ` size ${entropyNumber(picture.dimension?.width ?? 100)} ${entropyNumber(picture.dimension?.height ?? 100)}`;
     const filePart = picInfo.relativePath ?? (picture.fileurl ?? `${picInfo.identifier}.png`);
     const namePart = displayNamePart(picInfo.identifier, picture.name);
-    const forcePart = ctx.forcedIds.has(picture.id) ? ` force id ${tessString(picture.id)}` : '';
-    lines.push(`${isDefault ? 'default costume' : 'costume'} ${picInfo.identifier} ${tessString(filePart)}${sizePart}${namePart}${forcePart}`);
+    const forcePart = ctx.forcedIds.has(picture.id) ? ` force id ${entropyString(picture.id)}` : '';
+    lines.push(`${isDefault ? 'default costume' : 'costume'} ${picInfo.identifier} ${entropyString(filePart)}${sizePart}${namePart}${forcePart}`);
   }
   for (const sound of object.sprite?.sounds ?? []) {
     const sndInfo = ctx.soundsById.get(sound.id);
     if (!sndInfo) continue;
     // Preserve Entry's sound duration because it controls loading and play-and-wait timing.
-    const durationPart = ` for ${tessNumber(Number.isFinite(sound.duration) ? sound.duration : 1)}`;
+    const durationPart = ` for ${entropyNumber(Number.isFinite(sound.duration) ? sound.duration : 1)}`;
     const filePart = sndInfo.relativePath ?? (sound.fileurl ?? `${sndInfo.identifier}.mp3`);
     const namePart = displayNamePart(sndInfo.identifier, sound.name);
-    const forcePart = ctx.forcedIds.has(sound.id) ? ` force id ${tessString(sound.id)}` : '';
-    lines.push(`sound ${sndInfo.identifier} ${tessString(filePart)}${durationPart}${namePart}${forcePart}`);
+    const forcePart = ctx.forcedIds.has(sound.id) ? ` force id ${entropyString(sound.id)}` : '';
+    lines.push(`sound ${sndInfo.identifier} ${entropyString(filePart)}${durationPart}${namePart}${forcePart}`);
   }
 
   append(lines, objectPropertyLines(object, isText, 0));
@@ -789,7 +789,7 @@ function centerLine(object: RawEntity, pad: string): string[] {
   const height = picture?.dimension?.height ?? 100;
   if (entity.regX === width / 2 && entity.regY === height / 2) return [];
 
-  return [`${pad}center ${tessNumber(entity.regX)} ${tessNumber(entity.regY)}`];
+  return [`${pad}center ${entropyNumber(entity.regX)} ${entropyNumber(entity.regY)}`];
 }
 
 // Round percentages only when dividing by 100 restores the exact saved scale.
@@ -806,26 +806,26 @@ function objectPropertyLines(object: RawEntity, isText: boolean, indentLevel: nu
   const pad = '  '.repeat(indentLevel);
   const lines: string[] = [];
   const entity = object.entity ?? {};
-  if (entity.x) lines.push(`${pad}x = ${tessNumber(entity.x)}`);
-  if (entity.y) lines.push(`${pad}y = ${tessNumber(entity.y)}`);
-  if (entity.rotation) lines.push(`${pad}angle = ${tessNumber(entity.rotation)}`);
-  if (entity.direction !== undefined && entity.direction !== 90) lines.push(`${pad}way = ${tessNumber(entity.direction)}`);
-  if (entity.scaleX !== undefined && entity.scaleX !== 1) lines.push(`${pad}scale_x = ${tessNumber(scalePercent(entity.scaleX))}`);
-  if (entity.scaleY !== undefined && entity.scaleY !== 1) lines.push(`${pad}scale_y = ${tessNumber(scalePercent(entity.scaleY))}`);
+  if (entity.x) lines.push(`${pad}x = ${entropyNumber(entity.x)}`);
+  if (entity.y) lines.push(`${pad}y = ${entropyNumber(entity.y)}`);
+  if (entity.rotation) lines.push(`${pad}angle = ${entropyNumber(entity.rotation)}`);
+  if (entity.direction !== undefined && entity.direction !== 90) lines.push(`${pad}way = ${entropyNumber(entity.direction)}`);
+  if (entity.scaleX !== undefined && entity.scaleX !== 1) lines.push(`${pad}scale_x = ${entropyNumber(scalePercent(entity.scaleX))}`);
+  if (entity.scaleY !== undefined && entity.scaleY !== 1) lines.push(`${pad}scale_y = ${entropyNumber(scalePercent(entity.scaleY))}`);
   if (!isText) append(lines, centerLine(object, pad));
 
   if (isText) {
-    if (object.text) lines.push(`${pad}text_content = ${tessString(object.text)}`);
+    if (object.text) lines.push(`${pad}text_content = ${entropyString(object.text)}`);
     const font = parseFont(entity.font);
     // If Entry could not read fontSize, recover the canvas fallback from the font string.
     const fontSize = entity.fontSize || font.size;
-    if (fontSize) lines.push(`${pad}font_size = ${tessNumber(fontSize)}`);
+    if (fontSize) lines.push(`${pad}font_size = ${entropyNumber(fontSize)}`);
     // Preserve saved text bounds because estimating from character count loses wrapping.
     if (Number.isFinite(entity.width) && Number.isFinite(entity.height)) {
-      lines.push(`${pad}size ${tessNumber(entity.width)} ${tessNumber(entity.height)}`);
+      lines.push(`${pad}size ${entropyNumber(entity.width)} ${entropyNumber(entity.height)}`);
     }
 
-    if (font.family && font.family !== 'Nanum Gothic') lines.push(`${pad}font = ${tessString(font.family)}`);
+    if (font.family && font.family !== 'Nanum Gothic') lines.push(`${pad}font = ${entropyString(font.family)}`);
     if (font.bold) lines.push(`${pad}text_bold = true`);
     if (font.italic) lines.push(`${pad}text_italic = true`);
     if (entity.colour && entity.colour !== '#000000') lines.push(`${pad}font_color = ${colorExpr(entity.colour)}`);
@@ -879,7 +879,7 @@ function eventLines(thread: RawBlock[] | undefined, ctx: DecompileContext, inden
   const keyUp = matchKeyUpPattern(hat, rest);
   if (keyUp) {
     const body = indentBody(blocksToLines(keyUp.body, ctx));
-    return [...note, `${pad}when key ${tessString(keyUp.key)} up do`, ...body, `${pad}end`, ''];
+    return [...note, `${pad}when key ${entropyString(keyUp.key)} up do`, ...body, `${pad}end`, ''];
   }
 
   const header = eventHeader(hat, ctx);
@@ -901,7 +901,7 @@ function eventLines(thread: RawBlock[] | undefined, ctx: DecompileContext, inden
   const raw = blocksToLines(thread, ctx);
   keepOnly(ctx.warnings, hadWarnings);
   keepOnly(ctx.notices, hadNotices);
-  const commented = raw.map((line: string) => (line.trim() ? `${pad}${tessComment(line)}` : ''));
+  const commented = raw.map((line: string) => (line.trim() ? `${pad}${entropyComment(line)}` : ''));
   return [
     `${pad}# [decompile] 아래는 엔트리 원본에서 어디에도 연결돼 있지 않던 블록입니다 (실행되지 않음):`,
     ...commented,
@@ -919,10 +919,10 @@ function eventHeader(hat: RawBlock | undefined, ctx: DecompileContext): string |
     case 'mouse_clicked': return 'when stage click';
     case 'mouse_click_cancled': return 'when stage click up';
     case 'when_clone_start': return 'when cloned';
-    case 'when_message_cast': return `when signal ${tessString(ctx.messageName(p[1]))}`;
+    case 'when_message_cast': return `when signal ${entropyString(ctx.messageName(p[1]))}`;
     case 'when_some_key_pressed': {
       const name = keyName(p[1]);
-      return name ? `when key ${tessString(name)}` : null;
+      return name ? `when key ${entropyString(name)}` : null;
     }
     default: return null;
   }

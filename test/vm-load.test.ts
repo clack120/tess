@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { makeTar } from '@tess/compiler';
-import { loadProject, serveVm, Vm } from '@tess/vm';
+import { makeTar } from '@entropy/compiler';
+import { loadProject, serveVm, Vm } from '@entropy/vm';
 
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><path d="M0 0h1v1H0z"/></svg>');
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -35,7 +35,7 @@ function project() {
 }
 
 function fixture(t: any, work = project(), extra: Record<string, Buffer> = media) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tess-load-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-load-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'original.ent');
   fs.writeFileSync(file, zlib.gzipSync(makeTar([
@@ -48,7 +48,7 @@ function fixture(t: any, work = project(), extra: Record<string, Buffer> = media
 async function load(t: any, file: string, options: Parameters<typeof loadProject>[1] = {}) {
   const loaded = await loadProject(file, options);
   const folder = loaded.assetDirs.at(-1)!;
-  assert.ok(path.basename(folder).startsWith('tessvm-assets-'));
+  assert.ok(path.basename(folder).startsWith('entropy-assets-'));
   t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
   return loaded;
 }
@@ -72,11 +72,11 @@ test('.ent loading preserves original blocks, IDs, types, tables, and media', as
   assert.equal(vm.variables[0]!.value, true);
 });
 
-test('keeping Tess source never makes it the execution input', async (t) => {
+test('keeping Entropy source never makes it the execution input', async (t) => {
   const { file, dir, work } = fixture(t);
   const kept = path.join(dir, 'kept');
   const loaded = await load(t, file, { decompileTo: kept });
-  assert.ok(fs.existsSync(path.join(kept, 'main.tess')));
+  assert.ok(fs.existsSync(path.join(kept, 'main.etp')));
   assert.equal(loaded.decompiledTo, kept);
   assert.deepEqual(loaded.project, work);
 });

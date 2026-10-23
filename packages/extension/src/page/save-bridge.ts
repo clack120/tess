@@ -1,5 +1,5 @@
 // Match save requests and replies by ID across the page, content script, and worker.
-import type { SaveHost, StoredValue } from "../../../tessvm/src/runtime/save.ts";
+import type { SaveHost, StoredValue } from "../../../vm/src/runtime/save.ts";
 
 const TIMEOUT = 5000;
 
@@ -21,8 +21,8 @@ function listen(): void {
     if (event.source !== window) {
       return;
     }
-    const data = event.data as { __tessvm?: string; id?: number; answer?: Answer } | null;
-    if (!data || data.__tessvm !== "store-answer") {
+    const data = event.data as { __entropy?: string; id?: number; answer?: Answer } | null;
+    if (!data || data.__entropy !== "store-answer") {
       return;
     }
     const done = waiting.get(Number(data.id));
@@ -53,11 +53,11 @@ function ask(message: Record<string, unknown>): Promise<Answer> {
 export function bridgeSaveStore(work: string, title: string): SaveHost {
   return {
     async read() {
-      const answer = await ask({ __tessvm: "store-read", work });
+      const answer = await ask({ __entropy: "store-read", work });
       return answer.values ?? {};
     },
     async write(values) {
-      await ask({ __tessvm: "store-write", work, title, values });
+      await ask({ __entropy: "store-write", work, title, values });
     },
   };
 }

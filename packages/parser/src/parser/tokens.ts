@@ -1,5 +1,5 @@
 import { createToken, Lexer } from 'chevrotain';
-import { colorLiteralLength } from '@tess/core';
+import { colorLiteralLength } from '@entropy/core';
 import type { ILexingError, IToken, TokenType } from 'chevrotain';
 
 const IDENT_START = '[\\p{L}_]';

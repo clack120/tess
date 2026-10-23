@@ -1,7 +1,7 @@
 // The popup and worker share extension storage; page-origin storage is inaccessible to them.
 import { Dexie, type Table } from 'dexie';
 
-const DATABASE = 'tessvm-store';
+const DATABASE = 'entropy-store';
 
 export type StoredValue = string | number | boolean | Array<{ data: string | number | boolean }>;
 
@@ -72,7 +72,7 @@ export async function clearWorks(): Promise<void> {
   await open().works.clear();
 }
 
-const FORMAT = 'tessvm-saves';
+const FORMAT = 'entropy-saves';
 
 // JSON cannot hold NaN or Infinity, which Entry variables can, so tag them.
 const encode = (_key: string, value: unknown) =>
@@ -90,7 +90,7 @@ export function exportName(now = new Date()): string {
   const stamp = [now.getFullYear(), now.getMonth() + 1, now.getDate()]
     .map((part) => String(part).padStart(2, '0'))
     .join('-');
-  return `tessvm-save-${stamp}.json`;
+  return `entropy-save-${stamp}.json`;
 }
 
 // Merge matching works, preserve absent ones, and reject other files.
@@ -99,10 +99,10 @@ export async function importAll(file: Blob): Promise<number> {
   try {
     parsed = JSON.parse(await file.text(), decode);
   } catch {
-    throw new Error('tessvm 이 내보낸 파일이 아닙니다.');
+    throw new Error('entropy가 내보낸 파일이 아닙니다.');
   }
   if (parsed?.format !== FORMAT || parsed.version !== 1 || !Array.isArray(parsed.works)) {
-    throw new Error('tessvm 이 내보낸 파일이 아닙니다.');
+    throw new Error('entropy가 내보낸 파일이 아닙니다.');
   }
   const works = parsed.works as SavedWork[];
   if (works.some((row) => typeof row?.work !== 'string')) throw new Error('저장 파일의 작품 항목이 올바르지 않습니다.');

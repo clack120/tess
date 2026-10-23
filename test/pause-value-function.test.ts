@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@tess/compiler';
-import { Vm } from '@tess/vm';
+import { compileProject } from '@entropy/compiler';
+import { Vm } from '@entropy/vm';
 
 function machine(source: string, options: ConstructorParameters<typeof Vm>[0] = {}): Vm {
   const compiled = compileProject(source);

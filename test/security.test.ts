@@ -7,13 +7,13 @@ import os from 'node:os';
 import path from 'node:path';
 import vmModule from 'node:vm';
 import zlib from 'node:zlib';
-import { stripTypes } from '@tess/core/strip-types';
+import { stripTypes } from '@entropy/core/strip-types';
 import { fileURLToPath } from 'node:url';
-import { compileProject } from '@tess/compiler';
-import { Codegen, serveVm, Vm } from '@tess/vm';
-import { decompileEnt } from '@tess/decompiler';
-import { parse } from '@tess/parser';
-import { tessComment, tessCommentLines, tessString } from '../packages/decompiler/src/ident.ts';
+import { compileProject } from '@entropy/compiler';
+import { Codegen, serveVm, Vm } from '@entropy/vm';
+import { decompileEnt } from '@entropy/decompiler';
+import { parse } from '@entropy/parser';
+import { entropyComment, entropyCommentLines, entropyString } from '../packages/decompiler/src/ident.ts';
 
 const utf8 = (data: Uint8Array) => new TextDecoder('utf-8').decode(data);
 
@@ -43,7 +43,7 @@ function work(blocks: unknown[], object: Record<string, unknown> = {}) {
 const HAT = { id: 'a', type: 'when_run_button_click', params: [null], statements: [] };
 
 test('function IDs cannot escape generated kernel comments', () => {
-  const flag = '__tessKernelSecurityProbe';
+  const flag = '__entropyKernelSecurityProbe';
   const globals = globalThis as Record<string, unknown>;
   try {
     for (const separator of ['\n', '\r', '\u2028', '\u2029']) {
@@ -91,7 +91,7 @@ end`);
 
 function runsOwnCode(blocks: unknown[]): boolean {
   const source = new Codegen(work(blocks) as never).compile().source;
-  const flag = '__tessSecurityProbe';
+  const flag = '__entropySecurityProbe';
   delete (globalThis as Record<string, unknown>)[flag];
   try {
     const made = new Function('R', source)({ ops: {}, cast: {} }) as {
@@ -112,11 +112,11 @@ function runsOwnCode(blocks: unknown[]): boolean {
 test('블록 이름은 만들어진 자바스크립트를 빠져나가지 못한다', () => {
   // Sanitize unknown block names so they cannot close a generated comment and inject JavaScript.
   const escapes = [
-    "*/;globalThis.__tessSecurityProbe=1;/*",
-    "func_*/;globalThis.__tessSecurityProbe=1;/*",
-    "x*/\n;globalThis.__tessSecurityProbe=1;/*",
-    "x\u2028;globalThis.__tessSecurityProbe=1;//",
-    "open_table\n;globalThis.__tessSecurityProbe=1;//",
+    "*/;globalThis.__entropySecurityProbe=1;/*",
+    "func_*/;globalThis.__entropySecurityProbe=1;/*",
+    "x*/\n;globalThis.__entropySecurityProbe=1;/*",
+    "x\u2028;globalThis.__entropySecurityProbe=1;//",
+    "open_table\n;globalThis.__entropySecurityProbe=1;//",
   ];
   for (const type of escapes) {
     assert.equal(
@@ -300,11 +300,11 @@ test('미로 수업의 반복 블록은 한 바퀴에 프레임을 쓰지 않는
 
 // Guard frameless loops so a stuck work can still be stopped.
 test('프레임을 안 넘기는 반복도 실행기를 붙잡지 못한다', async () => {
-  const { compileProject } = await import('@tess/compiler');
-  const { Vm } = await import('@tess/vm');
+  const { compileProject } = await import('@entropy/compiler');
+  const { Vm } = await import('@entropy/vm');
   const result = compileProject(
     'scene "s":\n  object "o":\n    when start do\n      forever:\n        skip\n      end\n    end\n  end\nend',
-    { path: 'spin.tess' },
+    { path: 'spin.etp' },
   );
   assert.ok(result.project, result.errors[0]?.message ?? '컴파일 실패');
   const machine = new Vm({ renderer: null, audio: null });
@@ -320,16 +320,16 @@ test('되돌린 소스에서 주석과 문자열은 한 줄을 벗어나지 못�
   // Escape all four lexer line endings in strings and comments.
   for (const brk of ['\n', '\r', '\u2028', '\u2029']) {
     assert.equal(
-      tessComment(`note${brk}say "INJECTED"`).includes(brk),
+      entropyComment(`note${brk}say "INJECTED"`).includes(brk),
       false,
-      `tessComment ${JSON.stringify(brk)}`,
+      `entropyComment ${JSON.stringify(brk)}`,
     );
     assert.equal(
-      tessString(`a${brk}b`).includes(brk),
+      entropyString(`a${brk}b`).includes(brk),
       false,
-      `tessString ${JSON.stringify(brk)}`,
+      `entropyString ${JSON.stringify(brk)}`,
     );
-    for (const line of tessCommentLines(`note${brk}say "INJECTED"`)) {
+    for (const line of entropyCommentLines(`note${brk}say "INJECTED"`)) {
       assert.match(line, /^# /, line);
     }
   }
@@ -345,7 +345,7 @@ test('작품의 글자가 되돌린 소스의 문법을 바꾸지 못한다', as
   ];
   const bytes = entFile(work(script, { name: 'o\u2028INJECTED' }));
   const out = await decompileEnt(bytes, {});
-  const fragment = out.assets.find((asset) => asset.path.endsWith('.tess'));
+  const fragment = out.assets.find((asset) => asset.path.endsWith('.etp'));
   assert.ok(fragment, '오브젝트 조각이 나와야 합니다');
   const text = utf8(fragment.data);
 
@@ -381,7 +381,7 @@ test('모양·소리 파일은 내보낼 폴더 밖으로 나가지 못한다', 
   });
   const out = await decompileEnt(entFile(project, { [picture.fileurl]: PNG, [sound.fileurl]: PNG }), {});
 
-  const root = path.join(os.tmpdir(), 'tess-security');
+  const root = path.join(os.tmpdir(), 'entropy-security');
   for (const asset of out.assets) {
     assert.doesNotMatch(asset.path, /(^|\/)\.\.($|\/)/, asset.path);
     const target = path.resolve(root, asset.path);
@@ -427,12 +427,12 @@ test('만든 .ent 를 되돌리기가 실제로 읽는다', async () => {
   // Verify the archive fixture itself so malformed empty input cannot make the security checks pass.
   const out = await decompileEnt(entFile(work([HAT])), {});
   assert.match(out.source, /scene/);
-  assert.ok(out.assets.some((asset) => asset.path.endsWith('.tess')));
+  assert.ok(out.assets.some((asset) => asset.path.endsWith('.etp')));
 });
 
 test('파일을 쓰는 자리가 폴더 밖 경로를 거부한다', () => {
   const load = fs.readFileSync(
-    path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'packages/tessvm/src/node/load.ts'),
+    path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'packages/vm/src/node/load.ts'),
     'utf-8',
   );
   // Keep output-path validation even when decompilation already rejects unsafe paths.
@@ -475,7 +475,7 @@ test('미리보기 그림 주소는 playentry 를 벗어나지도, 따옴표를 
 
 async function withVmServer(body: (server: { port: number }) => Promise<void>) {
   const result = compileProject('scene "s":\n  text "t":\n    text_content = "x"\n  end\nend', {
-    path: 'main.tess',
+    path: 'main.etp',
   });
   assert.deepEqual(result.errors, [], result.errors.map((e) => e.message).join('\n'));
   const server = await serveVm({

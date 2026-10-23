@@ -1,11 +1,11 @@
-import { didYouMean } from '@tess/core';
+import { didYouMean } from '@entropy/core';
 import {
   BUILTIN_FUNCTIONS,
   OBJECT_PROPERTIES,
   OPTION_KEYWORDS,
   STATE_VALUES,
   TEXT_ONLY_PROPERTIES,
-} from '@tess/core';
+} from '@entropy/core';
 import type {
   Diagnostic, EventNode, Expr, FunctionDeclNode, Identifier, CallNode, Node,
   ObjectMember, ObjectNode, ProgramNode, SceneMember, Stmt, TopLevelItem,

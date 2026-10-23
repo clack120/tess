@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@tess/compiler';
-import { decompileProject } from '@tess/decompiler';
-import { Vm } from '@tess/vm';
-import { Codegen } from '../packages/tessvm/src/compile/codegen.ts';
-import type { RawEntity } from '@tess/decompiler';
+import { compileProject } from '@entropy/compiler';
+import { decompileProject } from '@entropy/decompiler';
+import { Vm } from '@entropy/vm';
+import { Codegen } from '../packages/vm/src/compile/codegen.ts';
+import type { RawEntity } from '@entropy/decompiler';
 
 const number = (value: string) => ({ type: 'number', params: [value] });
 
@@ -47,7 +47,7 @@ function legacyProject(): RawEntity {
   } as unknown as RawEntity;
 }
 
-test('옛 블록도 tessvm 이 그대로 돈다', () => {
+test('옛 블록도 entropy가 그대로 돈다', () => {
   const project = legacyProject();
   const program = new Codegen(project as never).compile();
   assert.deepEqual([...program.unknown.keys()], [], '모르는 블록이 없습니다');
@@ -105,11 +105,11 @@ test('옛 블록은 되돌릴 때 지금 문법으로 옮겨지고 다시 컴파
   ]) {
     assert.match(back.source, line, String(line));
   }
-  const again = compileProject(back.source, { path: 'main.tess' });
+  const again = compileProject(back.source, { path: 'main.etp' });
   assert.deepEqual(again.errors.map((error) => error.message), []);
 });
 
-// Legacy sizes use saved scale, while Tess axis scales use the original costume size.
+// Legacy sizes use saved scale, while Entropy axis scales use the original costume size.
 test('옛 크기 블록은 저장된 배율에서 잰다', () => {
   const project = legacyProject();
   const object = (project.objects as RawEntity[])[0]!;
@@ -128,7 +128,7 @@ test('옛 크기 블록은 저장된 배율에서 잰다', () => {
 
   const back = decompileProject(project, [], { inline: true });
   assert.match(back.source, /scale_x = 10 \* 54 \/ 100/);
-  const again = compileProject(back.source, { path: 'main.tess' });
+  const again = compileProject(back.source, { path: 'main.etp' });
   assert.deepEqual(again.errors.map((error) => error.message), []);
   const rebuilt = again.project as unknown as RawEntity;
   const entity = ((rebuilt.objects as RawEntity[])[0]!.entity as RawEntity);
@@ -145,7 +145,7 @@ test('옛 크기 블록은 저장된 배율에서 잰다', () => {
 
 test('`stop object` 는 복제본까지 이 오브젝트의 코드를 멈춘다', () => {
   const source = 'scene "s":\n  object "o":\n    when start do\n      stop object\n    end\n  end\nend';
-  const result = compileProject(source, { path: 'main.tess' });
+  const result = compileProject(source, { path: 'main.etp' });
   assert.deepEqual(result.errors.map((error) => error.message), []);
   const block = JSON.parse(
     String(((result.project as unknown as RawEntity).objects as RawEntity[])[0]!.script),
@@ -224,6 +224,6 @@ test('옛 연산 블록은 지금 연산자와 같은 값을 낸다', () => {
   ]) {
     assert.match(back.source, line, String(line));
   }
-  const again = compileProject(back.source, { path: 'main.tess' });
+  const again = compileProject(back.source, { path: 'main.etp' });
   assert.deepEqual(again.errors.map((error) => error.message), []);
 });
