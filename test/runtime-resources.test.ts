@@ -9,7 +9,7 @@ function global(t: any, key: string, value: unknown) {
   Object.defineProperty(globalThis, key, { configurable: true, value });
   t.after(() => { if (original) Object.defineProperty(globalThis, key, original); else delete (globalThis as any)[key]; });
 }
-const cloud = () => new CloudClient('work', '', [], new Map(), new Map(), new Map());
+const cloud = () => new CloudClient('work', '', [], new Map([['shared', 'shared']]), new Map(), new Map());
 
 test('disposed cloud clients abort requests and cannot open sockets after a late response', async t => {
   let reply: (value: Response) => void = () => {};

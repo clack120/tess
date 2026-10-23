@@ -14,6 +14,18 @@ function client(t: any, initial: Array<{ data: string | number; key: string }> |
   return { cloud, actions };
 }
 
+test('works without shared variables do not request or wait for a cloud connection', async t => {
+  let requests = 0;
+  stub(t, globalThis, 'fetch', () => {
+    requests++;
+    return Promise.resolve(new Response('{}'));
+  });
+  const cloud = new CloudClient('work', '', [{ id: 'local', value: 0 }], new Map(), new Map(), new Map());
+  await cloud.connect();
+  cloud.dispose();
+  assert.equal(requests, 0);
+});
+
 test('cloud list writes retain local values before a list arrives from the server', t => {
   stub(t, console, 'log', () => {});
   const { cloud, actions } = client(t, null);

@@ -42,7 +42,7 @@ export class CloudClient implements VariableStore {
   }
 
   async connect() {
-    if (this.controller.signal.aborted || this.ws) return;
+    if (!this.entropyIdToEntryId.size || this.controller.signal.aborted || this.ws) return;
     try {
       const response = await fetch("https://playentry.org/graphql/GET_CLOUD_SERVER_INFO", {
         method: "POST",
