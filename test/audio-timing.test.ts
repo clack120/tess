@@ -94,3 +94,15 @@ test('sound duration uses the exact saved ID and preserves a missing result', ()
   assert.equal(vm.ops.soundDuration(entity, 'tone'), 4);
   for (const id of ['tone name', '1', 'missing']) assert.equal(vm.ops.soundDuration(entity, id), undefined);
 });
+
+test('a main-thread stall expires timed playback without leaving the VM behind the sound clock', () => {
+  const { vm, plays, result } = setup('sound_something_second_wait_with_block', ['tone', 1]);
+  vm.advance(1000);
+  assert.equal(plays[0]!.stopped, false);
+  vm.advance(3000);
+  assert.equal(plays[0]!.stopped, true);
+  assert.equal(result(), 'done');
+  assert.equal(vm.clock, 2000 + 1000 / vm.frameRate);
+  assert.ok(vm.frame <= 5);
+  assert.deepEqual(vm.errors, []);
+});
