@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { stub } from './stub.ts';
 import { WebAudioEngine } from '../packages/tessvm/src/audio/sound.ts';
 
 function setup(t: any, fetchFile: (input?: unknown, options?: RequestInit) => Promise<Response>) {
@@ -28,7 +29,7 @@ function setup(t: any, fetchFile: (input?: unknown, options?: RequestInit) => Pr
   }
   const original = Object.getOwnPropertyDescriptor(globalThis, 'AudioContext');
   Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: Context });
-  t.mock.method(globalThis, 'fetch', fetchFile);
+  stub(t, globalThis, 'fetch', fetchFile);
   const engine = new WebAudioEngine();
   t.after(() => {
     engine.close();

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { stub } from './stub.ts';
 import { JSDOM } from 'jsdom';
 import { Vm } from '@tess/vm';
 import { mountInspector } from '../packages/extension/src/page/inspector.ts';
@@ -151,7 +152,7 @@ test('canvas inspection selects and reveals a virtualized clone without sending 
   canvas.addEventListener('pointerdown', () => presses++);
   canvas.addEventListener('pointerup', () => releases++);
   const points: number[][] = [];
-  t.mock.method(vm, 'entityAtPoint', (x: number, y: number) => { points.push([x, y]); return clone; });
+  stub(t, vm, 'entityAtPoint', (x: number, y: number) => { points.push([x, y]); return clone; });
   const pick = Array.from(panel.querySelectorAll('button')).find(node => node.textContent === '화면에서 선택')!;
   pick.click();
   pointer(window, canvas, 'pointermove', 100, 75);
