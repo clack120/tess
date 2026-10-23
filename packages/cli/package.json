@@ -2,7 +2,7 @@
   "name": "entropy",
   "version": "0.3.53",
   "description": "Entropy 언어(엔트리 블록 코드로 변환되는 텍스트 언어) — 라이브러리와 CLI",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "main": "index.ts",
   "exports": {

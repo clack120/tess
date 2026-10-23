@@ -50,3 +50,9 @@ if (result.ok) {
 
 - `bun run entropy-vm run <작품.ent|작품.etp>` 는 엔트리 대신 Entropy 실행기로 작품을 띄웁니다. `check`·`bench`·`emit`·`export` 도 있습니다.
 - [`packages/extension`](./packages/extension/README.md) 은 playentry.org 작품 페이지의 실행기를 Entropy로 바꾸는 브라우저 확장입니다. 작품의 원래 블록을 그대로 실행합니다.
+
+## 라이선스
+
+Entropy 는 [GNU AGPL v3](./LICENSE)(3.0 이후 버전)로 배포합니다.
+
+Based on Tess by ddtt786 — https://github.com/ddtt786/tess (MIT License). Tess 에서 온 부분의 MIT 고지는 [LICENSE-TESS](./LICENSE-TESS)에 있습니다.

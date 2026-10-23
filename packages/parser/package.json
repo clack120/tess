@@ -2,7 +2,7 @@
   "name": "@entropy/parser",
   "version": "0.3.53",
   "description": "Entropy 소스를 AST 로 읽고 의미를 검사한다",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "main": "index.ts",
   "exports": {

@@ -260,6 +260,8 @@ copyVendor(
 copy(path.join(SRC, 'player.css'), path.join(DIST, 'player.css'));
 copy(path.join(SRC, 'popup', 'popup.html'), path.join(DIST, 'popup', 'popup.html'));
 copy(path.join(SRC, 'popup', 'popup.css'), path.join(DIST, 'popup', 'popup.css'));
+// Ship the licenses with the build: AGPL for Entropy, MIT for the parts from Tess.
+for (const file of ['LICENSE', 'LICENSE-TESS']) copy(path.resolve(ROOT, '../..', file), path.join(DIST, file));
 writeIcons();
 checkLinks();
 

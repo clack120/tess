@@ -2,7 +2,7 @@
   "name": "@entropy/core",
   "version": "0.3.53",
   "description": "Entropy 언어용 공용 정의",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "main": "index.ts",
   "exports": {

@@ -5,7 +5,7 @@
   "version": "0.3.53",
   "type": "module",
   "publisher": "entropy",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "engines": {
     "vscode": "^1.60.0"
   },
