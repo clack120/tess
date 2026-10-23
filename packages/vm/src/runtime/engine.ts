@@ -61,6 +61,7 @@ export interface TextMeasurer {
 }
 
 export interface Renderer extends RendererLike, Partial<TextMeasurer> {
+  readonly renderCount?: number;
   attach?(targets: Target[], scenes: Scene[]): void;
   moveEntity?(entity: Entity, location: string): void;
   // Use live draw order for picking because layer changes leave declaration order unchanged.

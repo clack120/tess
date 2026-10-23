@@ -230,6 +230,7 @@ const SVG_PEEK = 4096;
 const SIZE_SLACK = 1;
 
 export class PixiRenderer implements Renderer {
+  renderCount = 0;
   readonly app = new Application();
   readonly world = new Container();
   private readonly sceneLayers = new Map<string, Container>();
@@ -296,6 +297,7 @@ export class PixiRenderer implements Renderer {
     // Clear to the stage color before loading so an opaque WebGL canvas does not show black.
     this.app.canvas.style.background = options.background ?? '#ffffff';
     this.app.renderer.render(this.app.stage);
+    this.renderCount++;
     if (options.parent && !options.canvas) {
       options.parent.appendChild(this.app.canvas);
     }
@@ -405,6 +407,7 @@ export class PixiRenderer implements Renderer {
       this.overlay?.setTextResolution(overlayTextResolution(stage.scale * resolution));
       // Draw immediately after resize so paused or idle stages do not stay black.
       this.app.renderer.render(this.app.stage);
+      this.renderCount++;
     }
     const canvas = this.app.canvas;
     canvas.style.width = `${cssWidth}px`;
@@ -1033,6 +1036,7 @@ export class PixiRenderer implements Renderer {
     this.overlay?.flush();
     this.drawInspection();
     this.app.renderer.render(this.app.stage);
+    this.renderCount++;
   }
 
   // Report drawing failures once per object to avoid flooding the console.

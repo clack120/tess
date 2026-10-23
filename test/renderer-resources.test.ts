@@ -96,3 +96,17 @@ test('reset releases owned Graphics contexts along with their containing entity 
   renderer.reset();
   assert.equal(graphic.destroyed, true); assert.equal(context.destroyed, true);
 });
+
+test('the renderer counts completed draws rather than idle or failed flushes', async () => {
+  const { PixiRenderer } = await import('../packages/vm/src/render/renderer.ts');
+  const renderer = new PixiRenderer();
+  renderer.flush();
+  assert.equal(renderer.renderCount, 0);
+  (renderer as any).ready = true;
+  (renderer.app as any).renderer = { render() {} };
+  renderer.flush(); renderer.flush();
+  assert.equal(renderer.renderCount, 2);
+  (renderer.app as any).renderer.render = () => { throw new Error('draw failed'); };
+  assert.throws(() => renderer.flush(), /draw failed/);
+  assert.equal(renderer.renderCount, 2);
+});
