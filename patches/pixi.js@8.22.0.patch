@@ -1,10 +1,16 @@
-diff --git a/node_modules/pixi.js/.bun-tag-ba54a5b85da11878 b/.bun-tag-ba54a5b85da11878
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/pixi.mjs b/dist/pixi.mjs
-index 2486e6de1c80a335ff83758bf2f2749b0dacbddf..6e8ad4b1d97ba1a2a952eaef087bf3f6c7da5a98 100644
+index 2486e6de1c80a335ff83758bf2f2749b0dacbddf..48315229bcdabd994fde1bc0a0beca1d4650c221 100644
 --- a/dist/pixi.mjs
 +++ b/dist/pixi.mjs
+@@ -17588,7 +17588,7 @@ function getMaxFragmentPrecision() {
+     if (gl) {
+       if (gl.getShaderPrecisionFormat) {
+         const shaderFragment = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+-        maxFragmentPrecision = shaderFragment.precision ? "highp" : "mediump";
++        maxFragmentPrecision = shaderFragment?.precision ? "highp" : "mediump";
+       }
+     }
+   }
 @@ -17664,18 +17664,10 @@ ${src}`;
  }
  
@@ -25,6 +31,32 @@ index 2486e6de1c80a335ff83758bf2f2749b0dacbddf..6e8ad4b1d97ba1a2a952eaef087bf3f6
    if (src.indexOf("#define SHADER_NAME") !== -1) return src;
    const shaderName = `#define SHADER_NAME ${name}`;
    return `${shaderName}
+diff --git a/lib/rendering/renderers/gl/shader/program/getMaxFragmentPrecision.js b/lib/rendering/renderers/gl/shader/program/getMaxFragmentPrecision.js
+index ea6cdb1e1acd5b0b152f9fae43ddccc60e56e84b..14dde4c29dc7b0fa6c2fb7d1d9edea9548cbe56f 100644
+--- a/lib/rendering/renderers/gl/shader/program/getMaxFragmentPrecision.js
++++ b/lib/rendering/renderers/gl/shader/program/getMaxFragmentPrecision.js
+@@ -11,7 +11,7 @@ function getMaxFragmentPrecision() {
+     if (gl) {
+       if (gl.getShaderPrecisionFormat) {
+         const shaderFragment = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+-        maxFragmentPrecision = shaderFragment.precision ? "highp" : "mediump";
++        maxFragmentPrecision = shaderFragment?.precision ? "highp" : "mediump";
+       }
+     }
+   }
+diff --git a/lib/rendering/renderers/gl/shader/program/getMaxFragmentPrecision.mjs b/lib/rendering/renderers/gl/shader/program/getMaxFragmentPrecision.mjs
+index f4570fc66caed808233b7dbaa19085dbec34c3af..b77b2131c3612609885ef4eac3fe9cb2d9a9e807 100644
+--- a/lib/rendering/renderers/gl/shader/program/getMaxFragmentPrecision.mjs
++++ b/lib/rendering/renderers/gl/shader/program/getMaxFragmentPrecision.mjs
+@@ -9,7 +9,7 @@ function getMaxFragmentPrecision() {
+     if (gl) {
+       if (gl.getShaderPrecisionFormat) {
+         const shaderFragment = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+-        maxFragmentPrecision = shaderFragment.precision ? "highp" : "mediump";
++        maxFragmentPrecision = shaderFragment?.precision ? "highp" : "mediump";
+       }
+     }
+   }
 diff --git a/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.js b/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.js
 index 7429b18acdf9f406b8200d4eab18f54fc5b85f2f..f9a93fcd8494df3c71987cd99115fbd15419bd8e 100644
 --- a/lib/rendering/renderers/gl/shader/program/preprocessors/setProgramName.js
