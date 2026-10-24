@@ -12,10 +12,9 @@ function report(): void {
       size => { if (current === version) window.postMessage({ __entropy: 'cache-size', ...size }, location.origin); },
       error => console.warn('[entropy] 에셋 캐시 용량을 읽지 못했습니다', error),
     );
-  }, 250);
+  }, 1000);
 }
 onAssetCacheChange(report);
-report();
 
 // Keep deletion requests until an Entry page can access its own Cache Storage.
 export function applyCacheClear(stamp: number, live = false): Promise<void> {
