@@ -120,3 +120,57 @@ test('turning the cache off during a download prevents stale writes and a quick 
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.deepEqual(writes, ['https://playentry.org/new.png']);
 });
+
+test('cached assets still reject loads cancelled before or during the cache lookup', async t => {
+  const { fetchAsset, setAssetCache } = await import('../packages/vm/src/web/fetch-retry.ts');
+  let finishMatch!: (value: Response) => void;
+  let beginMatch!: () => void;
+  const matching = new Promise<void>(resolve => { beginMatch = resolve; });
+  let opens = 0;
+  let holdMatch = false;
+  stub(t, globalThis, 'caches', {
+    open: async () => {
+      opens++;
+      return { match: () => {
+        if (!holdMatch) return Promise.resolve(new Response('cached'));
+        beginMatch(); return new Promise<Response>(resolve => { finishMatch = resolve; });
+      } };
+    },
+    delete: async () => true,
+  });
+  const seen = serve(t, []);
+  setAssetCache(true);
+  t.after(() => setAssetCache(false));
+  const early = new AbortController(); early.abort();
+  await assert.rejects(fetchAsset('https://playentry.org/a.png', early.signal), { name: 'AbortError' });
+  assert.equal(opens, 0);
+  holdMatch = true;
+  const late = new AbortController();
+  const pendingLate = fetchAsset('https://playentry.org/a.png', late.signal);
+  await matching; late.abort(); finishMatch(new Response('cached'));
+  await assert.rejects(pendingLate, { name: 'AbortError' });
+  assert.equal(seen.length, 0);
+});
+
+test('cache size reads file metadata concurrently with a bounded number of pending reads', async t => {
+  const { assetCacheSize, setAssetCache } = await import('../packages/vm/src/web/fetch-retry.ts');
+  const keys = Array.from({ length: 48 }, (_, i) => new Request(`https://playentry.org/${i}.png`));
+  let active = 0, peak = 0;
+  stub(t, globalThis, 'caches', {
+    open: async () => ({
+      keys: async () => keys,
+      match: async () => {
+        active++; peak = Math.max(peak, active);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        active--;
+        return new Response('data', { headers: { 'content-length': '4' } });
+      },
+    }),
+    delete: async () => true,
+  });
+  setAssetCache(true);
+  t.after(() => setAssetCache(false));
+  assert.deepEqual(await assetCacheSize(), { count: 48, bytes: 192 });
+  assert.ok(peak > 1 && peak <= 8, `concurrent reads: ${peak}`);
+  assert.equal(active, 0);
+});

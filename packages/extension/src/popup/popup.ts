@@ -71,9 +71,15 @@ function byteText(bytes: number): string {
   return mb < 1024 ? `${mb.toFixed(1)} MB` : `${(mb / 1024).toFixed(2)} GB`;
 }
 
-void api.storage.local.get({ [CACHE_SIZE_KEY]: null }).then((stored) => paintCacheSize(stored[CACHE_SIZE_KEY]));
+let cacheSizeUpdated = false;
+void api.storage.local.get({ [CACHE_SIZE_KEY]: null }).then((stored) => {
+  if (!cacheSizeUpdated) paintCacheSize(stored[CACHE_SIZE_KEY]);
+});
 api.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && CACHE_SIZE_KEY in changes) paintCacheSize(changes[CACHE_SIZE_KEY]?.newValue);
+  if (area === 'local' && CACHE_SIZE_KEY in changes) {
+    cacheSizeUpdated = true;
+    paintCacheSize(changes[CACHE_SIZE_KEY]?.newValue);
+  }
 });
 
 void readSettings().then((settings) => {

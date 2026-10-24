@@ -10,7 +10,8 @@ import { JSDOM } from 'jsdom';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const POPUP = path.join(root, 'packages/extension/src/popup');
 
-async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknown[] = [], cacheSize: unknown = null) {
+async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknown[] = [], cacheSize: unknown = null,
+  initialSize?: Promise<Record<string, unknown>>) {
   const html = fs.readFileSync(path.join(POPUP, 'popup.html'), 'utf-8');
   const dom = new JSDOM(html, { pretendToBeVisual: true });
   t.after(() => dom.window.close());
@@ -33,7 +34,7 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
     CACHE_KEY: 'assetCache',
     CACHE_SIZE_KEY: 'assetCacheSize',
     api: { storage: {
-      local: { get: () => Promise.resolve({ assetCacheSize: cacheSize }) },
+      local: { get: () => initialSize ?? Promise.resolve({ assetCacheSize: cacheSize }) },
       onChanged: { addListener: (listener: (changes: any, area: string) => void) => sizeListeners.push(listener) },
     } },
     Intl: globalThis.Intl,
@@ -161,6 +162,16 @@ test('열 때 이미 알려진 용량이 있으면 바로 보여 준다', async 
   const popup = await mountPopup(t, { cache: true }, [], { count: 3, bytes: 2048 });
   assert.equal((popup.find('cache') as HTMLInputElement).checked, true);
   assert.equal(popup.find('cache-size').textContent, '저장한 파일 3개, 2.0 KB');
+});
+
+test('팝업을 여는 중 받은 최신 개수를 늦게 도착한 이전 값으로 덮지 않는다', async (t) => {
+  let finishRead!: (value: Record<string, unknown>) => void;
+  const initial = new Promise<Record<string, unknown>>(resolve => { finishRead = resolve; });
+  const popup = await mountPopup(t, { cache: true }, [], null, initial);
+  popup.reportSize({ count: 2, bytes: 2048 });
+  finishRead({ assetCacheSize: { count: 1, bytes: 1024 } });
+  await popup.settle();
+  assert.equal(popup.find('cache-size').textContent, '저장한 파일 2개, 2.0 KB');
 });
 
 const WORKS = [

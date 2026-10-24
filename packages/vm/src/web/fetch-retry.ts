@@ -76,9 +76,12 @@ export function fetchAsset(url: string, signal?: AbortSignal): Promise<Response>
 }
 
 async function fetchCached(url: string, signal?: AbortSignal): Promise<Response> {
+  signal?.throwIfAborted();
   const version = cacheVersion;
   const store = await openCache();
+  signal?.throwIfAborted();
   const stored = await store?.match(url).catch((error) => console.warn('[entropy] 에셋 캐시를 읽지 못했습니다', url, error));
+  signal?.throwIfAborted();
   if (stored && cacheOn && version === cacheVersion) return stored;
   const response = await fetchRetry(url, signal);
   if (store && cacheOn && version === cacheVersion) {
@@ -108,18 +111,23 @@ export async function assetCacheSize(): Promise<{ count: number; bytes: number }
   if (!store) return { count: 0, bytes: 0 };
   const keys = await store.keys();
   let bytes = 0;
-  for (const key of keys) {
-    const known = cacheBytes.get(key.url);
-    if (known !== undefined) {
-      bytes += known;
-      continue;
+  let next = 0;
+  // Read a few file headers together without flooding Cache Storage during loading.
+  await Promise.all(Array.from({ length: Math.min(8, keys.length) }, async () => {
+    while (next < keys.length) {
+      const key = keys[next++]!;
+      const known = cacheBytes.get(key.url);
+      if (known !== undefined) {
+        bytes += known;
+        continue;
+      }
+      const stored = await store.match(key);
+      if (stored) {
+        const size = Number(stored.headers.get('content-length')) || (await stored.blob()).size;
+        cacheBytes.set(key.url, size);
+        bytes += size;
+      }
     }
-    const stored = await store.match(key);
-    if (stored) {
-      const size = Number(stored.headers.get('content-length')) || (await stored.blob()).size;
-      cacheBytes.set(key.url, size);
-      bytes += size;
-    }
-  }
+  }));
   return { count: keys.length, bytes };
 }
