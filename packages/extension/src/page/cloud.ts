@@ -1,4 +1,5 @@
 import type { VariableStore } from '../../../vm/src/runtime/engine.ts';
+import type { VariableValue } from '../../../vm/src/runtime/model.ts';
 
 export class CloudClient implements VariableStore {
   private ws: WebSocket | null = null;
@@ -184,7 +185,7 @@ export class CloudClient implements VariableStore {
     }
   }
 
-  read(key: string): string | number | Array<{ data: string | number }> | undefined {
+  read(key: string): VariableValue | Array<{ data: VariableValue }> | undefined {
     return this.values.get(key);
   }
 
@@ -192,7 +193,7 @@ export class CloudClient implements VariableStore {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
   }
 
-  write(key: string, value: string | number | Array<{ data: string | number }>): void {
+  write(key: string, value: VariableValue | Array<{ data: VariableValue }>): void {
     const isList = Array.isArray(value);
     
     if (!isList) {

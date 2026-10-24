@@ -1,6 +1,7 @@
 import type { AudioEngine, SpeechEngine } from '../runtime/engine.ts';
 import type { Sound, VoiceProps } from '../runtime/model.ts';
 import { fetchAsset } from '../web/fetch-retry.ts';
+import { loadYield } from '../web/load-yield.ts';
 
 interface Playing {
   source: AudioBufferSourceNode;
@@ -47,6 +48,7 @@ export class WebAudioEngine implements AudioEngine {
   async preload(sounds: Sound[], limit = 6, onLoaded?: (ok: boolean) => void): Promise<void> {
     const signal = this.controller.signal;
     let next = 0;
+    const yieldToPage = loadYield();
     const runners = new Array(Math.min(limit, sounds.length)).fill(0).map(async () => {
       while (!signal.aborted && next < sounds.length) {
         const sound = sounds[next];
@@ -59,10 +61,19 @@ export class WebAudioEngine implements AudioEngine {
           }
           const loaded = await this.buffer(sound);
           onLoaded?.(loaded !== null);
+          const pause = yieldToPage();
+          if (pause) await pause;
         }
       }
     });
     await Promise.all(runners);
+  }
+
+  retain(sounds: Sound[]): void {
+    const urls = new Set(sounds.filter(sound => sound.duration).map(sound => sound.fileurl));
+    for (const url of this.buffers.keys()) {
+      if (!urls.has(url)) this.buffers.delete(url);
+    }
   }
 
   private buffer(sound: Sound): Promise<AudioBuffer | null> {

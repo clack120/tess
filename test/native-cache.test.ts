@@ -140,3 +140,43 @@ test('the native frame uses the shared cache preference at startup and on live c
   changed({ assetCache: { newValue: false } }, 'local');
   assert.equal(messages.at(-1)!.on, false);
 });
+
+test('workspace bridges live runner settings and saves without echoing its own replies', async () => {
+  let changed!: (changes: Record<string, unknown>, area: string) => void;
+  let receive!: (event: any) => void;
+  let finishSettings!: (settings: unknown) => void;
+  const scripts: any[] = [], messages: any[] = [], saves: any[] = [];
+  const window = { addEventListener: (_type: string, fn: typeof receive) => { receive = fn; },
+    postMessage: (message: unknown) => { messages.push(message); } };
+  const context = vm.createContext({
+    CACHE_KEY: 'assetCache', CACHE_CLEAR_KEY: 'assetCacheClear', CACHE_SIZE_KEY: 'assetCacheSize',
+    ENABLED_KEY: 'enabled', SVG_KEY: 'svg', ESCAPE_KEY: 'grabEscape',
+    api: { storage: { onChanged: { addListener: (fn: typeof changed) => { changed = fn; } } },
+      runtime: { getURL: (path: string) => path, sendMessage: async (message: unknown) => { saves.push(message); return { ok: true }; } } },
+    readSettings: () => new Promise(resolve => { finishSettings = resolve; }),
+    document: { createElement: () => ({ dataset: {} }), head: { append: (...items: any[]) => { scripts.push(...items); } } },
+    window, location: { origin: 'https://playentry.org', pathname: '/ws/work' },
+  });
+  const source = stripTypes(fs.readFileSync(new URL('../packages/extension/src/native-content.ts', import.meta.url), 'utf8'))
+    .replace(/^import .*;\n/gm, '');
+  vm.runInContext(source, context);
+  changed({ enabled: { newValue: false }, assetCache: { newValue: true } }, 'local');
+  finishSettings({ enabled: true, svg: true, escape: true, cache: false, cacheClear: 0 });
+  await new Promise(resolve => setImmediate(resolve));
+  const editor = scripts.find(script => script.src === 'page/editor.js');
+  assert.ok(editor);
+  assert.ok(scripts.some(script => script.href === 'player.css'));
+  editor.onload();
+  assert.equal(messages.at(-1).__entropy, 'editor-settings');
+  assert.equal(messages.at(-1).enabled, false, 'late initial settings cannot re-enable the runner');
+  assert.equal(messages.at(-1).cache, true);
+  changed({ enabled: { newValue: true }, svg: { newValue: false } }, 'local');
+  assert.equal(messages.at(-1).enabled, true);
+  assert.equal(messages.at(-1).svg, false);
+  receive({ source: window, data: { __entropy: 'store-get', id: 5 } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(saves.length, 1);
+  assert.equal(messages.at(-1).__entropy, 'store-answer');
+  receive({ source: window, data: messages.at(-1) });
+  assert.equal(saves.length, 1);
+});

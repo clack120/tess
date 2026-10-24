@@ -21,6 +21,7 @@ import { Overlay, type TableLike } from './overlay.ts';
 import { entityBounds, type Rect } from '../collision/detect.ts';
 import { fillParts } from './fill.ts';
 import { fetchAsset } from '../web/fetch-retry.ts';
+import { loadYield } from '../web/load-yield.ts';
 import { isSegment, SegmentBatch, SEGMENT_FLOOR } from './segments.ts';
 import {
   FULLSCREEN_CANVAS_WIDTH,
@@ -826,6 +827,23 @@ export class PixiRenderer implements Renderer {
     sceneId?: string,
     onLoaded?: (ok: boolean) => void,
   ): Promise<void> {
+    const wanted = new Map(targets.flatMap(target => target.pictures).map(picture => [picture.id, picture]));
+    const release: Array<() => void> = [];
+    for (const [id, old] of this.pictures) {
+      const next = wanted.get(id);
+      if (next && old.fileurl === next.fileurl && old.pngurl === next.pngurl && old.imageType === next.imageType &&
+        old.dimension.width === next.dimension.width && old.dimension.height === next.dimension.height) continue;
+      const vector = this.svgBaked.get(id);
+      const raster = this.rasterSources.get(id);
+      if (vector) release.push(() => this.dropBaked(vector));
+      if (raster) release.push(() => releaseBaked(raster));
+      this.svgBaked.delete(id);
+      this.rasterSources.delete(id);
+      this.textures.delete(id);
+      this.images.delete(id);
+      this.pictures.delete(id);
+      this.svgScales.delete(id);
+    }
     const inScene: Picture[] = [];
     const rest: Picture[] = [];
     for (const target of targets) {
@@ -837,8 +855,16 @@ export class PixiRenderer implements Renderer {
       await this.loadPicture(picture);
       onLoaded?.(this.textures.get(picture.id) !== Texture.EMPTY);
     };
-    await pool(inScene, LOAD_CONCURRENCY, one);
-    await pool(rest, LOAD_CONCURRENCY, one);
+    try {
+      await pool(inScene, LOAD_CONCURRENCY, one);
+      await pool(rest, LOAD_CONCURRENCY, one);
+    } finally {
+      // Acquire replacements before releasing old URLs shared by renamed costumes.
+      for (const drop of release) drop();
+      const urls = new Set([...this.pictures.values()].map(picture => picture.fileurl));
+      for (const url of this.svgTexts.keys()) if (!urls.has(url)) this.svgTexts.delete(url);
+      for (const url of this.svgPicks.keys()) if (!urls.has(url)) this.svgPicks.delete(url);
+    }
   }
 
   static costumeCount(targets: Target[]): number {
@@ -1667,12 +1693,15 @@ export class PixiRenderer implements Renderer {
 
 async function pool<T>(items: T[], limit: number, work: (item: T) => Promise<void>): Promise<void> {
   let next = 0;
+  const yieldToPage = loadYield();
   const runners = new Array(Math.min(limit, items.length)).fill(0).map(async () => {
     while (next < items.length) {
       const item = items[next];
       next += 1;
       if (item !== undefined) {
         await work(item);
+        const pause = yieldToPage();
+        if (pause) await pause;
       }
     }
   });

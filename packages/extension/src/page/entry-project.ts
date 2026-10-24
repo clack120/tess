@@ -91,7 +91,7 @@ function soundUrl(sound: RawAsset): string {
 }
 
 // Entry keeps SVG and raster copies; pass both so the renderer can choose.
-function withAssetUrls(work: EntryWork): EntryWork {
+export function withAssetUrls(work: EntryWork): EntryWork {
   for (const object of work.objects ?? []) {
     const sprite = (object as { sprite?: { pictures?: RawAsset[]; sounds?: RawAsset[] } }).sprite;
     for (const picture of sprite?.pictures ?? []) {

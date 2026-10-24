@@ -47,7 +47,7 @@ export interface MountedPlayer {
   dispose(): void;
 }
 
-function ensureStageStyle(): void {
+export function ensureStageStyle(): void {
   if (document.getElementById(STAGE_STYLE_ID)) {
     return;
   }

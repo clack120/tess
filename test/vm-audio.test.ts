@@ -85,11 +85,14 @@ function fakeAudio() {
 
 function loadEngine(context: unknown) {
   const read = (file: string) => stripTypes(fs.readFileSync(path.join(root, file), 'utf-8'));
-  // The sandbox has no module loader, so inline the one runtime import.
+  // The sandbox has no module loader, so inline runtime imports.
   const source = read('packages/vm/src/web/fetch-retry.ts') +
-    read('packages/vm/src/audio/sound.ts').replace(/^import .*fetch-retry.*$/m, '');
+    read('packages/vm/src/web/load-yield.ts') +
+    read('packages/vm/src/audio/sound.ts').replace(/^import .*;\n/gm, '');
   const sandbox: Record<string, unknown> = {
     AbortController,
+    performance,
+    setTimeout,
     AudioContext: function AudioContext() { return context; },
     fetch: () => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) }),
   };
@@ -382,9 +385,10 @@ function fakeSpeaker(how: 'end' | 'error' | 'blocked' | 'hold') {
 
 function loadTts(how: 'end' | 'error' | 'blocked' | 'hold', origin = 'https://example.test') {
   const read = (file: string) => stripTypes(fs.readFileSync(path.join(root, file), 'utf-8'));
-  // The sandbox has no module loader, so inline the one runtime import.
+  // The sandbox has no module loader, so inline runtime imports.
   const source = read('packages/vm/src/web/fetch-retry.ts') +
-    read('packages/vm/src/audio/sound.ts').replace(/^import .*fetch-retry.*$/m, '');
+    read('packages/vm/src/web/load-yield.ts') +
+    read('packages/vm/src/audio/sound.ts').replace(/^import .*;\n/gm, '');
   const { FakeAudio, made } = fakeSpeaker(how);
   const spoken: Array<{ text: string; rate: number; pitch: number }> = [];
   const sandbox: Record<string, unknown> = {

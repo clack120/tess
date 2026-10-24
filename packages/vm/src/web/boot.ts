@@ -66,6 +66,7 @@ export interface EntropyHandle {
   downloadDiagnostics(): void;
   relayout(): void;
   setStageSize(width: number, height: number): void;
+  reload(project: EntryProjectLike, scene?: string): Promise<void>;
   dispose(): void;
 }
 
@@ -259,45 +260,50 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
     });
     cleanups.push(() => vm.stop());
 
-    vm.load(project);
-    if (options.scene) vm.setStartScene(options.scene);
-    // Restore saved values before the work starts on every run.
     vm.save.host = options.saveStore === null ? null : (options.saveStore ?? dexieSaveStore(storeKey(project)));
-    await wait(vm.save.load());
-    renderer.overlayView?.bind({
-      variables: vm.variables,
-      ownerName: (objectId) => vm.targetOf(objectId)?.name ?? null,
-      ownerScene: (objectId) => vm.targetOf(objectId)?.sceneId ?? null,
-      answer: () => vm.answer,
-      answerVisible: () => vm.answerVisible,
-      timer: () => vm.timerValue(),
-      timerVisible: () => vm.timerVisible,
-      scene: () => vm.currentSceneId,
-    });
-    // Wait for assets by default; opting out allows missing costumes and late sound loads during execution.
-    const sounds = vm.targets.flatMap((target) => target.sounds);
-    const waitForAssets = options.waitForAssets ?? true;
-    const total = PixiRenderer.costumeCount(vm.targets) + sounds.length;
-    let loaded = 0;
-    let failed = 0;
-    const arrived = (ok: boolean) => {
-      loaded += 1;
-      if (!ok) failed += 1;
-      options.onProgress?.(loaded, total);
-      if (loaded === total && failed) console.warn(`[entropy] 모양·소리 ${failed}개를 받지 못했습니다`);
-    };
-    options.onProgress?.(0, total);
-    // Start both preloads regardless of whether the caller waits for them.
-    const costumes = renderer
-      .preload(vm.targets, vm.currentSceneId, arrived)
-      .catch((error) => console.warn('[entropy] 모양을 미리 받지 못했습니다', error));
-    const files = audio.preload(sounds, 6, arrived).catch((error) => console.warn('[entropy] 소리를 미리 받지 못했습니다', error));
-    if (waitForAssets) {
-      await wait(Promise.all([costumes, files]));
+    async function loadProject(next: EntryProjectLike, scene?: string): Promise<void> {
+      vm.stop();
+      vm.load(next);
+      vm.setStartScene(scene);
+      // Restore saved values before the work starts on every run.
+      await wait(vm.save.load());
+      renderer.overlayView?.bind({
+        variables: vm.variables,
+        ownerName: (objectId) => vm.targetOf(objectId)?.name ?? null,
+        ownerScene: (objectId) => vm.targetOf(objectId)?.sceneId ?? null,
+        answer: () => vm.answer,
+        answerVisible: () => vm.answerVisible,
+        timer: () => vm.timerValue(),
+        timerVisible: () => vm.timerVisible,
+        scene: () => vm.currentSceneId,
+      });
+      // Wait for assets by default; opting out allows missing costumes and late sound loads during execution.
+      const sounds = vm.targets.flatMap((target) => target.sounds);
+      audio.retain(sounds);
+      const waitForAssets = options.waitForAssets ?? true;
+      const total = PixiRenderer.costumeCount(vm.targets) + sounds.length;
+      let loaded = 0;
+      let failed = 0;
+      const arrived = (ok: boolean) => {
+        loaded += 1;
+        if (!ok) failed += 1;
+        options.onProgress?.(loaded, total);
+        if (loaded === total && failed) console.warn(`[entropy] 모양·소리 ${failed}개를 받지 못했습니다`);
+      };
+      options.onProgress?.(0, total);
+      // Start both preloads regardless of whether the caller waits for them.
+      const costumes = renderer
+        .preload(vm.targets, vm.currentSceneId, arrived)
+        .catch((error) => console.warn('[entropy] 모양을 미리 받지 못했습니다', error));
+      const files = audio.preload(sounds, 6, arrived).catch((error) => console.warn('[entropy] 소리를 미리 받지 못했습니다', error));
+      if (waitForAssets) {
+        await wait(Promise.all([costumes, files]));
+      }
+      // Paint the idle stage, then remeasure text after web fonts finish loading.
+      renderer.flush();
+      void renderer.waitForFonts();
     }
-    // Paint the idle stage, then remeasure text after web fonts finish loading.
-    renderer.flush();
-    void renderer.waitForFonts();
+    await loadProject(project, options.scene);
 
     const question = makeQuestionField(frame, (value) => {
       vm.pendingAnswer = value;
@@ -431,6 +437,7 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       inspect: () => diagnosticView.open(),
       downloadDiagnostics: () => diagnosticView.download(),
       relayout: resize,
+      reload: loadProject,
       setStageSize(width: number, height: number) {
         setStageSize(width, height);
         renderer.applyStageSize();

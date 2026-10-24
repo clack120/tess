@@ -58,6 +58,21 @@ test('audio shares downloads and decoded buffers by URL while keeping playback i
   assert.equal(requests, 2);
 });
 
+test('editor asset updates keep unchanged decoded sounds and discard removed buffers', async t => {
+  let requests = 0;
+  const { engine, decodes } = setup(t, () => { requests++; return bytes(); });
+  const first = sound('first', '/first.wav'), second = sound('second', '/second.wav');
+  await engine.preload([first, second]);
+  const cached = (engine as any).buffers.get('/first.wav');
+  engine.retain([first, sound('second', '/new.wav')]);
+  await engine.preload([first, sound('second', '/new.wav')]);
+  assert.equal(requests, 3); assert.equal(decodes.length, 3);
+  assert.equal((engine as any).buffers.get('/first.wav'), cached);
+  assert.equal((engine as any).buffers.has('/second.wav'), false);
+  assert.equal((engine as any).buffers.size, 2);
+  engine.retain([]); assert.equal((engine as any).buffers.size, 0);
+});
+
 test('zero-duration sounds are skipped without requests or playback, even when their URL is cached', async t => {
   let requests = 0;
   const { engine, contexts, sources } = setup(t, () => { requests++; return bytes(); });

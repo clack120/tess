@@ -28,6 +28,7 @@ function setup() {
   const context = vm.createContext({ URL, AbortController, document: { baseURI: 'https://example.test/' },
     Application: class { renderer = { resolution: 1 }; destroy() {} }, Container, TextStyle: class {}, Texture: { EMPTY: {} }, Assets: assets,
     Color: class { alpha = 1; toNumber() { return 0; } }, svgSharpness: () => 2,
+    loadYield: () => () => undefined,
     stage: { scale: 1, worldWidth: 640, worldHeight: 360 }, MAX_SHARPNESS: 6,
   });
   const source = stripTypes(fs.readFileSync(new URL('../packages/vm/src/render/renderer.ts', import.meta.url), 'utf8'))
@@ -52,6 +53,27 @@ test('raster textures survive other runners and leave the shared cache when the 
     assert.equal(cache.size, 0); assert.equal(aliases.size, 0);
   }
   assert.equal(unloads.length, 40);
+});
+
+test('project edits keep unchanged textures and release only replaced or removed costumes', async () => {
+  const { create, picture, cache, unloads, settle } = setup();
+  const renderer = create();
+  renderer.setSvgBudget = () => {};
+  const first = picture('first', '/first.png'), second = picture('second', '/second.png');
+  await renderer.preload([{ pictures: [first, second] }]);
+  const kept = renderer.textures.get('first'), replaced = renderer.textures.get('second');
+  await renderer.preload([{ pictures: [first, { ...second, fileurl: '/new.png' }] }]);
+  await settle();
+  assert.equal(renderer.textures.get('first'), kept);
+  assert.notEqual(renderer.textures.get('second'), replaced);
+  assert.equal(replaced.destroyed, true);
+  assert.deepEqual(unloads, ['https://example.test/second.png']);
+  await renderer.preload([{ pictures: [first] }]); await settle();
+  assert.equal(renderer.textures.size, 1);
+  assert.equal(renderer.images.size, 1);
+  assert.equal(renderer.pictures.size, 1);
+  assert.equal(cache.size, 1);
+  renderer.destroy(); await settle(); assert.equal(cache.size, 0);
 });
 
 test('a late costume load cannot repopulate a destroyed renderer or retain its global texture', async () => {
