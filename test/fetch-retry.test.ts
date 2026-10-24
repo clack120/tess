@@ -86,6 +86,38 @@ test('the asset cache survives switching off and is removed only by explicit del
   assert.deepEqual(await reported.at(-1), { count: 0, bytes: 0 });
 });
 
+test('bulk loading reports cache changes once when it ends', async t => {
+  const { fetchAsset, setAssetCache, beginAssetBulk, endAssetBulk, onAssetCacheChange } = await import('../packages/vm/src/web/fetch-retry.ts');
+  const entries = new Map<string, Response>();
+  stub(t, globalThis, 'caches', {
+    open: async () => ({
+      match: async (key: string | Request) => entries.get(typeof key === 'string' ? key : key.url)?.clone(),
+      put: async (url: string, response: Response) => { entries.set(url, response); },
+      keys: async () => [...entries.keys()].map(url => new Request(url)),
+    }),
+    delete: async () => true,
+    has: async () => true,
+  });
+  stub(t, globalThis, 'fetch', async () => new Response('ok', { headers: { 'content-length': '2' } }));
+  setAssetCache(true);
+  t.after(() => { setAssetCache(false); });
+  let changes = 0;
+  const unsubscribe = onAssetCacheChange(() => { changes += 1; });
+  t.after(unsubscribe);
+  beginAssetBulk();
+  try {
+    await Promise.all([1, 2, 3].map(i => fetchAsset(`https://playentry.org/uploads/${i}.png`)));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(changes, 0, 'a bulk load does not recount the cache after every asset');
+  } finally {
+    endAssetBulk();
+  }
+  assert.equal(changes, 1, 'the end of the bulk reports once');
+  beginAssetBulk();
+  endAssetBulk();
+  assert.equal(changes, 1, 'a bulk with no writes does not recount the cache');
+});
+
 test('deletion during a download prevents stale writes and re-enabled requests wait for deletion', async t => {
   const { fetchAsset, setAssetCache, clearAssetCache } = await import('../packages/vm/src/web/fetch-retry.ts');
   let finishDownload!: (value: Response) => void;
@@ -180,4 +212,28 @@ test('cache size reads file metadata concurrently with a bounded number of pendi
   assert.deepEqual(await assetCacheSize(), { count: 48, bytes: 192 });
   assert.ok(peak > 1 && peak <= 8, `concurrent reads: ${peak}`);
   assert.equal(active, 0);
+});
+
+test('one cache handle serves every cached asset read', async t => {
+  const { fetchAsset, setAssetCache } = await import('../packages/vm/src/web/fetch-retry.ts');
+  let opens = 0;
+  const entries = new Map<string, Response>();
+  stub(t, globalThis, 'caches', {
+    open: async () => {
+      opens++;
+      return {
+        match: async (key: string | Request) => entries.get(typeof key === 'string' ? key : key.url)?.clone(),
+        put: async (url: string, response: Response) => { entries.set(url, response); },
+        keys: async () => [...entries.keys()].map(url => new Request(url)),
+      };
+    },
+    delete: async () => true,
+    has: async () => true,
+  });
+  stub(t, globalThis, 'fetch', async () => new Response('ok'));
+  setAssetCache(true);
+  t.after(() => { setAssetCache(false); });
+  const urls = Array.from({ length: 20 }, (_, i) => `https://playentry.org/uploads/${i}.png`);
+  await Promise.all(urls.map(url => fetchAsset(url)));
+  assert.equal(opens, 1, 'opening the cache is shared by every asset');
 });

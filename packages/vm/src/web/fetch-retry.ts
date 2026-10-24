@@ -48,6 +48,8 @@ let cacheVersion = 0;
 let cacheDeletion: Promise<unknown> = Promise.resolve();
 const cacheBytes = new Map<string, number>();
 const cacheListeners = new Set<() => void>();
+let bulkDepth = 0;
+let bulkChanged = false;
 
 export function onAssetCacheChange(listener: () => void): () => void {
   cacheListeners.add(listener);
@@ -55,7 +57,29 @@ export function onAssetCacheChange(listener: () => void): () => void {
 }
 
 function cacheChanged(): void {
+  if (bulkDepth > 0) {
+    bulkChanged = true;
+    return;
+  }
   for (const listener of cacheListeners) listener();
+}
+
+// Preloading thousands of assets changes the cache on every put; tell listeners once when it ends.
+export function beginAssetBulk(): void {
+  bulkDepth += 1;
+}
+
+export function endAssetBulk(): void {
+  if (bulkDepth > 0) bulkDepth -= 1;
+  if (bulkDepth !== 0 || !bulkChanged) return;
+  bulkChanged = false;
+  cacheChanged();
+}
+
+function rememberSize(url: string, response: Response, replaced = false): void {
+  const length = Number(response.headers.get('content-length'));
+  if (Number.isFinite(length) && length > 0) cacheBytes.set(url, length);
+  else if (replaced) cacheBytes.delete(url);
 }
 
 // Entry gives every upload a new file name, so a stored copy is used without asking the server again.
@@ -85,25 +109,40 @@ async function fetchCached(url: string, signal?: AbortSignal): Promise<Response>
   signal?.throwIfAborted();
   const stored = await store?.match(url).catch((error) => console.warn('[entropy] 에셋 캐시를 읽지 못했습니다', url, error));
   signal?.throwIfAborted();
-  if (stored && cacheOn && version === cacheVersion) return stored;
+  if (stored && cacheOn && version === cacheVersion) {
+    rememberSize(url, stored);
+    return stored;
+  }
   const response = await fetchRetry(url, signal);
   if (store && cacheOn && version === cacheVersion) {
     void store.put(url, response.clone()).then(() => {
       if (!cacheOn || version !== cacheVersion) return;
-      cacheBytes.delete(url);
+      rememberSize(url, response, true);
       cacheChanged();
     }).catch((error) => console.warn('[entropy] 에셋을 캐시에 넣지 못했습니다', url, error));
   }
   return response;
 }
 
+let opened: { storage: CacheStorage; deletion: Promise<unknown>; open: Promise<Cache | null> } | null = null;
+
 async function openCache(): Promise<Cache | null> {
+  const storage = globalThis.caches;
+  if (!storage) return null;
   // Finish explicit deletion before opening the cache for new requests.
-  await cacheDeletion;
-  return globalThis.caches?.open(CACHE_NAME).catch((error) => {
+  const deletion = cacheDeletion;
+  await deletion;
+  if (opened && opened.storage === storage && opened.deletion === deletion) return opened.open;
+  // Firefox makes each open call round-trip through its quota manager, and a large
+  // work was spending most of its load time opening the same cache per costume.
+  let open!: Promise<Cache | null>;
+  open = storage.open(CACHE_NAME).catch((error) => {
+    if (opened?.open === open) opened = null;
     console.warn('[entropy] 에셋 캐시를 열지 못했습니다', error);
     return null;
-  }) ?? Promise.resolve(null);
+  });
+  opened = { storage, deletion, open };
+  return open;
 }
 
 // Sum stored bodies so the extension popup can show how much disk the cache uses.

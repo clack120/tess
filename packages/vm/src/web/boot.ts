@@ -10,7 +10,7 @@ import { dexieSaveStore } from './save-store.ts';
 import type { SaveHost } from '../runtime/save.ts';
 import { bindExtras } from './extras.ts';
 import { RuntimeDiagnostics } from './diagnostics.ts';
-import { setAssetCache } from './fetch-retry.ts';
+import { beginAssetBulk, endAssetBulk, setAssetCache } from './fetch-retry.ts';
 import { mountDiagnostics } from './diagnostics-view.ts';
 
 export interface BootOptions {
@@ -298,12 +298,16 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       };
       options.onProgress?.(0, total);
       // Start both preloads regardless of whether the caller waits for them.
+      beginAssetBulk();
       const costumes = renderer
         .preload(vm.targets, vm.currentSceneId, arrived)
         .catch((error) => console.warn('[entropy] 모양을 미리 받지 못했습니다', error));
       const files = audio.preload(sounds, 6, arrived).catch((error) => console.warn('[entropy] 소리를 미리 받지 못했습니다', error));
+      const assets = Promise.all([costumes, files]).finally(endAssetBulk);
       if (waitForAssets) {
-        await wait(Promise.all([costumes, files]));
+        await wait(assets);
+      } else {
+        void assets;
       }
       // Paint the idle stage, then remeasure text after web fonts finish loading.
       renderer.flush();
