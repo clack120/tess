@@ -10,7 +10,7 @@ function keyOf(host: HTMLElement): string {
 
 function scan(): void {
   for (const [host, { player, key }] of players) {
-    if (!host.isConnected || !host.dataset.entropyProject || key !== keyOf(host)) {
+    if (!player.isConnected || !host.dataset.entropyProject || key !== keyOf(host)) {
       player.dispose();
       players.delete(host);
     } else {

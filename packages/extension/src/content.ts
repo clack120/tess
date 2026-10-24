@@ -59,6 +59,8 @@ function capture(item: Held): void {
 function mount(item: Held): void {
   capture(item);
   if (item.host?.isConnected) {
+    // A page update can clear the player while leaving its host attached.
+    if (!item.host.firstChild) window.postMessage({ __entropy: 'scan' }, location.origin);
     return;
   }
   const parent = item.frame.parentElement;

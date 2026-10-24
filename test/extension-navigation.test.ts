@@ -23,7 +23,8 @@ async function setup(t: any) {
   (w as any).mountPlayer = (host: HTMLElement, id: string) => {
     const item = { id, disposed: false, host }; mounted.push(item);
     const root = w.document.createElement('div'); root.className = 'entropy-player'; host.append(root);
-    return { setAssetCache(on: boolean) { cacheSettings.push(on); },
+    return { get isConnected() { return !item.disposed && root.isConnected && root.parentElement === host; },
+      setAssetCache(on: boolean) { cacheSettings.push(on); },
       dispose() { assert.equal(item.disposed, false); item.disposed = true; root.remove(); } };
   };
   // Deliver content-to-page messages in order without jsdom's missing event.source.
@@ -51,6 +52,19 @@ test('cache changes preserve the player and apply without remounting on repeated
     await scan();
     assert.equal(mounted.length, 1);
   }
+});
+
+test('an emptied connected host is rebuilt instead of skipped as an already mounted player', async t => {
+  const { w, mounted, settle, scan } = await setup(t);
+  const host = mounted[0]!.host;
+  host.replaceChildren();
+  await settle();
+  assert.equal(w.document.querySelectorAll('.entropy-player').length, 1);
+  assert.equal(mounted[0]!.disposed, true);
+  assert.equal(mounted[1]!.host, host);
+  await scan();
+  assert.equal(mounted.length, 2);
+  assert.equal(w.document.querySelectorAll('script[src="/extension/page/main.js"]').length, 1);
 });
 
 test('removing an Entry iframe removes its sibling host and stops its player before the next work', async t => {

@@ -42,6 +42,7 @@ const nextFrame = () =>
   });
 
 export interface MountedPlayer {
+  readonly isConnected: boolean;
   setAssetCache(on: boolean): void;
   dispose(): void;
 }
@@ -505,6 +506,7 @@ export function mountPlayer(
   }
 
   return {
+    get isConnected() { return !disposed && root.isConnected && root.parentElement === host; },
     setAssetCache(on: boolean) {
       cacheAssets = on;
       setAssetCache(on);
