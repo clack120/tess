@@ -279,6 +279,7 @@ export class Vm implements Project {
 
   load(project: EntryProjectLike): void {
     this.lastError = null;
+    this.masks.clear();
     // Match Entry's project speed fallback and use it for timed blocks.
     this.frameRate = this.requestedFps ?? (Number(project.speed) || DEFAULT_FPS);
     this.scenes = project.scenes.map((scene) => ({ id: scene.id, name: scene.name }));

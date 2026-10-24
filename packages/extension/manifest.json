@@ -34,7 +34,7 @@
       "all_frames": false
     },
     {
-      "matches": ["https://playentry.org/iframe/*"],
+      "matches": ["https://playentry.org/iframe/*", "https://playentry.org/ws*"],
       "js": ["native-content.js"],
       "run_at": "document_start",
       "all_frames": true

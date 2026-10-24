@@ -21,9 +21,9 @@ function setup(t: any, phase: 'init' | 'save' | 'assets') {
   }
   const context = vm.createContext({ document: dom.window.document, window: dom.window,
     navigator: { userAgent: '', maxTouchPoints: 0 }, AbortController, PixiRenderer: Renderer, setAssetCache() {},
-    WebAudioEngine: class { async preload() {} close() { calls.closed++; } }, EntryTtsEngine: class {}, EntryTranslator: class {},
+    WebAudioEngine: class { retain() {} async preload() {} close() { calls.closed++; } }, EntryTtsEngine: class {}, EntryTranslator: class {},
     Vm: class { targets = []; currentSceneId = ''; save = { host: null, async load() { if (phase === 'save') await blocked; } };
-      load() {} stop() { calls.stopped++; } },
+      load() {} setStartScene() {} stop() { calls.stopped++; } },
   });
   const source = stripTypes(fs.readFileSync(new URL('../packages/vm/src/web/boot.ts', import.meta.url), 'utf8'))
     .replace(/^import[\s\S]*?;\n/gm, '').replace(/^export /gm, '');
@@ -47,7 +47,7 @@ for (const phase of ['init', 'save', 'assets'] as const) {
     finish(); await rejected;
     assert.equal(calls.destroyed, 1); assert.equal(calls.afterLoad, 0);
     assert.equal(calls.closed, phase === 'init' ? 0 : 1);
-    assert.equal(calls.stopped, phase === 'init' ? 0 : 1);
+    assert.equal(calls.stopped, phase === 'init' ? 0 : 2);
     assert.equal(document.querySelector('.entropy-stage'), null);
     controller.abort(); assert.equal(calls.destroyed, 1);
   });

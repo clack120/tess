@@ -5,6 +5,19 @@
   inset: 0;
 }
 
+/* Keep the native board's pan, wheel and zoom controls usable during Entropy runs. */
+.entropy-editor-browsing #entryCurtain {
+  display: none !important;
+}
+
+.entropy-editor-browsing .entryBoard * {
+  pointer-events: none !important;
+}
+
+.entropy-editor-player[hidden] {
+  display: none !important;
+}
+
 .entropy-player {
   position: relative;
   display: flex;
