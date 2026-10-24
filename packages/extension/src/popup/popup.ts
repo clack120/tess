@@ -1,4 +1,4 @@
-import { api, readSettings, write, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY, NATIVE_CACHE_KEY, CACHE_CLEAR_KEY } from '../browser.ts';
+import { api, readSettings, write, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY, CACHE_CLEAR_KEY } from '../browser.ts';
 import {
   clearWorks, exportAll, exportName, importAll, listWorks, removeWork, type SavedSummary,
 } from '../store-db.ts';
@@ -6,7 +6,6 @@ import {
 const power = document.getElementById('enabled') as HTMLButtonElement;
 const svg = document.getElementById('svg') as HTMLInputElement;
 const cache = document.getElementById('cache') as HTMLInputElement;
-const nativeCache = document.getElementById('native-cache') as HTMLInputElement;
 const cacheClear = document.getElementById('cache-clear') as HTMLButtonElement;
 const cacheNote = document.getElementById('cache-note') as HTMLElement;
 const cacheSize = document.getElementById('cache-size') as HTMLElement;
@@ -60,9 +59,6 @@ svg.addEventListener('change', () => {
 cache.addEventListener('change', () => {
   void write(CACHE_KEY, cache.checked);
 });
-nativeCache.addEventListener('change', () => {
-  void write(NATIVE_CACHE_KEY, nativeCache.checked);
-});
 
 // Cache writes arrive through extension storage while the popup is open.
 function paintCacheSize(value: unknown): void {
@@ -90,7 +86,6 @@ api.storage.onChanged.addListener((changes, area) => {
 void readSettings().then((settings) => {
   svg.checked = settings.svg;
   cache.checked = settings.cache;
-  nativeCache.checked = settings.nativeCache;
   paint(settings.enabled);
 });
 

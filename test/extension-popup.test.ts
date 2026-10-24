@@ -33,7 +33,6 @@ async function mountPopup(t: any, stored: Record<string, boolean>, saved: unknow
     SVG_KEY: 'svg',
     CACHE_KEY: 'assetCache',
     CACHE_SIZE_KEY: 'assetCacheSize',
-    NATIVE_CACHE_KEY: 'nativeAssetCache',
     CACHE_CLEAR_KEY: 'assetCacheClear',
     api: { storage: {
       local: { get: () => initialSize ?? Promise.resolve({ assetCacheSize: cacheSize }),
@@ -167,11 +166,12 @@ test('열 때 이미 알려진 용량이 있으면 바로 보여 준다', async 
   assert.equal(popup.find('cache-size').textContent, '저장한 파일 3개, 2.0 KB');
 });
 
-test('기본 엔트리 캐시는 실행기와 독립적이고 파일 삭제는 설정을 바꾸지 않는다', async t => {
-  const popup = await mountPopup(t, { enabled: false, cache: false, nativeCache: true }, [], { count: 3, bytes: 2048 });
-  assert.equal((popup.find('native-cache') as HTMLInputElement).checked, true);
-  popup.toggle('native-cache');
-  assert.deepEqual(popup.written, [['nativeAssetCache', false]]);
+test('공용 캐시 스위치는 실행기와 독립적이고 파일 삭제는 설정을 바꾸지 않는다', async t => {
+  const popup = await mountPopup(t, { enabled: false, cache: true }, [], { count: 3, bytes: 2048 });
+  assert.equal(popup.find('native-cache'), null);
+  assert.equal((popup.find('cache') as HTMLInputElement).checked, true);
+  popup.toggle('cache');
+  assert.deepEqual(popup.written, [['assetCache', false]]);
   assert.equal(popup.find('cache-size').textContent, '저장한 파일 3개, 2.0 KB');
   popup.click('cache-clear');
   assert.equal(popup.written.length, 1);

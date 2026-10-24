@@ -1,4 +1,4 @@
-import { api, readSettings, NATIVE_CACHE_KEY, CACHE_CLEAR_KEY, CACHE_SIZE_KEY } from './browser.ts';
+import { api, readSettings, CACHE_KEY, CACHE_CLEAR_KEY, CACHE_SIZE_KEY } from './browser.ts';
 
 let on = false;
 let clear = 0;
@@ -11,9 +11,9 @@ const send = (live = false) => {
 
 api.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  if (NATIVE_CACHE_KEY in changes) { on = changes[NATIVE_CACHE_KEY]?.newValue === true; changed = true; }
+  if (CACHE_KEY in changes) { on = changes[CACHE_KEY]?.newValue === true; changed = true; }
   if (CACHE_CLEAR_KEY in changes) { clear = Number(changes[CACHE_CLEAR_KEY]?.newValue) || 0; clearChanged = true; }
-  if (NATIVE_CACHE_KEY in changes || CACHE_CLEAR_KEY in changes) send(CACHE_CLEAR_KEY in changes);
+  if (CACHE_KEY in changes || CACHE_CLEAR_KEY in changes) send(CACHE_CLEAR_KEY in changes);
 });
 
 window.addEventListener('message', event => {
@@ -23,7 +23,7 @@ window.addEventListener('message', event => {
 });
 
 void readSettings().then(settings => {
-  if (!changed) on = settings.nativeCache;
+  if (!changed) on = settings.cache;
   if (!clearChanged) clear = settings.cacheClear;
   const script = document.createElement('script');
   script.src = api.runtime.getURL('page/native-cache.js');

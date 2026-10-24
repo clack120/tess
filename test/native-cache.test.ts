@@ -112,3 +112,31 @@ test('a deletion requested while pages are closed is applied once when an Entry 
   await vm.runInContext('applyCacheClear(456, true)', context);
   assert.equal(deleted, 3, 'live frames also invalidate their own pending writes');
 });
+
+test('the native frame uses the shared cache preference at startup and on live changes', async () => {
+  let changed!: (changes: Record<string, unknown>, area: string) => void;
+  let finishSettings!: (settings: unknown) => void;
+  const settings = new Promise(resolve => { finishSettings = resolve; });
+  const scripts: Array<{ dataset: Record<string, string>; onload(): void }> = [];
+  const messages: Array<{ on: boolean }> = [];
+  const context = vm.createContext({
+    CACHE_KEY: 'assetCache', CACHE_CLEAR_KEY: 'assetCacheClear', CACHE_SIZE_KEY: 'assetCacheSize',
+    api: { storage: { onChanged: { addListener: (fn: typeof changed) => { changed = fn; } } },
+      runtime: { getURL: (path: string) => path } },
+    readSettings: () => settings,
+    document: { createElement: () => ({ dataset: {} }), head: { append: (script: typeof scripts[number]) => { scripts.push(script); } } },
+    window: { addEventListener() {}, postMessage: (message: typeof messages[number]) => { messages.push(message); } },
+    location: { origin: 'https://playentry.org' },
+  });
+  const source = stripTypes(fs.readFileSync(new URL('../packages/extension/src/native-content.ts', import.meta.url), 'utf8'))
+    .replace(/^import .*;\n/gm, '');
+  vm.runInContext(source, context);
+  changed({ assetCache: { newValue: true } }, 'local');
+  finishSettings({ cache: false, cacheClear: 0 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(scripts[0]!.dataset.entropyNativeCache, '1');
+  scripts[0]!.onload();
+  assert.equal(messages.at(-1)!.on, true);
+  changed({ assetCache: { newValue: false } }, 'local');
+  assert.equal(messages.at(-1)!.on, false);
+});
