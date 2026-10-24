@@ -63,12 +63,15 @@ export function setAssetCache(on: boolean): void {
   if (cacheOn === on) return;
   cacheOn = on;
   cacheVersion++;
-  cacheBytes.clear();
-  if (!on) {
-    cacheDeletion = cacheDeletion.then(() => globalThis.caches?.delete(CACHE_NAME))
-      .catch((error) => console.warn('[entropy] 에셋 캐시를 지우지 못했습니다', error));
-  }
   cacheChanged();
+}
+
+export function clearAssetCache(): Promise<void> {
+  cacheVersion++;
+  cacheBytes.clear();
+  cacheDeletion = cacheDeletion.then(() => globalThis.caches?.delete(CACHE_NAME))
+    .catch((error) => console.warn('[entropy] 에셋 캐시를 지우지 못했습니다', error));
+  return cacheDeletion.then(() => { cacheChanged(); });
 }
 
 export function fetchAsset(url: string, signal?: AbortSignal): Promise<Response> {
@@ -95,9 +98,8 @@ async function fetchCached(url: string, signal?: AbortSignal): Promise<Response>
 }
 
 async function openCache(): Promise<Cache | null> {
-  // A quick off/on must finish deleting the old cache before opening the new one.
+  // Finish explicit deletion before opening the cache for new requests.
   await cacheDeletion;
-  if (!cacheOn) return null;
   return globalThis.caches?.open(CACHE_NAME).catch((error) => {
     console.warn('[entropy] 에셋 캐시를 열지 못했습니다', error);
     return null;
@@ -106,7 +108,8 @@ async function openCache(): Promise<Cache | null> {
 
 // Sum stored bodies so the extension popup can show how much disk the cache uses.
 export async function assetCacheSize(): Promise<{ count: number; bytes: number }> {
-  if (!cacheOn) return { count: 0, bytes: 0 };
+  await cacheDeletion;
+  if (!globalThis.caches || !await globalThis.caches.has(CACHE_NAME)) return { count: 0, bytes: 0 };
   const store = await openCache();
   if (!store) return { count: 0, bytes: 0 };
   const keys = await store.keys();

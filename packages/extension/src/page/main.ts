@@ -1,5 +1,6 @@
 import { mountPlayer, type MountedPlayer } from './player.ts';
-import { assetCacheSize, onAssetCacheChange, setAssetCache } from '../../../vm/src/web/fetch-retry.ts';
+import { setAssetCache } from '../../../vm/src/web/fetch-retry.ts';
+import { applyCacheClear } from './cache.ts';
 
 const HOST_SELECTOR = '[data-entropy-project]';
 const players = new Map<HTMLElement, { player: MountedPlayer; key: string }>();
@@ -36,26 +37,6 @@ function scan(): void {
   }
 }
 
-let sizeTimer: ReturnType<typeof setTimeout> | undefined;
-let sizeVersion = 0;
-function reportCacheSize(): void {
-  sizeVersion++;
-  // Batch writes while a work loads, without delaying updates until loading finishes.
-  if (sizeTimer !== undefined) return;
-  sizeTimer = setTimeout(() => {
-    sizeTimer = undefined;
-    const version = sizeVersion;
-    void assetCacheSize().then(
-      (size) => {
-        if (version === sizeVersion) window.postMessage({ __entropy: 'cache-size', ...size }, location.origin);
-      },
-      (error) => console.warn('[entropy] 에셋 캐시 용량을 읽지 못했습니다', error),
-    );
-  }, 250);
-}
-onAssetCacheChange(reportCacheSize);
-reportCacheSize();
-
 function unmountAll(): void {
   for (const { player } of players.values()) {
     player.dispose();
@@ -67,11 +48,12 @@ window.addEventListener('message', (event) => {
   if (event.source !== window) {
     return;
   }
-  const data = event.data as { __entropy?: string; cache?: boolean } | null;
+  const data = event.data as { __entropy?: string; cache?: boolean; clear?: number; live?: boolean } | null;
   if (!data || typeof data !== 'object') {
     return;
   }
   if (data.__entropy === 'scan') {
+    if (data.clear) void applyCacheClear(data.clear, data.live);
     if (typeof data.cache === 'boolean') setAssetCache(data.cache);
     scan();
   } else if (data.__entropy === 'unmount') {

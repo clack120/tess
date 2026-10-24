@@ -39,8 +39,8 @@ test('aborting stops a pending retry', async t => {
   await assert.rejects(pending);
 });
 
-test('the asset cache answers repeat requests without the network and is dropped when turned off', async t => {
-  const { fetchAsset, setAssetCache, assetCacheSize, onAssetCacheChange } = await import('../packages/vm/src/web/fetch-retry.ts');
+test('the asset cache survives switching off and is removed only by explicit deletion', async t => {
+  const { fetchAsset, setAssetCache, assetCacheSize, onAssetCacheChange, clearAssetCache } = await import('../packages/vm/src/web/fetch-retry.ts');
   const stores = new Map<string, Map<string, Response>>();
   let finishWrite!: () => void;
   const writing = new Promise<void>(resolve => { finishWrite = resolve; });
@@ -56,10 +56,11 @@ test('the asset cache answers repeat requests without the network and is dropped
       };
     },
     delete: async (name: string) => stores.delete(name),
+    has: async (name: string) => stores.has(name),
   });
   const seen = serve(t, []);
   setAssetCache(true);
-  t.after(() => setAssetCache(false));
+  t.after(() => { setAssetCache(false); });
   const reported: Array<Promise<{ count: number; bytes: number }>> = [];
   const unsubscribe = onAssetCacheChange(() => { reported.push(assetCacheSize()); });
   t.after(unsubscribe);
@@ -77,13 +78,16 @@ test('the asset cache answers repeat requests without the network and is dropped
   assert.equal(seen.length, 2, 'non-http URLs bypass the cache');
   setAssetCache(false);
   await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(stores.size, 1, 'switching off retains stored assets');
+  assert.deepEqual(await assetCacheSize(), { count: 1, bytes: 2 });
+  await clearAssetCache();
   assert.equal(stores.size, 0);
   assert.deepEqual(await assetCacheSize(), { count: 0, bytes: 0 });
   assert.deepEqual(await reported.at(-1), { count: 0, bytes: 0 });
 });
 
-test('turning the cache off during a download prevents stale writes and a quick re-enable waits for deletion', async t => {
-  const { fetchAsset, setAssetCache } = await import('../packages/vm/src/web/fetch-retry.ts');
+test('deletion during a download prevents stale writes and re-enabled requests wait for deletion', async t => {
+  const { fetchAsset, setAssetCache, clearAssetCache } = await import('../packages/vm/src/web/fetch-retry.ts');
   let finishDownload!: (value: Response) => void;
   let finishDelete!: () => void;
   const deleting = new Promise<void>(resolve => { finishDelete = resolve; });
@@ -103,10 +107,11 @@ test('turning the cache off during a download prevents stale writes and a quick 
     return new Promise<Response>(resolve => { finishDownload = resolve; });
   });
   setAssetCache(true);
-  t.after(() => setAssetCache(false));
+  t.after(() => { setAssetCache(false); });
   const stale = fetchAsset('https://playentry.org/old.png');
   await beganDownload;
   setAssetCache(false);
+  void clearAssetCache();
   setAssetCache(true);
   const fresh = fetchAsset('https://playentry.org/new.png');
   await new Promise(resolve => setTimeout(resolve, 0));
@@ -137,10 +142,11 @@ test('cached assets still reject loads cancelled before or during the cache look
       } };
     },
     delete: async () => true,
+    has: async () => true,
   });
   const seen = serve(t, []);
   setAssetCache(true);
-  t.after(() => setAssetCache(false));
+  t.after(() => { setAssetCache(false); });
   const early = new AbortController(); early.abort();
   await assert.rejects(fetchAsset('https://playentry.org/a.png', early.signal), { name: 'AbortError' });
   assert.equal(opens, 0);
@@ -167,9 +173,10 @@ test('cache size reads file metadata concurrently with a bounded number of pendi
       },
     }),
     delete: async () => true,
+    has: async () => true,
   });
   setAssetCache(true);
-  t.after(() => setAssetCache(false));
+  t.after(() => { setAssetCache(false); });
   assert.deepEqual(await assetCacheSize(), { count: 48, bytes: 192 });
   assert.ok(peak > 1 && peak <= 8, `concurrent reads: ${peak}`);
   assert.equal(active, 0);

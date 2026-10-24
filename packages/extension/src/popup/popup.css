@@ -153,7 +153,7 @@ body {
   transition: opacity 0.22s ease-out;
 }
 
-body.is-off .card {
+body.is-off .runner-settings {
   opacity: 0.55;
 }
 
@@ -171,8 +171,21 @@ body.is-off .card {
 
 .row-text {
   flex: 1;
+  min-width: 0;
   display: block;
 }
+
+.cache-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.cache-actions .row-hint { flex: 1; margin: 0; font-variant-numeric: tabular-nums; }
+.cache-actions .link { flex: none; }
+.cache-actions + .saves-note { margin: 0; padding: 0 12px 10px; text-align: left; }
 
 .row-title {
   display: block;

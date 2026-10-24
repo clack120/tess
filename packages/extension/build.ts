@@ -23,8 +23,8 @@ const CRX = path.join(ROOT, 'entropy-extension.crx');
 // The signing key determines the extension ID, so keep it stable.
 const CRX_KEY = path.join(ROOT, 'crx-key.pem');
 
-const MODULE_ENTRIES = ['page/main.ts', 'popup/popup.ts'];
-const CLASSIC_ENTRIES = ['content.ts'];
+const MODULE_ENTRIES = ['page/main.ts', 'page/native-cache.ts', 'popup/popup.ts'];
+const CLASSIC_ENTRIES = ['content.ts', 'native-content.ts'];
 const ICON_SIZES = [16, 32, 48, 128];
 
 const RELATIVE_IMPORT = /(['"])(\.\.?\/[^'"]*\.ts)\1/g;

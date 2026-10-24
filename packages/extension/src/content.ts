@@ -1,5 +1,5 @@
 // Blank the original iframe before loading, but keep its layout box for the replacement player.
-import { api, readSettings, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY, ESCAPE_KEY } from './browser.ts';
+import { api, readSettings, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY, CACHE_CLEAR_KEY, ESCAPE_KEY } from './browser.ts';
 
 const IFRAME_MARK = '/iframe/';
 
@@ -16,6 +16,7 @@ interface Held {
 let enabled: boolean | null = null;
 let svg = true;
 let cache = false;
+let cacheClear = 0;
 let escape = true;
 let injected = false;
 const held: Held[] = [];
@@ -36,6 +37,7 @@ function inject(): void {
   const script = document.createElement('script');
   script.type = 'module';
   script.src = api.runtime.getURL('page/main.js');
+  script.onload = () => window.postMessage({ __entropy: 'scan', cache, clear: cacheClear }, location.origin);
   // Report a missing runner instead of leaving an unexplained empty player.
   script.onerror = () => {
     for (const item of held) {
@@ -102,6 +104,7 @@ function release(item: Held): void {
 }
 
 function applyAll(): void {
+  if (enabled === null) return;
   let removed = false;
   for (let i = held.length - 1; i >= 0; i -= 1) {
     const item = held[i]!;
@@ -199,6 +202,10 @@ api.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') {
     return;
   }
+  if (CACHE_CLEAR_KEY in changes) {
+    cacheClear = Number(changes[CACHE_CLEAR_KEY]?.newValue) || 0;
+    window.postMessage({ __entropy: 'scan', clear: cacheClear, live: true }, location.origin);
+  }
   if (CACHE_KEY in changes) {
     cache = changes[CACHE_KEY]?.newValue === true;
     for (const item of held) {
@@ -228,6 +235,7 @@ void readSettings().then((settings) => {
   enabled = settings.enabled;
   svg = settings.svg;
   cache = settings.cache;
+  cacheClear = settings.cacheClear;
   escape = settings.escape;
   applyAll();
 });
