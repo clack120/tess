@@ -128,3 +128,22 @@ test('enabling preloads once and disabling releases the prepared player without 
   assert.equal(s.handles[0].disposed, true);
   assert.equal(s.w.document.querySelector('.entropy-editor-player'), null);
 });
+
+test('moving blocks on the board keeps the prepared runner, while code edits reload it', async t => {
+  const s = await setup(t);
+  const object = s.work.objects[0] as any;
+  object.entity = { x: 10, y: 20 };
+  object.script = '[[{"id":"a","x":5,"y":6,"type":"when_run_button_click","params":["\\"x\\":1,\\"y\\":2"]}]]';
+  s.engine.toggleRun(); await s.settle(); await s.engine.toggleStop();
+  object.script = object.script.replace('"x":5,"y":6', '"x":-40.5,"y":1e3');
+  s.engine.toggleRun(); await s.settle(); await s.engine.toggleStop();
+  assert.equal(s.reloads.length, 0, 'board coordinates are not part of the runnable work');
+  object.entity.x = 11;
+  s.engine.toggleRun(); await s.settle(); await s.engine.toggleStop();
+  assert.equal(s.reloads.length, 1, 'object positions still matter');
+  assert.equal(s.reloads[0].objects[0].entity.x, 11);
+  assert.match(s.reloads[0].objects[0].script, /\\"x\\":1,\\"y\\":2/, 'text that looks like a position is kept');
+  object.script = object.script.replace('when_run_button_click', 'when_some_key_pressed');
+  s.engine.toggleRun(); await s.settle();
+  assert.equal(s.reloads.length, 2);
+});
