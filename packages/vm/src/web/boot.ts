@@ -284,10 +284,16 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       const total = PixiRenderer.costumeCount(vm.targets) + sounds.length;
       let loaded = 0;
       let failed = 0;
+      let reported = 0;
       const arrived = (ok: boolean) => {
         loaded += 1;
         if (!ok) failed += 1;
-        options.onProgress?.(loaded, total);
+        // Each report rewrites page text, and other extensions' DOM observers rescan the page for it.
+        const now = performance.now();
+        if (loaded === total || now - reported >= 100) {
+          reported = now;
+          options.onProgress?.(loaded, total);
+        }
         if (loaded === total && failed) console.warn(`[entropy] 모양·소리 ${failed}개를 받지 못했습니다`);
       };
       options.onProgress?.(0, total);
