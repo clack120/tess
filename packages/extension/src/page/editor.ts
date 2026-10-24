@@ -60,13 +60,22 @@ function discard(): void {
   old?.root.remove();
 }
 
+// Block and comment coordinates in saved scripts only place them on the board; the runner never reads them.
+const BOARD_POSITION = /(?<!\\)"x":-?[\d.eE+-]+,"y":-?[\d.eE+-]+/g;
+
+function withoutBoardPositions(script: unknown): unknown {
+  return typeof script === 'string' ? script.replace(BOARD_POSITION, '"x":0,"y":0') : script;
+}
+
 function snapshot(entry: Editor): string | null {
   entry.getMainWS()?.syncCode();
   const work = entry.exportProject();
   if (!work) return null;
   // Layout-only changes do not invalidate a compiled work or decoded assets.
-  return JSON.stringify({ objects: work.objects, scenes: work.scenes, variables: work.variables,
-    messages: work.messages, functions: work.functions, tables: work.tables, speed: work.speed });
+  const objects = work.objects?.map(object => ({ ...object, script: withoutBoardPositions(object.script) }));
+  const functions = work.functions?.map(fn => ({ ...fn, content: withoutBoardPositions(fn.content) }));
+  return JSON.stringify({ objects, scenes: work.scenes, variables: work.variables,
+    messages: work.messages, functions, tables: work.tables, speed: work.speed });
 }
 
 function schedule(): void {
