@@ -1,0 +1,85 @@
+name: Idle release
+
+on:
+  schedule:
+    # A two-hour poll is the cheapest practical schedule. Sleeping in a runner
+    # would consume the whole quiet period as billable Actions time.
+    - cron: "17 */2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: idle-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check idle time and existing release
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_SHA" >/dev/null 2>&1; then
+            echo "This commit already has a release."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            pushed_at="$(gh api "repos/$GITHUB_REPOSITORY" --jq .pushed_at)"
+            pushed_epoch="$(date -u -d "$pushed_at" +%s)"
+            now_epoch="$(date -u +%s)"
+            age="$((now_epoch - pushed_epoch))"
+            if [ "$age" -lt 7200 ]; then
+              echo "The last push was ${age}s ago; waiting for 7200s."
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          fetch-depth: 1
+
+      - name: Set up Bun
+        if: steps.gate.outputs.ready == 'true'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        if: steps.gate.outputs.ready == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Test with Bun
+        if: steps.gate.outputs.ready == 'true'
+        run: bun run test:bun
+
+      - name: Type-check
+        if: steps.gate.outputs.ready == 'true'
+        run: bun run typecheck
+
+      - name: Build extension packages
+        if: steps.gate.outputs.ready == 'true'
+        run: bun run build:extension
+
+      - name: Publish latest release
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_SHA" \
+            packages/extension/entropy-extension.zip \
+            packages/extension/entropy-extension-chrome.zip \
+            packages/extension/entropy.user.js \
+            --target "$GITHUB_SHA" \
+            --title "$GITHUB_SHA" \
+            --notes "" \
+            --latest
