@@ -1,6 +1,6 @@
 {
   "name": "@entropy/extension",
-  "version": "0.3.53",
+  "version": "0.4.0",
   "description": "playentry.org 작품 실행 화면을 Entropy 실행기로 바꾸는 크롬·파이어폭스 확장",
   "license": "AGPL-3.0-or-later",
   "private": true,

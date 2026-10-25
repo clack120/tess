@@ -1,6 +1,6 @@
 {
   "name": "@entropy/decompiler",
-  "version": "0.3.53",
+  "version": "0.4.0",
   "description": "이미 있는 엔트리 작품을 Entropy 소스로 되돌린다",
   "license": "AGPL-3.0-or-later",
   "type": "module",

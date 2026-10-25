@@ -2,7 +2,7 @@
   "name": "entropy-lang",
   "displayName": "Entropy",
   "description": "Entropy 언어 문법 강조 (엔트리 작품으로 컴파일되는 텍스트 언어)",
-  "version": "0.3.53",
+  "version": "0.4.0",
   "type": "module",
   "publisher": "entropy",
   "license": "AGPL-3.0-or-later",

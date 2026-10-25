@@ -1,6 +1,6 @@
 {
   "name": "@entropy/parser",
-  "version": "0.3.53",
+  "version": "0.4.0",
   "description": "Entropy 소스를 AST 로 읽고 의미를 검사한다",
   "license": "AGPL-3.0-or-later",
   "type": "module",

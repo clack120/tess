@@ -20,6 +20,7 @@ const DEXIE_OUT = path.join(VENDOR, 'dexie.mjs');
 const ZIP = path.join(ROOT, 'entropy-extension.zip');
 const CHROME_ZIP = path.join(ROOT, 'entropy-extension-chrome.zip');
 const CRX = path.join(ROOT, 'entropy-extension.crx');
+const USERSCRIPT = path.join(ROOT, 'entropy.user.js');
 // The signing key determines the extension ID, so keep it stable.
 const CRX_KEY = path.join(ROOT, 'crx-key.pem');
 
@@ -241,6 +242,45 @@ function writeIcons(): void {
   }
 }
 
+function buildUserscript(): number {
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf-8'));
+  const metadata = [
+    '// ==UserScript==',
+    '// @name         Entropy for Entry',
+    '// @namespace    https://playentry.org/entropy',
+    `// @version      ${manifest.version}`,
+    '// @description  엔트리 작품과 에디터를 Entropy 실행기로 실행합니다.',
+    '// @match        https://playentry.org/*',
+    '// @exclude-match https://playentry.org/iframe/*',
+    '// @run-at       document-start',
+    '// @grant        none',
+    '// @inject-into  page',
+    '// @noframes',
+    '// @license      AGPL-3.0-or-later',
+    '// ==/UserScript==',
+  ].join('\n');
+  const css = fs.readFileSync(path.join(SRC, 'player.css'), 'utf-8');
+  execFileSync(process.execPath, [
+    'build', path.join(SRC, 'userscript.ts'), '--target=browser', '--format=iife', '--minify',
+    `--define=ENTROPY_PLAYER_CSS:${JSON.stringify(css)}`,
+    `--banner=${metadata}`,
+    `--outfile=${USERSCRIPT}`,
+  ]);
+  const code = fs.readFileSync(USERSCRIPT, 'utf-8');
+  if (!code.startsWith('// ==UserScript==') || !code.includes('// ==/UserScript==')) {
+    throw new Error('userscript 메타데이터가 파일 맨 앞에 없습니다.');
+  }
+  for (const leftover of ['import(', 'ENTROPY_PLAYER_CSS', 'chrome.', 'browser.']) {
+    if (code.includes(leftover)) throw new Error(`userscript에 외부 의존성이 남았습니다: ${leftover}`);
+  }
+  try {
+    new Function(code);
+  } catch (error) {
+    throw new Error(`userscript를 단일 클래식 스크립트로 읽지 못합니다: ${(error as Error).message}`);
+  }
+  return Buffer.byteLength(code);
+}
+
 fs.rmSync(DIST, { recursive: true, force: true });
 const modules = emitModules(MODULE_ENTRIES.map((entry) => path.join(SRC, entry)));
 let flattened = 0;
@@ -275,11 +315,13 @@ zipDirectory(DIST, CHROME_ZIP);
 // Unpacked loading uses either browser's supported background environment.
 writeManifest('shared');
 checkManifest();
+const userscriptBytes = buildUserscript();
 
 const lines = [
   `확장을 만들었습니다: ${rel(DIST)} (모듈 ${modules.size}개 · 내용 스크립트 ${flattened}개)`,
   `파이어폭스용 묶음: ${rel(ZIP)}`,
   `크롬용 묶음: ${rel(CHROME_ZIP)} (웹스토어에 올리는 것은 이 zip 입니다)`,
+  `유저스크립트: ${rel(USERSCRIPT)} (${(userscriptBytes / 1024 / 1024).toFixed(2)} MiB · 단일 파일)`,
 ];
 if (process.argv.includes('--crx')) {
   const fresh = !fs.existsSync(CRX_KEY);

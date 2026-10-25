@@ -47,6 +47,11 @@ export interface MountedPlayer {
   dispose(): void;
 }
 
+export interface PlayerCacheControls {
+  change(on: boolean): void;
+  clear(): Promise<void>;
+}
+
 export function ensureStageStyle(): void {
   if (document.getElementById(STAGE_STYLE_ID)) {
     return;
@@ -168,6 +173,7 @@ export function mountPlayer(
   svg = true,
   cacheAssets = false,
   grabEscape = true,
+  cacheControls?: PlayerCacheControls,
 ): MountedPlayer {
   setAssetCache(cacheAssets);
   ensureStageStyle();
@@ -489,6 +495,27 @@ export function mountPlayer(
         { label: "현재 상태 보기", run: () => live.inspect() },
         { label: `Entropy 디버그 ${inspector?.enabled ? "끄기" : "켜기"}`, run: () => inspector?.toggle() },
         { label: "진단 파일 저장", run: () => live.downloadDiagnostics() },
+        ...(cacheControls ? [
+          null,
+          {
+            label: `에셋 캐시 ${cacheAssets ? "끄기" : "켜기"}`,
+            run: () => {
+              cacheAssets = !cacheAssets;
+              setAssetCache(cacheAssets);
+              cacheControls.change(cacheAssets);
+              setNotice(`에셋 캐시를 ${cacheAssets ? "켰습니다" : "껐습니다"}.`);
+            },
+          },
+          {
+            label: "에셋 캐시 비우기",
+            run: () => {
+              void cacheControls.clear().then(
+                () => setNotice("저장한 모양과 소리 캐시를 비웠습니다."),
+                error => showError(`에셋 캐시를 비우지 못했습니다: ${error instanceof Error ? error.message : String(error)}`),
+              );
+            },
+          },
+        ] as Array<MenuItem | null> : []),
         null,
         { label: "이전 장면", run: () => sceneStep("prev"), disabled: still || !sceneAt(-1) },
         { label: "다음 장면", run: () => sceneStep("next"), disabled: still || !sceneAt(1) },

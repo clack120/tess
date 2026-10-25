@@ -8,6 +8,7 @@ packages/extension/dist
 packages/extension/entropy-extension.zip
 packages/extension/entropy-extension-chrome.zip
 packages/extension/entropy-extension.crx
+packages/extension/entropy.user.js
 packages/extension/crx-key.pem
 editors/vscode/*.vsix
 packages/painter/dist

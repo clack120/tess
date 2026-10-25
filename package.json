@@ -1,6 +1,6 @@
 {
   "name": "entropy-monorepo",
-  "version": "0.3.53",
+  "version": "0.4.0",
   "description": "Entropy 언어(엔트리 블록 코드로 변환되는 텍스트 언어) 모노레포",
   "private": true,
   "license": "AGPL-3.0-or-later",

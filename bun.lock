@@ -23,7 +23,7 @@
     },
     "editors/vscode": {
       "name": "entropy-lang",
-      "version": "0.3.53",
+      "version": "0.4.0",
       "devDependencies": {
         "@entropy/core": "workspace:*",
         "@entropy/parser": "workspace:*",
@@ -31,7 +31,7 @@
     },
     "packages/cli": {
       "name": "entropy",
-      "version": "0.3.53",
+      "version": "0.4.0",
       "bin": {
         "entropy": "./index.ts",
       },
@@ -46,7 +46,7 @@
     },
     "packages/compiler": {
       "name": "@entropy/compiler",
-      "version": "0.3.53",
+      "version": "0.4.0",
       "dependencies": {
         "@entropy/core": "workspace:*",
         "@entropy/parser": "workspace:*",
@@ -54,11 +54,11 @@
     },
     "packages/core": {
       "name": "@entropy/core",
-      "version": "0.3.53",
+      "version": "0.4.0",
     },
     "packages/decompiler": {
       "name": "@entropy/decompiler",
-      "version": "0.3.53",
+      "version": "0.4.0",
       "dependencies": {
         "@entropy/core": "workspace:*",
         "@entropy/parser": "workspace:*",
@@ -67,7 +67,7 @@
     },
     "packages/extension": {
       "name": "@entropy/extension",
-      "version": "0.3.53",
+      "version": "0.4.0",
       "dependencies": {
         "@entropy/vm": "workspace:*",
         "dexie": "^4.4.6",
@@ -76,7 +76,7 @@
     },
     "packages/parser": {
       "name": "@entropy/parser",
-      "version": "0.3.53",
+      "version": "0.4.0",
       "dependencies": {
         "@entropy/core": "workspace:*",
         "chevrotain": "^13.2.0",
@@ -84,7 +84,7 @@
     },
     "packages/player": {
       "name": "@entropy/player",
-      "version": "0.3.53",
+      "version": "0.4.0",
       "dependencies": {
         "@entropy/compiler": "workspace:*",
         "preact": "^11.0.1",
@@ -95,7 +95,7 @@
     },
     "packages/vm": {
       "name": "@entropy/vm",
-      "version": "0.3.53",
+      "version": "0.4.0",
       "bin": {
         "entropy-vm": "./src/node/cli.ts",
       },

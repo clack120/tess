@@ -1,6 +1,6 @@
 {
   "name": "@entropy/core",
-  "version": "0.3.53",
+  "version": "0.4.0",
   "description": "Entropy 언어용 공용 정의",
   "license": "AGPL-3.0-or-later",
   "type": "module",

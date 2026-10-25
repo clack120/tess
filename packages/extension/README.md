@@ -3,7 +3,7 @@
 엔트리 작품 페이지(`playentry.org/project/<작품 ID>`)와 에디터(`playentry.org/ws/<작품 ID>`)의 실행기를 Entropy로 바꾸는 확장입니다. 에디터에서는 기존 실행·일시정지·정지 버튼을 사용하며, 실행할 때 저장 전 수정 내용과 선택한 장면을 읽습니다.
 
 ```bash
-bun run build:extension                   # dist 폴더와 zip 생성
+bun run build:extension                   # dist, zip, entropy.user.js 생성
 bun run watch:extension                   # 소스가 바뀔 때마다 자동 빌드
 bun packages/extension/build.ts --crx      # crx 까지 함께 생성
 ```
@@ -14,9 +14,11 @@ bun packages/extension/build.ts --crx      # crx 까지 함께 생성
 | `entropy-extension.zip`          | 파이어폭스                               |
 | `entropy-extension-chrome.zip`   | **크롬 웹스토어에 올리는 파일**          |
 | `entropy-extension.crx`          | 웹스토어를 거치지 않고 직접 배포할 때    |
+| `entropy.user.js`                | Violentmonkey·Safari Userscripts용 단일 파일 |
 
 - 크롬: `chrome://extensions`에서 개발자 모드를 켜고 **압축해제된 확장 프로그램을 로드**를 눌러 `dist`를 선택합니다.
 - 파이어폭스: `about:debugging#/runtime/this-firefox`에서 **임시 부가 기능 로드**를 눌러 `dist/manifest.json` 또는 `entropy-extension.zip`을 선택합니다.
+- 유저스크립트: `entropy.user.js`를 Violentmonkey 또는 Safari의 Userscripts에서 엽니다. 작품 실행기·에디터 실행·대용량 저장 축약·디버거가 들어 있으며 popup은 없습니다. 켜고 끄기는 유저스크립트 관리자에서 합니다. 에셋 캐시는 기본으로 켜지고, 실행 화면 우클릭 메뉴에서 끄거나 저장한 캐시를 비울 수 있습니다. SVG는 켜며 환경 차이가 큰 Esc 가로채기는 끈 상태로 동작합니다. 작품의 저장값은 확장 저장소 대신 `playentry.org`의 IndexedDB에 보관됩니다.
 
 툴바 아이콘의 창에서 켜고 끄며, 다음을 설정합니다.
 
@@ -24,6 +26,8 @@ bun packages/extension/build.ts --crx      # crx 까지 함께 생성
 - **캐시 쓰기** (기본 꺼짐): 작품 화면과 에디터에서 받은 모양과 소리를 저장하고 다음부터 서버에 묻지 않고 씁니다. Entropy 실행기를 꺼도 기본 엔트리에 적용되며, 캐시를 꺼도 저장한 파일은 유지합니다.
 - **파일 삭제**: 캐시 설정과 실행 중인 작품을 유지한 채 저장한 모양과 소리만 삭제합니다. 엔트리 페이지가 닫혀 있으면 다음에 작품을 열 때 삭제합니다. 작품이 저장한 값은 건드리지 않습니다. 파일 개수와 용량은 저장과 삭제가 끝날 때 갱신됩니다.
 - **저장된 데이터**: 작품이 저장한 값을 보고 지우거나 파일로 내보내고 가져옵니다.
+
+에디터 저장·내보내기의 UTF-8 JSON이 **16,700,000바이트를 넘으면** 블록의 기본 속성과 PNG 기본 형식 표기를 자동으로 생략합니다. 블록 ID·배치·사용자 설정·변수/리스트·자산은 보존하며 에디터에서 편집 중인 데이터는 바꾸지 않습니다. 한도 이하는 그대로 반환합니다. Entropy 실행기를 꺼도 적용되며, 축약 전후 크기는 개발자 콘솔에 표시합니다. 축약 후에도 한도를 넘으면 서버 제한은 그대로 적용됩니다.
 
 실행 중인 작품이 포커스를 가지면 Esc 도 작품이 가져갑니다. 요소 전체화면에서는 크롬 계열에서 Esc 를 길게 눌러야 빠져나오고, 파이어폭스는 Esc 를 막을 수 없어 바로 빠져나옵니다.
 아직 창에 스위치가 없으므로, 끄려면 확장 창의 개발자 도구 콘솔에서 `chrome.storage.local.set({ grabEscape: false })` 를 실행합니다.

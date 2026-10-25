@@ -1,6 +1,6 @@
 {
   "name": "@entropy/vm",
-  "version": "0.3.53",
+  "version": "0.4.0",
   "description": "Entropy 작품을 PixiJS 위에서 엔트리와 같게, 훨씬 빠르게 실행하는 런타임",
   "license": "AGPL-3.0-or-later",
   "type": "module",
