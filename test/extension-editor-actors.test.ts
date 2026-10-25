@@ -123,3 +123,13 @@ test('stopping with a focused edit does not schedule a native blur command or re
   assert.equal(s.entity.x, 5); assert.equal(input.value, '5'); assert.equal(s.counts().nativeChanges, 0);
   s.live.sync(); assert.equal(input.disabled, true);
 });
+
+test('partially initialized actor controls restore listeners if a changed native view rejects synchronization', t => {
+  const s = setup(t); s.live.restore();
+  s.first.rotateWrapper_.classList.toggle = () => { throw new Error('changed native view'); };
+  assert.throws(() => s.w.begin(s.entry, s.handle), /changed native view/);
+  const input = s.first.coordinateView_.xInput_;
+  assert.equal(input.disabled, true);
+  input.disabled = false; input.focus(); input.blur();
+  assert.equal(s.counts().nativeChanges, 1, 'no temporary blur handler remains');
+});

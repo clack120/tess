@@ -105,8 +105,7 @@ export function beginActorEditing(entry: any, handle: EntropyHandle): ActorEditi
       button.classList.toggle('selected', target.rotateMethod === method);
     }
   };
-  sync();
-  return { sync, restore() {
+  function restore() {
     if (restored) return;
     restored = true;
     if (inputs.has(document.activeElement as HTMLInputElement)) (document.activeElement as HTMLInputElement).blur();
@@ -119,5 +118,8 @@ export function beginActorEditing(entry: any, handle: EntropyHandle): ActorEditi
       } catch (error) { console.warn('[entropy] 오브젝트 표시를 복원하지 못했습니다', error); }
     }
     // Called before native stop restores and enables the original controls.
-  } };
+  }
+  try { sync(); }
+  catch (error) { restore(); throw error; }
+  return { sync, restore };
 }

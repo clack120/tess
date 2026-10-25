@@ -56,6 +56,7 @@ let wrappedExport: Editor['exportProject'] | null = null;
 let restoreExport: (() => void) | null = null;
 let soundEditor: unknown = null;
 let restoreSound: (() => void) | null = null;
+const incompatible = new WeakSet<Editor>();
 
 function traceEditor(phase: string): void {
   if (document.documentElement) document.documentElement.dataset.entropyEditorPhase = phase;
@@ -171,7 +172,6 @@ function schedule(): void {
 
 function createPrepared(canvas: HTMLCanvasElement, entry: Editor): Prepared {
   let audioContext: AudioContext | undefined;
-  try { if (typeof AudioContext === 'function') audioContext = new AudioContext(); } catch {}
   const root = document.createElement('div');
   root.className = 'entropy-player entropy-editor-player';
   root.hidden = true;
@@ -227,8 +227,16 @@ function createPrepared(canvas: HTMLCanvasElement, entry: Editor): Prepared {
   const timer = setInterval(() => {
     if (!canvas.isConnected) { if (active) void attached?.engine.toggleStop(); discard(); return; }
     if (active && prepared?.handle?.vm.state === 'stop' && !prepared.busy) void attached?.engine.toggleStop();
-    if (active) { layout(); active.actors?.sync(); }
+    if (active) {
+      layout();
+      try { active.actors?.sync(); }
+      catch (error) {
+        active.actors?.restore(); active.actors = undefined;
+        console.warn('[entropy] 오브젝트 속성 표시를 연결하지 못했습니다', error);
+      }
+    }
   }, 100);
+  try { if (typeof AudioContext === 'function') audioContext = new AudioContext(); } catch {}
   return { root, status, audioContext, controller: new AbortController(), source: '', requested: '', requestedWork: null,
     promise: Promise.resolve(),
     busy: false, svg: settings.svg, escape: settings.escape,
@@ -240,7 +248,7 @@ function createPrepared(canvas: HTMLCanvasElement, entry: Editor): Prepared {
     } };
 }
 
-function prepare(entry: Editor, snapshot: EditorSnapshot): Promise<void> {
+async function prepare(entry: Editor, snapshot: EditorSnapshot): Promise<void> {
   if (prepared && (prepared.svg !== settings.svg || prepared.escape !== settings.escape)) discard();
   const canvas = document.getElementById('entryCanvas');
   if (!(canvas instanceof HTMLCanvasElement)) return Promise.reject(new Error('엔트리 실행 화면을 찾지 못했습니다'));
@@ -318,8 +326,13 @@ function prepare(entry: Editor, snapshot: EditorSnapshot): Promise<void> {
         current.handle = handle;
         handle.vm.onSceneChange = id => {
           if (!active || prepared !== current || attached !== entry || (window as any).Entry !== entry || entry.scene.selectedScene?.id === id) return;
-          const scene = entry.scene.getSceneById?.(id);
-          if (scene) entry.scene.selectScene?.(scene);
+          try {
+            const scene = entry.scene.getSceneById?.(id);
+            if (scene) entry.scene.selectScene?.(scene);
+          } catch (error) {
+            handle.vm.onSceneChange = null;
+            console.warn('[entropy] 장면 선택을 연결하지 못했습니다', error);
+          }
         };
         handle.vm.onError = error => {
           console.error('[entropy] 에디터 실행 오류', error);
@@ -348,7 +361,7 @@ function prepare(entry: Editor, snapshot: EditorSnapshot): Promise<void> {
 function browse(entry: Editor): () => void {
   const workspace = entry.getMainWS();
   const playground = entry.playground;
-  if (!workspace?.board || !playground?.view_ || !playground.getViewMode) return () => {};
+  if (!workspace?.board || !playground?.view_ || typeof playground.getViewMode !== 'function') return () => {};
   const boards = [...new Set([workspace.board, workspace.overlayBoard, workspace.blockMenu].filter(Boolean))];
   const saved = boards.map(board => [board, board.readOnly] as const);
   for (const board of boards) board.readOnly = true;
@@ -365,94 +378,133 @@ function browse(entry: Editor): () => void {
 function attach(entry: Editor): void {
   cachedExport = null; // Edits made while the VM was disabled did not advance editRevision.
   const engine = entry.engine;
-  const originals = new Map<string, (...args: any[]) => any>();
+  const originals = new Map<string, { original: (...args: any[]) => any; replacement: (...args: any[]) => any }>();
   const patch = (name: string, replacement: (...args: any[]) => any) => {
-    originals.set(name, engine[name]); engine[name] = replacement;
+    originals.set(name, { original: engine[name], replacement });
+    if (!Reflect.set(engine, name, replacement) || engine[name] !== replacement) throw new Error(`Entry.${name} 연결을 지원하지 않습니다`);
   };
   const originalRun = engine.toggleRun, originalStop = engine.toggleStop, originalPause = engine.togglePause;
-  for (const name of ['update', 'computeFunction', 'raiseEvent', 'raiseKeyEvent', 'raiseEventOnEntity']) {
-    if (typeof engine[name] !== 'function') continue;
-    const original = engine[name];
-    patch(name, function(this: unknown, ...args: any[]) { if (!active) return original.apply(this, args); });
-  }
   const restartTicker = () => {
     if (!engine.ticker || !(entry.tickTime > 0) || typeof engine.update !== 'function') return;
-    clearInterval(engine.ticker); engine.ticker = setInterval(engine.update, entry.tickTime);
+    const previous = engine.ticker;
+    const next = setInterval(engine.update, entry.tickTime);
+    if (!Reflect.set(engine, 'ticker', next)) { clearInterval(next); throw new Error('Entry ticker 연결을 지원하지 않습니다'); }
+    clearInterval(previous);
   };
-  restartTicker();
-  patch('toggleRun', function(...args: any[]) {
-    if (active) { if (engine.state === 'pause') engine.togglePause(); return; }
-    if (!settings.enabled || engine.state !== 'stop') return originalRun.apply(engine, args);
-    traceEditor('run-requested');
-    prepared?.handle?.audio.unlock();
-    const currentSnapshot = snapshot(entry);
-    if (!currentSnapshot) return;
-    const canvas = document.getElementById('entryCanvas') as HTMLCanvasElement;
-    const visibility = canvas.style.visibility;
-    const current: RunningEditor = {
-      cleanup() { canvas.style.visibility = visibility; unbrowse(); },
-    };
-    let unbrowse = () => {};
-    active = current;
-    try { originalRun.apply(engine, args); } catch (error) { finish()(); throw error; }
-    try { current.live = beginLiveEditing(entry, currentSnapshot.work, () => prepared?.handle?.vm, traceEditor); }
-    catch (error) { console.warn('[entropy] 실행 중 편집을 준비하지 못해 탐색만 허용합니다', error); }
-    unbrowse = current.live ? () => current.live?.restore() : browse(entry);
-    const scene = entry.scene.selectedScene?.id;
-    const ready = prepare(entry, currentSnapshot);
-    void prepared?.audioContext?.resume().catch(() => undefined);
-    if (prepared) {
-      prepared.root.hidden = false; prepared.root.tabIndex = 0; prepared.root.removeAttribute('aria-hidden');
-      canvas.style.visibility = 'hidden';
-    }
-    void ready.then(() => {
-      if (active !== current || !prepared?.handle) return;
-      const handle = prepared.handle;
-      handle.vm.setStartScene(scene);
-      const unknown = [...handle.vm.unknownBlocks.keys()].filter(type => !type.startsWith('variable:'));
-      if (unknown.length) (window as any).Entry.toast?.alert('실행기 안내',
-        `이 실행기가 아직 모르는 블록이 ${unknown.length}종 있습니다: ${unknown.slice(0, 6).join(', ')}`);
-      handle.relayout(); handle.start();
-      current.actors = beginActorEditing(entry, handle);
-      traceEditor('running');
-      if (engine.state === 'pause') handle.pause();
-    }).catch(error => {
-      if (active === current && prepared) {
-        const message = error instanceof Error ? error.message : String(error);
-        traceEditor('run-error');
-        console.warn('[entropy] 실행기를 준비하지 못했습니다', error);
-        void engine.toggleStop().finally(() => discard());
-        (entry as any).toast?.alert('실행기를 준비하지 못했습니다', message);
+  let changed: { destroy(): void } | undefined;
+  let tickerChanged = false;
+  const unpatch = () => {
+    try { changed?.destroy(); }
+    finally {
+      changed = undefined;
+      for (const [name, { original, replacement }] of originals) {
+        if (engine[name] === replacement) Reflect.set(engine, name, original);
       }
-    });
-  });
-  patch('toggleStop', async function(...args: any[]) {
-    const cleanup = finish();
-    try { return await originalStop.apply(engine, args); }
-    finally { cleanup(); schedule(); }
-  });
-  patch('togglePause', function(...args: any[]) {
-    const result = originalPause.apply(engine, args);
-    if (active && prepared?.handle) {
-      if (engine.state === 'pause') prepared.handle.pause();
-      else prepared.handle.start();
+      if (cachedExport?.entry === entry) cachedExport = null;
+      if (tickerChanged) { tickerChanged = false; restartTicker(); }
     }
-    return result;
-  });
-  const changed = entry.creationChangedEvent?.attach(null, () => {
-    editRevision += 1;
-    schedule();
-  });
-  restore = () => {
-    changed?.destroy();
-    for (const [name, original] of originals) engine[name] = original;
-    if (cachedExport?.entry === entry) cachedExport = null;
-    restartTicker();
   };
-  attached = entry; attachedEngine = engine;
-  traceEditor('attached');
-  if (engine.state === 'run' || engine.state === 'pause') void engine.toggleStop();
-  schedule();
+  const disable = (error: unknown) => {
+    incompatible.add(entry);
+    try { unpatch(); }
+    finally {
+      if (attached === entry) { restore = null; attached = null; attachedEngine = null; }
+      traceEditor('incompatible');
+      console.warn('[entropy] 에디터 연결을 해제했습니다. 원본 실행기를 사용합니다.', error);
+    }
+  };
+  try {
+    for (const name of ['update', 'computeFunction', 'raiseEvent', 'raiseKeyEvent', 'raiseEventOnEntity']) {
+      const original = engine[name];
+      patch(name, function(this: unknown, ...args: any[]) { if (!active) return original.apply(this, args); });
+    }
+    patch('toggleRun', function(...args: any[]) {
+      if (active) { if (engine.state === 'pause') engine.togglePause(); return; }
+      if (!settings.enabled || engine.state !== 'stop') return originalRun.apply(engine, args);
+      traceEditor('run-requested');
+      let currentSnapshot: EditorSnapshot;
+      let canvas: HTMLCanvasElement;
+      try {
+        prepared?.handle?.audio.unlock();
+        const element = document.getElementById('entryCanvas');
+        if (!(element instanceof HTMLCanvasElement)) throw new Error('엔트리 실행 화면을 찾지 못했습니다');
+        canvas = element;
+        const exported = snapshot(entry);
+        if (!exported) throw new Error('엔트리 작품을 읽지 못했습니다');
+        currentSnapshot = exported;
+      } catch (error) {
+        disable(error); discard();
+        return originalRun.apply(engine, args);
+      }
+      const visibility = canvas.style.visibility;
+      const current: RunningEditor = {
+        cleanup() { canvas.style.visibility = visibility; unbrowse(); },
+      };
+      let unbrowse = () => {};
+      active = current;
+      try { originalRun.apply(engine, args); } catch (error) { finish()(); throw error; }
+      try { current.live = beginLiveEditing(entry, currentSnapshot.work, () => prepared?.handle?.vm, traceEditor); }
+      catch (error) { console.warn('[entropy] 실행 중 편집을 준비하지 못해 탐색만 허용합니다', error); }
+      if (current.live) unbrowse = () => current.live?.restore();
+      else {
+        try { unbrowse = browse(entry); }
+        catch (error) { console.warn('[entropy] 블록 탐색을 연결하지 못했습니다', error); }
+      }
+      const scene = entry.scene.selectedScene?.id;
+      const ready = prepare(entry, currentSnapshot);
+      void prepared?.audioContext?.resume().catch(() => undefined);
+      if (prepared) {
+        prepared.root.hidden = false; prepared.root.tabIndex = 0; prepared.root.removeAttribute('aria-hidden');
+        canvas.style.visibility = 'hidden';
+      }
+      void ready.then(() => {
+        if (active !== current || !prepared?.handle) return;
+        const handle = prepared.handle;
+        handle.vm.setStartScene(scene);
+        const unknown = [...handle.vm.unknownBlocks.keys()].filter(type => !type.startsWith('variable:'));
+        if (unknown.length) (window as any).Entry.toast?.alert('실행기 안내',
+          `이 실행기가 아직 모르는 블록이 ${unknown.length}종 있습니다: ${unknown.slice(0, 6).join(', ')}`);
+        handle.relayout(); handle.start();
+        try { current.actors = beginActorEditing(entry, handle); }
+        catch (error) { console.warn('[entropy] 오브젝트 속성 편집을 연결하지 못했습니다', error); }
+        traceEditor('running');
+        if (engine.state === 'pause') handle.pause();
+      }).catch(error => {
+        if (active === current) {
+          const failed = prepared;
+          const message = error instanceof Error ? error.message : String(error);
+          traceEditor('run-error');
+          console.warn('[entropy] 실행기를 준비하지 못했습니다', error);
+          void engine.toggleStop().finally(() => { disable(error); if (prepared === failed) discard(); })
+            .catch((error: unknown) => console.warn('[entropy] 에디터 정지를 마치지 못했습니다', error));
+          (entry as any).toast?.alert('실행기를 준비하지 못했습니다', `${message}\n다시 시작하면 원본 실행기를 사용합니다.`);
+        }
+      });
+    });
+    patch('toggleStop', async function(...args: any[]) {
+      const cleanup = finish();
+      try { return await originalStop.apply(engine, args); }
+      finally { cleanup(); schedule(); }
+    });
+    patch('togglePause', function(...args: any[]) {
+      const result = originalPause.apply(engine, args);
+      if (active && prepared?.handle) {
+        if (engine.state === 'pause') prepared.handle.pause();
+        else prepared.handle.start();
+      }
+      return result;
+    });
+    changed = entry.creationChangedEvent?.attach(null, () => {
+      editRevision += 1;
+      schedule();
+    });
+    restartTicker(); tickerChanged = true;
+    restore = unpatch;
+    attached = entry; attachedEngine = engine;
+    traceEditor('attached');
+    if (engine.state === 'run' || engine.state === 'pause') void engine.toggleStop();
+    schedule();
+  } catch (error) { disable(error); }
 }
 
 function reconcile(): void {
@@ -470,7 +522,9 @@ function reconcile(): void {
     if (active) void attachedEngine?.toggleStop();
     restore?.(); discard(); restore = null; attached = null; attachedEngine = null;
   }
-  if (!attached && settings.enabled && entry?.type === 'workspace' && entry.engine?.runButton &&
+  if (!attached && settings.enabled && entry?.type === 'workspace' && !incompatible.has(entry) && entry.engine?.runButton &&
+    typeof entry.getMainWS === 'function' && entry.scene &&
+    exportingEntry === entry && entry.exportProject === wrappedExport && typeof entry.creationChangedEvent?.attach === 'function' &&
     entry.isLoadProject !== false && typeof entry.exportProject === 'function' &&
     ['toggleRun', 'toggleStop', 'togglePause', 'update', 'computeFunction', 'raiseEvent', 'raiseKeyEvent', 'raiseEventOnEntity']
       .every(name => typeof entry.engine[name] === 'function')) attach(entry);

@@ -321,3 +321,97 @@ test('moving blocks on the board keeps the prepared runner, while code edits rel
   s.engine.toggleRun(); await s.settle();
   assert.equal(s.reloads.length, 2);
 });
+
+test('an incompatible engine rolls back partial patches and leaves every native method callable', async t => {
+  const s = await setup(t);
+  s.configure(false); await s.settle();
+  const original = { ...s.engine };
+  Object.defineProperty(s.engine, 'togglePause', { writable: false });
+  s.configure(true); await s.settle();
+  for (const key of Object.keys(original) as Array<keyof typeof original>) assert.equal(s.engine[key], original[key]);
+  assert.equal(s.w.document.documentElement.dataset.entropyEditorPhase, 'incompatible');
+  s.configure(true); s.engine.toggleRun(); s.engine.update();
+  assert.equal(s.counts().nativeTicks, 2); assert.equal(s.boots.length, 0);
+});
+
+test('a changed native event API cannot leave the engine half attached', async t => {
+  const s = await setup(t);
+  s.configure(false); await s.settle();
+  s.w.Entry.creationChangedEvent.attach = () => { throw new Error('changed Entry event API'); };
+  s.configure(true); await s.settle();
+  assert.equal(s.engine.toggleRun, s.originalRun); assert.equal(s.engine.computeFunction, s.originalTick);
+  s.engine.toggleRun(); assert.equal(s.engine.state, 'run'); assert.equal(s.boots.length, 0);
+});
+
+test('a read-only native ticker stays running if attaching its replacement is rejected', async t => {
+  const s = await setup(t);
+  s.configure(false); await s.settle();
+  let ticks = 0;
+  const ticker = s.w.setInterval(() => { ticks++; }, 10);
+  t.after(() => s.w.clearInterval(ticker));
+  s.w.Entry.tickTime = 10;
+  Object.defineProperty(s.engine, 'ticker', { value: ticker, writable: false });
+  s.configure(true); await s.settle();
+  await new Promise(resolve => setTimeout(resolve, 35));
+  assert.ok(ticks > 0); assert.equal(s.engine.toggleRun, s.originalRun);
+  assert.equal(s.engine.computeFunction, s.originalTick);
+});
+
+test('if project export cannot be wrapped, live copies cannot reach native saving', async t => {
+  const s = await setup(t);
+  s.configure(false); await s.settle();
+  const entry = { ...s.w.Entry };
+  Object.defineProperty(entry, 'exportProject', { writable: false });
+  s.w.Entry = entry; s.configure(true); await s.settle();
+  assert.equal(s.engine.toggleRun, s.originalRun);
+  s.engine.toggleRun(); assert.equal(s.boots.length, 0); assert.equal(s.counts().nativeTicks, 1);
+});
+
+test('a changed export format falls back to native execution before creating live copies', async t => {
+  const s = await setup(t);
+  (s.work as any).objects = {};
+  s.engine.toggleRun(); await s.settle();
+  assert.equal(s.engine.toggleRun, s.originalRun); assert.equal(s.engine.state, 'run');
+  assert.equal(s.counts().nativeTicks, 1); assert.equal(s.boots.length, 0);
+  assert.equal(s.w.document.querySelector('.entropy-editor-live'), null);
+});
+
+test('preparation failures before a handle exists stop cleanly and permit the next native run', async t => {
+  const s = await setup(t);
+  s.w.ResizeObserver = class { constructor() { throw new Error('cannot observe stage'); } };
+  s.engine.toggleRun(); await s.settle();
+  assert.equal(s.engine.state, 'stop'); assert.equal(s.engine.toggleRun, s.originalRun);
+  assert.equal(s.w.document.getElementById('entryCanvas').style.visibility, '');
+  assert.equal(s.boots.length, 0);
+  s.engine.toggleRun(); assert.equal(s.counts().nativeTicks, 1);
+});
+
+test('a rejected VM module load restores native buttons, canvas and temporary editing state', async t => {
+  const s = await setup(t);
+  s.w.loadModule = async () => { throw new Error('missing module'); };
+  s.engine.toggleRun(); await s.settle();
+  assert.equal(s.engine.state, 'stop'); assert.equal(s.engine.toggleRun, s.originalRun);
+  assert.equal(s.w.document.getElementById('entryCanvas').style.visibility, '');
+  assert.equal(s.w.document.querySelector('.entropy-editor-player'), null);
+  s.engine.toggleRun(); assert.equal(s.counts().nativeTicks, 1);
+});
+
+test('optional actor and scene integration failures leave the replacement VM running', async t => {
+  const s = await setup(t);
+  s.w.beginActorEditing = () => { throw new Error('changed actor controls'); };
+  s.engine.toggleRun(); await s.settle();
+  const vm = s.handles[0].vm;
+  assert.equal(vm.state, 'run');
+  s.w.Entry.scene.selectScene = () => { throw new Error('changed scene API'); };
+  assert.doesNotThrow(() => vm.onSceneChange('first'));
+  assert.equal(vm.state, 'run'); assert.equal(vm.onSceneChange, null);
+  await s.engine.toggleStop(); assert.equal(s.engine.state, 'stop');
+});
+
+test('detach preserves native methods that Entry replaced after the extension attached', async t => {
+  const s = await setup(t);
+  const newPause = () => {};
+  s.engine.togglePause = newPause;
+  s.configure(false); await s.settle();
+  assert.equal(s.engine.togglePause, newPause); assert.equal(s.engine.toggleRun, s.originalRun);
+});
