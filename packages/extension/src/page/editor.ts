@@ -109,21 +109,32 @@ function observeExport(entry: Editor | undefined): void {
   };
 }
 
+function tryCleanup(action: () => void): boolean {
+  try { action(); return true; }
+  catch (error) { console.warn('[entropy] 에디터 정리 중 오류가 발생했습니다', error); return false; }
+}
+
+function restoreActors(current: RunningEditor | null): void {
+  const actors = current?.actors;
+  if (current) current.actors = undefined;
+  tryCleanup(() => actors?.restore());
+}
+
 function finish(): () => void {
   traceEditor('stopping');
   const old = active;
   active = null;
-  old?.actors?.restore();
-  prepared?.handle?.stop();
+  restoreActors(old);
+  const stopped = tryCleanup(() => prepared?.handle?.stop());
   if (prepared) {
     prepared.root.hidden = true;
     prepared.root.tabIndex = -1;
     prepared.root.setAttribute('aria-hidden', 'true');
   }
-  if (prepared?.busy) discard();
+  if (prepared?.busy || !stopped) discard();
   // Restore native code only after toggleStop has restored Entry's edit state.
   return () => {
-    old?.cleanup();
+    tryCleanup(() => old?.cleanup());
     if (old?.live?.applied && prepared) { prepared.source = ''; prepared.requested = ''; }
     if (old?.live) cachedExport = null;
   };
@@ -132,12 +143,12 @@ function finish(): () => void {
 function discard(): void {
   const old = prepared;
   prepared = null;
-  old?.controller.abort();
-  old?.handle?.dispose();
-  if (old?.audioContext && !old.handle) void old.audioContext.close().catch(() => undefined);
-  old?.cloud?.dispose();
-  old?.cleanup();
-  old?.root.remove();
+  tryCleanup(() => old?.controller.abort());
+  tryCleanup(() => old?.handle?.dispose());
+  tryCleanup(() => { if (old?.audioContext && !old.handle) void old.audioContext.close().catch(() => undefined); });
+  tryCleanup(() => old?.cloud?.dispose());
+  tryCleanup(() => old?.cleanup());
+  tryCleanup(() => old?.root.remove());
   if (old) traceEditor('disposed');
 }
 
@@ -233,7 +244,7 @@ function createPrepared(canvas: HTMLCanvasElement, entry: Editor): Prepared {
       layout();
       try { active.actors?.sync(); }
       catch (error) {
-        active.actors?.restore(); active.actors = undefined;
+        restoreActors(active);
         console.warn('[entropy] 오브젝트 속성 표시를 연결하지 못했습니다', error);
       }
     }

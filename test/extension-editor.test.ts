@@ -460,3 +460,32 @@ test('disabling during native stop restores live wrappers before detaching the e
   assert.equal(s.engine.togglePause, nativePause); assert.equal(s.engine.toggleRun, s.originalRun);
   assert.equal(s.handles[0].disposed, true);
 });
+
+for (const failure of ['actor restore', 'renderer stop', 'renderer dispose']) {
+  test(`a failing ${failure} cannot interrupt native stop or leave temporary blocks and canvas behind`, async t => {
+    const s = await setup(t);
+    let restored = false;
+    s.w.beginLiveEditing = (_entry: any, work: any) => {
+      const original = structuredClone(work);
+      (s.work.objects[0] as any).script = 'temporary';
+      return { work: original, applied: false, restore() {
+        restored = true; delete (s.work.objects[0] as any).script;
+      } };
+    };
+    if (failure === 'actor restore') s.w.beginActorEditing = () => ({ sync() {}, restore() { throw new Error(failure); } });
+    s.engine.toggleRun(); await s.settle();
+    const handle = s.handles[0];
+    if (failure !== 'actor restore') {
+      handle.stop = () => { handle.vm.state = 'stop'; throw new Error('lost renderer'); };
+      if (failure === 'renderer dispose') handle.dispose = () => { handle.disposed = true; throw new Error(failure); };
+    }
+    await assert.doesNotReject(s.engine.toggleStop());
+    assert.equal(s.engine.state, 'stop'); assert.equal(s.counts().stops, 1);
+    assert.equal(restored, true); assert.equal(s.w.Entry.exportProject().objects[0].script, undefined);
+    assert.equal(s.w.document.getElementById('entryCanvas').style.visibility, '');
+    if (failure !== 'actor restore') {
+      assert.equal(handle.disposed, true);
+      assert.equal(s.w.document.querySelector('.entropy-editor-player'), null);
+    }
+  });
+}
