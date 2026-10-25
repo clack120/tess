@@ -169,6 +169,7 @@ export class Codegen {
   private readonly liveTypes = new Map<string, string>();
   readonly unknown = new Map<string, number>();
   private needsBlockCounts = false;
+  private compiledBlocks = 0;
   private keys: Set<number> | null = new Set();
 
   private paramSlots: Map<string, number> | null = null;
@@ -198,7 +199,10 @@ export class Codegen {
   }
 
   compile(): CompiledProgram {
-    const steps = this.compileSteps();
+    return this.finish(this.compileSteps());
+  }
+
+  private finish<T>(steps: Generator<void, T, unknown>): T {
     let result = steps.next();
     while (!result.done) result = steps.next();
     return result.value;
@@ -217,7 +221,7 @@ export class Codegen {
 
   private *compileSteps(): Generator<void, CompiledProgram, unknown> {
     for (const fn of this.input.functions) {
-      this.functionSources.push(this.compileFunction(fn));
+      this.functionSources.push(yield* this.compileFunction(fn));
       yield;
     }
     for (const [targetIndex, object] of this.input.objects.entries()) {
@@ -236,7 +240,7 @@ export class Codegen {
         const filter =
           filterIndex === undefined ? null : text(hat.params[filterIndex]);
         if (event === 'keyPress') this.keys?.add(Number(filter));
-        const body = this.compileStack(stack.slice(1), '  ', `object:${object.id}:${hat.id}`);
+        const body = yield* this.compileStack(stack.slice(1), '  ', `object:${object.id}:${hat.id}`);
         this.plans.push({
           targetIndex,
           event,
@@ -250,58 +254,93 @@ export class Codegen {
         yield;
       }
     }
-    return { source: this.emitModule(), plans: this.plans, unknown: this.unknown, keys: this.keys, trace: this.trace };
+    return { source: yield* this.emitModule(), plans: this.plans, unknown: this.unknown, keys: this.keys, trace: this.trace };
   }
 
   // Store a clicked reporter's value in th.state.result for inspection.
   compileProbe(block: RawBlock): string {
     for (const fn of this.input.functions) {
-      this.functionSources.push(this.compileFunction(fn));
+      this.functionSources.push(this.finish(this.compileFunction(fn)));
     }
     const result = this.value(block);
     this.bodies.push(`function* (e, th) {\n  th.state.result = ${result.code};\n}`);
-    return this.emitModule();
+    return this.finish(this.emitModule());
   }
 
   compileStackProbe(stack: RawBlock[]): string {
     for (const fn of this.input.functions) {
-      this.functionSources.push(this.compileFunction(fn));
+      this.functionSources.push(this.finish(this.compileFunction(fn)));
     }
-    this.bodies.push(`function* (e, th) {\n${this.compileStack(stack)}}`);
-    return this.emitModule();
+    this.bodies.push(`function* (e, th) {\n${this.finish(this.compileStack(stack))}}`);
+    return this.finish(this.emitModule());
   }
 
-  private emitModule(): string {
-    const parts: string[] = [];
-    parts.push('"use strict";');
-    parts.push('const O = R.ops, V = R.variables, T = R.targets, C = R.cast;');
-    parts.push('const n = C.num, s = C.str, b = C.bool, nf = C.field;');
-    if (this.needsBlockCounts) parts.push(`const B = ${literal(blockCounts(this.input))};`);
-    parts.push('const F = [];');
-    this.functionSources.forEach((source, index) => {
-      parts.push(`F[${index}] = ${source};`);
-    });
-    const live = this.input.liveEditing
-      ? `, blocks: {${[...this.liveBlocks].map(([id, source]) => `${literal(id)}: ${source}`).join(',\n')}}, sequences: ${literal(Object.fromEntries(this.liveSequences))}, blockTypes: ${literal(Object.fromEntries(this.liveTypes))}, checks: {${[...this.liveChecks].map(([id, source]) => `${literal(id)}: ${source}`).join(',\n')}}`
-      : '';
-    parts.push(`return { scripts: [\n${this.bodies.join(',\n')}\n], functions: F${live} };`);
-    const source = parts.join('\n');
-    let line = 3, column = 1, previous = 0; // new Function adds two header lines.
-    const clean: string[] = [];
-    this.trace.sites = [];
-    for (const match of source.matchAll(/\/\*@entropy:(\d+)\*\//g)) {
-      const gap = source.slice(previous, match.index);
-      clean.push(gap);
-      for (let index = 0; index < gap.length; index++) {
-        const char = gap.charCodeAt(index);
-        if (char === 10 || char === 0x2028 || char === 0x2029) { line++; column = 1; }
-        else column++;
+  // Keep source pieces small enough to yield during serialization and trace
+  // indexing. Markers are removed once, before joining the finished module.
+  private *moduleParts(): Generator<string> {
+    yield '"use strict";\nconst O = R.ops, V = R.variables, T = R.targets, C = R.cast;\nconst n = C.num, s = C.str, b = C.bool, nf = C.field;';
+    if (this.needsBlockCounts) yield `\nconst B = ${literal(blockCounts(this.input))};`;
+    yield '\nconst F = [];';
+    for (const [index, source] of this.functionSources.entries()) yield `\nF[${index}] = ${source};`;
+    yield '\nreturn { scripts: [\n';
+    for (const [index, body] of this.bodies.entries()) yield (index ? ',\n' : '') + body;
+    yield '\n], functions: F';
+    if (this.input.liveEditing) {
+      yield ', blocks: {';
+      let separator = '';
+      for (const [id, source] of this.liveBlocks) {
+        yield `${separator}${literal(id)}: ${source}`;
+        separator = ',\n';
       }
-      previous = match.index + match[0].length;
-      const block = this.traceBlocks[Number(match[1])]!;
-      this.trace.sites.push({ line, column, blockId: block.id, blockType: block.type });
+      yield '}, sequences: ';
+      yield* this.recordParts(this.liveSequences);
+      yield ', blockTypes: ';
+      yield* this.recordParts(this.liveTypes);
+      yield ', checks: {';
+      separator = '';
+      for (const [id, source] of this.liveChecks) {
+        yield `${separator}${literal(id)}: ${source}`;
+        separator = ',\n';
+      }
+      yield '}';
     }
-    clean.push(source.slice(previous));
+    yield ' };';
+  }
+
+  private *recordParts(entries: Map<string, string | string[]>): Generator<string> {
+    // Retain JSON's property ordering, including numeric block IDs.
+    const pairs = Object.entries(Object.fromEntries(entries));
+    yield '{';
+    for (let index = 0; index < pairs.length; index += 128) {
+      yield (index ? ',' : '') + literal(Object.fromEntries(pairs.slice(index, index + 128))).slice(1, -1);
+    }
+    yield '}';
+  }
+
+  private *emitModule(): Generator<void, string, unknown> {
+    let line = 3, column = 1; // new Function adds two header lines.
+    const clean: string[] = [];
+    let emitted = 0;
+    this.trace.sites = [];
+    const advance = (part: string) => {
+      clean.push(part);
+      emitted += part.length;
+      let end = -1;
+      for (const match of part.matchAll(/[\n\u2028\u2029]/g)) { line++; end = match.index; }
+      column = end < 0 ? column + part.length : part.length - end;
+    };
+    for (const part of this.moduleParts()) {
+      let previous = 0;
+      for (const match of part.matchAll(/\/\*@entropy:(\d+)\*\//g)) {
+        advance(part.slice(previous, match.index));
+        previous = match.index + match[0].length;
+        const block = this.traceBlocks[Number(match[1])]!;
+        this.trace.sites.push({ line, column, blockId: block.id, blockType: block.type });
+        if (emitted >= 16_384) { emitted = 0; yield; }
+      }
+      advance(part.slice(previous));
+      if (emitted >= 16_384) { emitted = 0; yield; }
+    }
     return `${clean.join('')}\n//# sourceURL=${this.trace.sourceId}`;
   }
 
@@ -309,7 +348,7 @@ export class Codegen {
     return `/*@entropy:${this.traceBlocks.push(block) - 1}*/`;
   }
 
-  private compileFunction(fn: FunctionEntry): string {
+  private *compileFunction(fn: FunctionEntry): Generator<void, string, unknown> {
     // Intercept the save manager's empty functions here instead of through an extension.
     const saving = pick(SAVE_FUNCTIONS, functionLabel(fn.content));
     if (saving) {
@@ -333,7 +372,7 @@ export class Codegen {
       .join(', ');
     const previousLabel = this.funcLabel;
     this.funcLabel = 'fn';
-    const body = this.compileStack(functionBody(stack!), '    ', `function:${fn.id}`);
+    const body = yield* this.compileStack(functionBody(stack!), '    ', `function:${fn.id}`);
     this.funcLabel = previousLabel;
 
     // Beyond the depth limit, a call runs no body and produces no value.
@@ -370,30 +409,32 @@ export class Codegen {
     return this.funcLabel ? `break ${this.funcLabel};` : 'return;';
   }
 
-  private compileStack(blocks: RawBlock[], indent = '  ', sequenceId = 'probe'): string {
+  private *compileStack(blocks: RawBlock[], indent = '  ', sequenceId = 'probe'): Generator<void, string, unknown> {
     if (this.input.liveEditing) {
-      const ids = blocks.map((block, index) => block.id ?? `${sequenceId}:${index}`);
+      const ids: string[] = [];
       this.liveSequences.set(sequenceId, ids);
-      blocks.forEach((block, index) => {
-        const id = ids[index]!;
+      for (const [index, block] of blocks.entries()) {
+        const id = block.id ?? `${sequenceId}:${index}`;
+        ids.push(id);
         this.liveTypes.set(id, block.type);
-        const body = this.statement({ ...block, id }, '  ');
+        const current = { ...block, id };
+        const marker = this.marker(current);
+        const body = marker + (yield* this.statementCode(current, '  '));
         this.liveBlocks.set(id, `function* (ctx, th) { let e = ctx.entity; const P = ctx.params, L = ctx.locals;\n${body}}`);
-      });
+        if (++this.compiledBlocks % 32 === 0) yield;
+      }
       return `${indent}yield R.liveCode.sequence(${literal(sequenceId)}, ctx, th);\n`;
     }
-    let out = '';
+    const out: string[] = [];
     for (const block of blocks) {
-      out += this.statement(block, indent);
+      const marker = this.marker(block);
+      out.push(marker + (yield* this.statementCode(block, indent)));
+      if (++this.compiledBlocks % 32 === 0) yield;
     }
-    return out;
+    return out.join('');
   }
 
-  private statement(block: RawBlock, ind: string): string {
-    return this.marker(block) + this.statementCode(block, ind);
-  }
-
-  private statementCode(block: RawBlock, ind: string): string {
+  private *statementCode(block: RawBlock, ind: string): Generator<void, string, unknown> {
     const p = block.params;
     const line = (code: string) => `${ind}${code}\n`;
 
@@ -503,28 +544,28 @@ export class Codegen {
       case 'wait_second':
         return line(`yield* O.waitSecond(${this.num(p[0])});`);
       case 'repeat_basic':
-        return this.repeatBasic(block, ind);
+        return yield* this.repeatBasic(block, ind);
       case 'repeat_inf':
-        return this.loop(`while (${this.liveCheck(block.id, 'true')}) {`, block.statements?.[0] ?? [], ind, false, block.id);
+        return yield* this.loop(`while (${this.liveCheck(block.id, 'true')}) {`, block.statements?.[0] ?? [], ind, false, block.id);
       // Maze loops cost no frame; guard nonempty bodies and skip empty ones, matching Entry.
       case 'ai_repeat_until_reach':
         return block.statements?.[0]?.length
-          ? this.loop(`while (true) {`, block.statements[0], ind, true, block.id)
+          ? yield* this.loop(`while (true) {`, block.statements[0], ind, true, block.id)
           : '';
       case 'repeat_while_true':
-        return this.repeatWhile(block, ind);
+        return yield* this.repeatWhile(block, ind);
       case '_if':
         return (
           line(`if (${this.bool(p[0])}) {`) +
-          this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`) +
+          (yield* this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`)) +
           line('}')
         );
       case 'if_else':
         return (
           line(`if (${this.bool(p[0])}) {`) +
-          this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`) +
+          (yield* this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`)) +
           line('} else {') +
-          this.compileStack(block.statements?.[1] ?? [], `${ind}  `, `${block.id}:1`) +
+          (yield* this.compileStack(block.statements?.[1] ?? [], `${ind}  `, `${block.id}:1`)) +
           line('}')
         );
       case 'wait_until_true': {
@@ -739,13 +780,13 @@ export class Codegen {
     );
   }
 
-  private repeatBasic(block: RawBlock, ind: string): string {
+  private *repeatBasic(block: RawBlock, ind: string): Generator<void, string, unknown> {
     const count = this.num(block.params[0]);
     const depth = this.loopDepth;
     const varName = `i${depth}`;
     this.loopDepth += 1;
     this.spinning.push(false);
-    const inner = this.loopBody(this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`), ind);
+    const inner = this.loopBody((yield* this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`)), ind);
     const spins = this.spinning.pop() ?? false;
     this.loopDepth -= 1;
     const head = spins ? `, s${depth} = 0, m${depth} = O.frame()` : '';
@@ -758,10 +799,10 @@ export class Codegen {
     );
   }
 
-  private repeatWhile(block: RawBlock, ind: string): string {
+  private *repeatWhile(block: RawBlock, ind: string): Generator<void, string, unknown> {
     const until = text(block.params[1] ?? 'until') === 'until';
     const condition = until ? `!(${this.bool(block.params[0])})` : this.bool(block.params[0]);
-    return this.loop(`while (${this.liveCheck(block.id, condition)}) {`, block.statements?.[0] ?? [], ind, false, block.id);
+    return yield* this.loop(`while (${this.liveCheck(block.id, condition)}) {`, block.statements?.[0] ?? [], ind, false, block.id);
   }
 
   private liveCheck(id: string, expression: string): string {
@@ -778,11 +819,11 @@ export class Codegen {
 
   // Loop iterations cost a frame unless the body skips yielding.
   // Frameless loops still need the spin guard to yield when stuck.
-  private loop(header: string, body: RawBlock[], ind: string, frameless = false, id = ''): string {
+  private *loop(header: string, body: RawBlock[], ind: string, frameless = false, id = ''): Generator<void, string, unknown> {
     const depth = this.loopDepth;
     this.loopDepth += 1;
     this.spinning.push(false);
-    const inner = this.loopBody(this.compileStack(body, `${ind}  `, `${id}:0`), ind);
+    const inner = this.loopBody(yield* this.compileStack(body, `${ind}  `, `${id}:0`), ind);
     const spins = (this.spinning.pop() ?? false) || frameless;
     this.loopDepth -= 1;
     const tail = frameless ? '' : `${ind}  yield 0;\n`;
