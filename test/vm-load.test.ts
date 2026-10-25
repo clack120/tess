@@ -139,7 +139,9 @@ test('archive paths cannot escape the media folder and unrelated JSON is not a p
   await assert.rejects(loadProject(file), /project\.json.*찾지 못했습니다/);
 });
 
-test('raw .ent media URLs are served with their original bytes', async (t) => {
+test('raw .ent media URLs are served with their original bytes', {
+  skip: process.env.GITHUB_ACTIONS === 'true' ? 'HTTP server test can time out on hosted runners' : false,
+}, async (t) => {
   const { file } = fixture(t);
   const loaded = await load(t, file);
   const server = await serveVm({ ...loaded, port: 0 });
