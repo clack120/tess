@@ -1,3 +1,5 @@
+import { parseEntryBlockData } from '@entropy/core';
+
 export interface RawBlock {
   id: string;
   type: string;
@@ -17,19 +19,14 @@ export function isBlock(value: unknown): value is RawBlock {
 }
 
 export function parseScript(script: string | RawBlock[][] | undefined): RawBlock[][] {
-  if (!script) {
+  if (!script || (typeof script === 'string' && !script.trim())) {
     return [];
   }
-  if (typeof script === 'string') {
-    if (!script.trim()) {
-      return [];
-    }
-    try {
-      script = JSON.parse(script) as RawBlock[][];
-    } catch (error) {
-      console.warn('[entropy] 스크립트를 읽지 못해 이 오브젝트의 블록을 건너뜁니다', error);
-      return [];
-    }
+  try {
+    script = parseEntryBlockData<RawBlock>(script);
+  } catch (error) {
+    console.warn('[entropy] 스크립트를 읽지 못해 이 오브젝트의 블록을 건너뜁니다', error);
+    return [];
   }
   // Visit containers only; a JSON reviver also calls back for every scalar field.
   const pending: object[] = [script];

@@ -734,7 +734,10 @@ export function functionDeclarationLines(
     ...indent(locals),
     ...body,
   ];
-  if (isValue) lines.push(...indent([`return ${returnExpr}`]));
+  if (isValue) {
+    if (body.length || locals.length) lines.push("");
+    lines.push(...indent([`return ${returnExpr}`]));
+  }
   lines.push("end");
   return lines;
 }

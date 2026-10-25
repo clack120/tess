@@ -899,6 +899,27 @@ test('Entry 검증기는 손상된 project.json도 예외 대신 구체적인 �
   assert.ok(malformed.some((problem) => problem.includes('statements 가 배열이 아닙니다')));
 });
 
+test('Entry 검증기는 배열 스크립트와 함수도 검사하고 손상된 저장값을 거절한다', () => {
+  const { project } = compileScript('say value(3)', {
+    before: 'function value(n):\n  return n + 1\nend',
+  });
+  const raw: any = structuredClone(project!);
+  for (const object of raw.objects) object.script = JSON.parse(object.script);
+  for (const fn of raw.functions) fn.content = JSON.parse(fn.content);
+  assert.deepEqual(verifyEntryProject(raw), []);
+
+  const script = raw.objects[0].script;
+  for (const value of [undefined, null, '', 'null', '{}', {}]) {
+    raw.objects[0].script = value;
+    assert.ok(verifyEntryProject(raw).some((problem) => problem.includes('script')));
+  }
+  raw.objects[0].script = script;
+  for (const value of [undefined, null, '', 'null', '{}', {}]) {
+    raw.functions[0].content = value;
+    assert.ok(verifyEntryProject(raw).some((problem) => problem.includes('content')));
+  }
+});
+
 test('Entry 검증기는 매우 깊은 블록도 호출 스택을 넘치지 않고 검사한다', () => {
   const depth = 10_000;
   const open = Array.from({ length: depth }, (_, index) =>

@@ -15,6 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { parseEntryBlockData } from '@entropy/core';
 import type {
   AssetFile,
   CompileCache,
@@ -349,7 +350,7 @@ async function runBuild(file: string, options: CliOptions): Promise<number> {
 
   const project = result.project!;
   const blocks = project.objects.reduce(
-    (sum: number, o) => sum + countBlocks(JSON.parse(o.script)),
+    (sum: number, o) => sum + countBlocks(parseEntryBlockData(o.script)),
     0,
   );
   out.note(

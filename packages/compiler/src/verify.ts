@@ -1,5 +1,5 @@
 import { BLOCK_PARAM_COUNTS } from './block-params.ts';
-import { expansionBlock } from '@entropy/core';
+import { expansionBlock, parseEntryBlockData } from '@entropy/core';
 import type { EntryProject } from './types.ts';
 
 type AnyBlock = Record<string, any>;
@@ -99,7 +99,7 @@ export function verifyEntryProject(
   const functionParamCounts = new Map<string, number>();
   for (const fn of functions) {
     try {
-      const create = JSON.parse(fn.content)?.[0]?.[0];
+      const create = parseEntryBlockData<AnyBlock>(fn.content)?.[0]?.[0];
       let count = 0;
       let field = create?.params?.[0];
       while (field && typeof field === 'object') {
@@ -263,9 +263,9 @@ export function verifyEntryProject(
     blockIds = new Set();
     let script;
     try {
-      script = JSON.parse(object.script);
+      script = parseEntryBlockData<AnyBlock>(object.script);
     } catch {
-      add(`${label}: script 가 JSON 문자열이 아닙니다.`);
+      add(`${label}: script 가 JSON 문자열 또는 블록 배열이 아닙니다.`);
       continue;
     }
     if (!Array.isArray(script)) {
@@ -285,9 +285,9 @@ export function verifyEntryProject(
     blockIds = new Set();
     let content;
     try {
-      content = JSON.parse(fn.content);
+      content = parseEntryBlockData<AnyBlock>(fn.content);
     } catch {
-      add(`함수 '${fn.id}': content 가 JSON 문자열이 아닙니다.`);
+      add(`함수 '${fn.id}': content 가 JSON 문자열 또는 블록 배열이 아닙니다.`);
       continue;
     }
     const create = content?.[0]?.[0];

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { parseEntryBlockData } from '@entropy/core';
 import { stripTypes } from '@entropy/core/strip-types';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -130,7 +131,7 @@ export function serveProject({
     const summary = {
       scenes: currentProject.scenes.length,
       objects: currentProject.objects.length,
-      blocks: currentProject.objects.reduce((sum: number, object) => sum + countBlocks(JSON.parse(object.script)), 0),
+      blocks: currentProject.objects.reduce((sum: number, object) => sum + countBlocks(parseEntryBlockData(object.script)), 0),
     };
     return playerPage({ name, base, mediaBase, summary, entName, reload, boost });
   };

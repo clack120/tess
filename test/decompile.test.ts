@@ -444,6 +444,29 @@ function hardcodedFunctionProject(shapeValue: any, { shared = false } = {}) {
   };
 }
 
+for (const shared of [false, true]) {
+  test(`배열로 저장된 스크립트와 함수도 본문·변수 복구·리소스 참조를 보존한다 (shared=${shared})`, () => {
+    const project: RawEntity = hardcodedFunctionProject(
+      (value: any) => ({ type: 'text', params: [value] }), { shared },
+    );
+    const script = JSON.parse(project.objects[0].script);
+    script[0].push({ type: 'set_variable', params: [
+      'deleted', { type: 'number', params: ['1'] }, null,
+    ] });
+    project.objects[0].script = JSON.stringify(script);
+    const expected = decompileProject(project, []);
+
+    for (const object of project.objects) object.script = JSON.parse(object.script);
+    for (const fn of project.functions) fn.content = JSON.parse(fn.content);
+    const actual = decompileProject(project, []);
+
+    assert.deepEqual(actual, expected);
+    assert.match(actual.source, /^var missing_var_deleted = 0$/m);
+    const fragment = utf8(actual.assets.find((asset) => asset.path === 'objects/주인공.etp')!.data);
+    assert.match(fragment, /^when start do\n  점프하기\(\)\n  missing_var_deleted = 1\nend$/m);
+  });
+}
+
 function recompileResult(result: any, prefix: any) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const mainFile = path.join(dir, 'main.etp');

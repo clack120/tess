@@ -1,11 +1,10 @@
 import { imageSize } from '../../compiler/src/assets.ts';
 import { append, safeIdentifier, entropyString, entropyNumber, entropyLiteral, entropyComment, displayNamePart } from './ident.ts';
-import { autoParamName } from '@entropy/core';
-import { blocksToLines, commentLines, indent, functionDeclarationLines, colorExpr } from './stmt.ts';
 import {
-  KEY_CODES, STORE_PREFIX, STORE_SAVE_ASYNC_FUNCTION, STORE_SAVE_FUNCTION,
-  tableRowCells, tableRows,
+  autoParamName, KEY_CODES, parseEntryBlockData, STORE_PREFIX, STORE_SAVE_ASYNC_FUNCTION,
+  STORE_SAVE_FUNCTION, tableRowCells, tableRows,
 } from '@entropy/core';
+import { blocksToLines, commentLines, indent, functionDeclarationLines, colorExpr } from './stmt.ts';
 import type {
   DecompileContext, DecompileOptions, DecompileResult,
   FunctionField, FunctionLocal, RawBlock, RawEntity,
@@ -173,7 +172,7 @@ function decompileProjectUnchecked(
     // Save manager stubs become save statements and need no declarations.
     if (entry.saveKind) continue;
     try {
-      const content = JSON.parse(fn.content ?? '[]');
+      const content = parseEntryBlockData<RawBlock>(fn.content ?? []);
       const createBlock = functionCreateBlock(content);
       if (!createBlock) continue;
       append(lines, functionDeclarationLines(entry, createBlock, ctx));
@@ -284,8 +283,8 @@ function touchedVariableNames(content: unknown, ctx: DecompileContext): Set<stri
 // Declare placeholders for deleted variables so their remaining references still compile.
 function reviveDanglingVariables(project: RawEntity, ctx: DecompileContext, usedNames: Set<string>) {
   const found: VariableIds = { variables: new Set(), lists: new Set() };
-  const scan = (text: string | undefined) => {
-    try { variableIdsIn(JSON.parse(text ?? '[]'), found); } catch { }
+  const scan = (data: unknown) => {
+    try { variableIdsIn(parseEntryBlockData<RawBlock>(data ?? []), found); } catch { }
   };
   for (const object of project.objects ?? []) scan(object.script);
   for (const fn of project.functions ?? []) scan(fn.content);
@@ -491,7 +490,7 @@ function buildContext(
     let fields: FunctionField[] = [];
     let content: unknown = [];
     try {
-      content = JSON.parse(fn.content ?? '[]');
+      content = parseEntryBlockData<RawBlock>(fn.content ?? []);
       fields = readFunctionFields(functionCreateBlock(content));
     } catch { /* Fall back to the function ID if its header cannot be read. */ }
 
@@ -540,7 +539,7 @@ function buildContext(
   // Keep global resource IDs; functions owned by one object can use resource names instead.
   for (const fn of project.functions ?? []) {
     let content = null;
-    try { content = JSON.parse(fn.content ?? '[]'); } catch { }
+    try { content = parseEntryBlockData<RawBlock>(fn.content ?? []); } catch { }
     if (!content) continue;
 
     const ownerId = soleResourceOwner(content, ctx);
@@ -779,7 +778,7 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
 
   let threads: RawBlock[][] = [];
   try {
-    threads = JSON.parse(object.script ?? '[]');
+    threads = parseEntryBlockData<RawBlock>(object.script ?? []);
   } catch (error) {
     ctx.warnings.add(`오브젝트 '${info.displayName}' 의 스크립트를 읽지 못했습니다: ${(error as Error).message}`);
   }

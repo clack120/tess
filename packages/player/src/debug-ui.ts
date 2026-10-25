@@ -17,6 +17,18 @@ const DEFAULT_SECTION_HEIGHT = 200;
 const STICKY = 56;
 const sticky = (size: number) => (size < STICKY ? 0 : size);
 
+// This file is served directly to browsers, so keep its parser self-contained.
+function parseEntryBlockData(value: any): any[][] {
+  let parsed = value;
+  if (parsed == null) return [];
+  if (typeof parsed === 'string') {
+    if (!parsed.trim()) return [];
+    parsed = JSON.parse(parsed);
+  }
+  if (!Array.isArray(parsed)) throw new TypeError('Entry 블록 데이터가 배열이 아닙니다.');
+  return parsed;
+}
+
 const panel = document.getElementById("debug-panel")!;
 
 let scheduled = false;
@@ -447,7 +459,7 @@ const describeFunction = (fn: any) => {
   let params = 0;
   let kind = "일반 함수";
   try {
-    const create = JSON.parse(fn.content || "[]")[0][0];
+    const create = parseEntryBlockData(fn.content)[0]?.[0];
     if (create && create.type === "function_create_value") kind = "값 함수";
     let node = create && create.params && create.params[0];
     const labels = [];
@@ -631,7 +643,7 @@ const showObject = (object: any, instance = 0) => {
   state.currentName = object.name;
   state.currentInstance = Math.max(0, Number(instance) || 0);
   try {
-    currentThreads = JSON.parse(object.script);
+    currentThreads = parseEntryBlockData(object.script);
   } catch (error) {
     currentThreads = [];
   }
@@ -1632,7 +1644,7 @@ window.entropyRenderProjectDebug = function renderProjectDebug(loaded) {
   for (const fn of project.functions || []) {
     try {
       // Accept both inline function bodies and bodies nested inside the definition block.
-      const stack = JSON.parse(fn.content || "[]")[0] || [];
+      const stack = parseEntryBlockData(fn.content)[0] || [];
       const create = stack[0];
       const nested = create && create.statements && create.statements[0];
       functionContentById.set(
@@ -1647,7 +1659,7 @@ window.entropyRenderProjectDebug = function renderProjectDebug(loaded) {
 
   for (const object of project.objects) {
     try {
-      indexBlocks(JSON.parse(object.script), object);
+      indexBlocks(parseEntryBlockData(object.script), object);
     } catch (e) {
     }
   }
