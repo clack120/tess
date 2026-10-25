@@ -2,16 +2,21 @@ import { assetCacheSize, clearAssetCache, onAssetCacheChange } from '../../../vm
 
 let timer: ReturnType<typeof setTimeout> | undefined;
 let version = 0;
+let reporting = false;
 function report(): void {
   version++;
-  if (timer !== undefined) return;
+  if (timer !== undefined || reporting) return;
   timer = setTimeout(() => {
     timer = undefined;
     const current = version;
+    reporting = true;
     void assetCacheSize().then(
       size => { if (current === version) window.postMessage({ __entropy: 'cache-size', ...size }, location.origin); },
       error => console.warn('[entropy] 에셋 캐시 용량을 읽지 못했습니다', error),
-    );
+    ).finally(() => {
+      reporting = false;
+      if (current !== version) report();
+    });
   }, 1000);
 }
 onAssetCacheChange(report);

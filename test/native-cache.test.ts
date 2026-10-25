@@ -4,6 +4,28 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { stripTypes } from '@entropy/core/strip-types';
 
+test('slow cache censuses never overlap and one final report includes changes made during the scan', async () => {
+  let changed!: () => void;
+  const timers: Array<() => void> = [], scans: Array<(size: unknown) => void> = [], messages: unknown[] = [];
+  const context = vm.createContext({
+    onAssetCacheChange(fn: () => void) { changed = fn; }, clearAssetCache() {},
+    setTimeout(fn: () => void) { timers.push(fn); return timers.length; },
+    assetCacheSize: () => new Promise(resolve => scans.push(resolve)),
+    window: { postMessage: (message: unknown) => messages.push(message) }, location: { origin: 'https://playentry.org' },
+  });
+  const source = stripTypes(fs.readFileSync(new URL('../packages/extension/src/page/cache.ts', import.meta.url), 'utf8'))
+    .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+  vm.runInContext(source, context);
+  changed(); timers.shift()!();
+  for (let i = 0; i < 20; i++) changed();
+  assert.equal(timers.length, 0); assert.equal(scans.length, 1);
+  scans[0]!({ count: 1, bytes: 1 }); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(messages.length, 0, 'the old snapshot is not published as current');
+  assert.equal(timers.length, 1); timers.shift()!();
+  scans[1]!({ count: 21, bytes: 21 }); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(messages.length, 1); assert.equal(timers.length, 0);
+});
+
 function setup() {
   const changes: boolean[] = [], deleted: number[] = [], revoked: string[] = [];
   const pending: Array<{ url: string; signal: AbortSignal; resolve(value: Response): void; reject(error: unknown): void }> = [];

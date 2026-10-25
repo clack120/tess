@@ -6,6 +6,9 @@ import {
   type FunctionEntry,
   type RawBlock,
 } from '../compile/codegen.ts';
+import { blockCounts } from '../compile/block-count.ts';
+import { LiveCode, type LiveProgram } from './live-code.ts';
+import { loadYield } from '../web/load-yield.ts';
 import { attachJsKernel, CALL_DEPTH_LIMIT, type KernelHandle } from '../kernel/bridge.ts';
 import { planKernel, type KernelPlan } from '../kernel/plan.ts';
 import { CollisionSystem } from '../collision/detect.ts';
@@ -92,7 +95,7 @@ export interface Renderer extends RendererLike, Partial<TextMeasurer> {
   setBoost?(on: boolean): void;
 }
 
-type ProgramFactory = (runtime: Vm) => {
+type ProgramFactory = (runtime: Vm) => LiveProgram & {
   scripts: CompiledScript['body'][];
   functions: CompiledFunction[];
 };
@@ -145,6 +148,7 @@ export const GUEST = ' ';
 const STORE_FLUSH_MS = 1000;
 
 export interface VmOptions {
+  liveEditing?: boolean;
   renderer?: Renderer | null;
   audio?: AudioEngine | null;
   speech?: SpeechEngine | null;
@@ -203,6 +207,7 @@ export interface VmError {
 }
 
 export class Vm implements Project {
+  readonly liveCode: LiveCode | null;
   scenes: Scene[] = [];
   targets: Target[] = [];
   variables: Variable[] = [];
@@ -280,6 +285,8 @@ export class Vm implements Project {
   unknownBlocks = new Map<string, number>();
   // A null key set means the work may read any key.
   usedKeys: Set<number> | null = new Set();
+  // Untouched generators keep their compiled constants across live edits.
+  liveBlockCounts: Record<string, number> | null = null;
   private compileInput: CompileInput | null = null;
   private compiledProgram: CompiledProgram | null = null;
   private compiledFactory: ProgramFactory | null = null;
@@ -287,6 +294,7 @@ export class Vm implements Project {
   private functionScripts = new Map<number, ParsedSource>();
 
   constructor(options: VmOptions = {}) {
+    this.liveCode = options.liveEditing ? new LiveCode() : null;
     this.renderer = options.renderer ?? null;
     this.audio = options.audio ?? null;
     this.speech = options.speech ?? null;
@@ -459,6 +467,7 @@ export class Vm implements Project {
   }
 
   private compile(project: EntryProjectLike): void {
+    this.liveBlockCounts = null;
     let cacheable = true;
     const nextObjectScripts = new Map<number, ParsedSource>();
     const nextFunctionScripts = new Map<number, ParsedSource>();
@@ -474,6 +483,7 @@ export class Vm implements Project {
       return value;
     };
     const input: CompileInput = {
+      liveEditing: this.liveCode !== null,
       objects: project.objects.map((raw, index) => ({
         id: String(raw.id),
         scene: String(raw.scene ?? this.targetOf(String(raw.id))?.sceneId ?? this.currentSceneId),
@@ -505,6 +515,7 @@ export class Vm implements Project {
     this.unknownBlocks = new Map(program.unknown);
     this.usedKeys = program.keys ? new Set(program.keys) : null;
     const built = factory(this);
+    this.liveCode?.install(built, program.trace);
     built.scripts.forEach(body => this.traces.set(body, program.trace));
     // Identify function frames by their generator prototypes.
     this.functionOf = new WeakMap();
@@ -572,13 +583,148 @@ export class Vm implements Project {
     }
   }
 
+  // Rebuild executable code without reloading entities, clones, variables or assets.
+  // Editor dispatch preserves active blocks; other hosts restart edited stacks
+  // because their compiled generators cannot change their instruction pointer.
+  patchCode(project: Pick<EntryProjectLike, 'objects' | 'functions'>): number {
+    const change = this.prepareCodePatch(project);
+    return change ? this.commitCodePatch(change, new Codegen(change.input).compile()) : 0;
+  }
+
+  async patchCodeAsync(project: Pick<EntryProjectLike, 'objects' | 'functions'>, signal?: AbortSignal): Promise<number> {
+    signal?.throwIfAborted();
+    const change = this.prepareCodePatch(project);
+    if (!change) return 0;
+    const program = await new Codegen(change.input).compileAsync(loadYield(), signal);
+    signal?.throwIfAborted();
+    if (this.compileInput !== change.previous || this.state === 'stop') throw new Error('실행이 중단되어 갱신을 취소했습니다.');
+    return this.commitCodePatch(change, program);
+  }
+
+  private prepareCodePatch(project: Pick<EntryProjectLike, 'objects' | 'functions'>) {
+    const previous = this.compileInput;
+    if (!previous) return null;
+    const key = (value: unknown) => JSON.stringify(value, (_name, item) => {
+      if (item && typeof item.id === 'string' && typeof item.type === 'string' &&
+        ('params' in item || 'statements' in item)) {
+        return { id: item.id, type: item.type, params: item.params ?? [], statements: item.statements ?? [] };
+      }
+      return item;
+    });
+    const objects = new Map(project.objects.map(object => [String(object.id), object]));
+    const functionScripts = new Map<number, ParsedSource>();
+    const input: CompileInput = { ...previous,
+      objects: previous.objects.map(object => ({ ...object,
+        script: objects.has(object.id) ? parseScript(objects.get(object.id)!.script as string) : object.script,
+      })),
+      functions: project.functions.map((fn, index) => {
+        const raw = fn.content;
+        const cached = this.functionScripts.get(index);
+        const content = typeof raw === 'string' && cached?.raw === raw ? cached.parsed : parseScript(raw as string);
+        if (typeof raw === 'string') functionScripts.set(index, { raw, parsed: content });
+        return { id: String(fn.id), type: String(fn.type ?? 'normal'), content,
+          localVariables: (fn.localVariables as FunctionEntry['localVariables']) ?? [] };
+      }),
+    };
+    const functionsChanged = previous.functions.length !== input.functions.length || input.functions.some((fn, index) => {
+      const old = previous.functions[index]!;
+      return old.id !== fn.id || old.type !== fn.type || key(old.localVariables) !== key(fn.localVariables) ||
+        (old.content !== fn.content && key(old.content) !== key(fn.content));
+    });
+    if (!functionsChanged && input.objects.every((object, index) => {
+      const old = previous.objects[index]!;
+      return old.script === object.script || key(old.script) === key(object.script);
+    })) return null;
+    return { previous, input, functionsChanged, key, functionScripts };
+  }
+
+  private commitCodePatch(change: NonNullable<ReturnType<Vm['prepareCodePatch']>>, factoryProgram: CompiledProgram): number {
+    const { previous, input, functionsChanged, key, functionScripts } = change;
+    const unsupported = [...factoryProgram.unknown].filter(([type, count]) => count > (this.unknownBlocks.get(type) ?? 0));
+    if (unsupported.length) {
+      throw new Error(`현재 실행기에 없는 블록 또는 변수가 있습니다: ${unsupported.slice(0, 6).map(([type]) => type).join(', ')}`);
+    }
+    const factory = new Function('R', factoryProgram.source) as ProgramFactory;
+    const built = factory(this); // Compile completely before replacing any running code.
+    const counts = blockCounts(input);
+    this.liveCode?.install(built, factoryProgram.trace);
+    built.scripts.forEach(body => this.traces.set(body, factoryProgram.trace));
+    this.rememberFunctions(built.functions, input.functions);
+    this.installKernel(input, built.functions);
+    this.rememberFunctions(built.functions, input.functions);
+    const signatures = (script: RawBlock[][]) => new Map(script.map(stack => [stack[0]?.id, key(stack)]));
+    let restarted = 0;
+    for (let index = 0; index < this.targets.length; index++) {
+      const target = this.targets[index]!;
+      const before = this.liveCode ? null : signatures(previous.objects[index]!.script as RawBlock[][]);
+      const after = this.liveCode ? null : signatures(input.objects[index]!.script as RawBlock[][]);
+      const old = new Map(target.scripts.map(script => [script.blockId, script]));
+      const changed = new Set<string>();
+      const scripts = factoryProgram.plans.filter(plan => plan.targetIndex === index).map(plan => {
+        const kept = old.get(plan.blockId);
+        if (kept && (this.liveCode ? kept.event === plan.event && kept.filter === plan.filter
+          : !functionsChanged && before!.get(plan.blockId) === after!.get(plan.blockId))) return kept;
+        changed.add(plan.blockId);
+        return { event: plan.event, filter: plan.filter, blockId: plan.blockId, body: built.scripts[plan.index]! };
+      });
+      const next = new Map(scripts.map(script => [script.blockId, script]));
+      const restartedEntities = new Map<CompiledScript, Set<Entity>>();
+      for (const thread of target.threads) {
+        if (this.liveCode) {
+          if (thread.script.event === 'probe') continue;
+          const replacement = next.get(thread.script.blockId);
+          if (!replacement) thread.stop();
+          else {
+            thread.script = replacement;
+            thread.pruneLiveFrames(frame => this.liveCode!.contains(frame));
+          }
+          continue;
+        }
+        if (thread.script.event === 'probe' && !functionsChanged) continue;
+        const replacement = next.get(thread.script.blockId);
+        if (!replacement || changed.has(thread.script.blockId)) {
+          if (!thread.done && replacement && replacement.event === thread.script.event && replacement.filter === thread.script.filter &&
+            this.state !== 'stop' && target.sceneId === this.currentSceneId && !thread.entity.removed) {
+            thread.restart(replacement);
+            const entities = restartedEntities.get(replacement) ?? new Set<Entity>();
+            entities.add(thread.entity); restartedEntities.set(replacement, entities);
+            restarted++;
+          } else thread.stop();
+        }
+      }
+      target.threads = target.threads.filter(thread => !thread.done);
+      target.scripts = scripts;
+      if (!this.liveCode && target.sceneId === this.currentSceneId && this.state !== 'stop') {
+        for (const script of scripts) {
+          if (script.event === 'start' && changed.has(script.blockId)) {
+            const entities = restartedEntities.get(script);
+            target.forEachEntity(entity => {
+              if (!entity.removed && !entities?.has(entity)) {
+                target.threads.push(new Thread(target, entity, script)); restarted++;
+              }
+            });
+          }
+        }
+      }
+    }
+    this.scripts = this.targets.flatMap(target => target.scripts);
+    this.compileInput = input;
+    this.liveBlockCounts = counts;
+    this.compiledProgram = factoryProgram;
+    this.compiledFactory = factory;
+    this.objectScripts.clear(); this.functionScripts = functionScripts;
+    this.unknownBlocks = new Map(factoryProgram.unknown);
+    this.usedKeys = factoryProgram.keys ? new Set(factoryProgram.keys) : null;
+    return restarted;
+  }
+
   // Step waiting reporter blocks across frames until completion or the evaluation timeout.
   async evaluate(block: RawBlock, targetId: string, timeoutMs = 5000): Promise<unknown> {
     const target = this.targetOf(targetId);
     if (!target || !this.compileInput) {
       return undefined;
     }
-    const codegen = new Codegen(this.compileInput);
+    const codegen = new Codegen({ ...this.compileInput, liveEditing: false });
     const source = codegen.compileProbe(block);
     const built = (new Function('R', source) as (runtime: Vm) => { scripts: CompiledScript['body'][]; functions: CompiledFunction[] })(this);
     built.scripts.forEach(body => this.traces.set(body, codegen.trace));
@@ -621,7 +767,7 @@ export class Vm implements Project {
     const input = extraFunctions.length
       ? { ...this.compileInput, functions: [...this.compileInput.functions, ...extraFunctions] }
       : this.compileInput;
-    const codegen = new Codegen(input);
+    const codegen = new Codegen({ ...input, liveEditing: false });
     const source = codegen.compileStackProbe(stack);
     const built = (new Function('R', source) as (runtime: Vm) => { scripts: CompiledScript['body'][]; functions: CompiledFunction[] })(this);
     built.scripts.forEach(body => this.traces.set(body, codegen.trace));
@@ -821,7 +967,7 @@ export class Vm implements Project {
     this.extras.stopped();
   }
 
-  pause(): void {
+  pause(finishValues = true): void {
     if (this.state === 'run') {
       // Stop the project timer with the engine clock.
       this.state = 'pause';
@@ -829,7 +975,7 @@ export class Vm implements Project {
       this.audio?.pause?.();
       this.speech?.pause?.();
       for (const target of this.targets) {
-        for (const thread of target.threads.slice()) this.runThread(thread, true);
+        if (finishValues) for (const thread of target.threads.slice()) this.runThread(thread, true);
       }
     }
   }
@@ -984,7 +1130,8 @@ export class Vm implements Project {
 
   private errorRecord(error: unknown, thread: Thread | null, blockId: string | null = null, targetId: string | null = null): VmError {
     const stack = error instanceof Error ? error.stack : undefined;
-    const site = blockOfError(stack, thread ? this.traces.get(thread.script.body) : undefined);
+    const site = thread?.failedFrames?.slice().reverse().map(frame => blockOfError(stack, frame.liveTrace)).find(Boolean)
+      ?? blockOfError(stack, thread ? this.traces.get(thread.script.body) : undefined);
     const target = thread?.target ?? (targetId ? this.targetOf(targetId) : null);
     const sceneId = target?.sceneId ?? this.currentSceneId;
     const calls = thread ? this.callsOf(thread) : [];
@@ -1122,7 +1269,10 @@ export class Vm implements Project {
       ? wanted
       : this.scenes.find((candidate) => candidate.name === wanted)?.id ?? '';
     this.startSceneId = found;
-    if (this.state === 'stop') this.currentSceneId = this.firstSceneId();
+    if (this.state === 'stop') {
+      this.currentSceneId = this.firstSceneId();
+      this.renderer?.setScene?.(this.currentSceneId);
+    }
   }
 
   private firstSceneId(): string {

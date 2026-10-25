@@ -5,7 +5,7 @@ import { EntryTranslator } from './translate.ts';
 import { EntryExpansionReader } from './expansion.ts';
 import { mountChartWindow } from './chart-view.ts';
 import { LIST_MIN_SIZE } from '../render/overlay.ts';
-import { setStageSize, stage, type Entity } from '../runtime/model.ts';
+import { setStageSize, stage, type Entity, type Sound } from '../runtime/model.ts';
 import { localVariableStore } from './store.ts';
 import { dexieSaveStore } from './save-store.ts';
 import type { SaveHost } from '../runtime/save.ts';
@@ -15,6 +15,11 @@ import { beginAssetBulk, endAssetBulk, setAssetCache } from './fetch-retry.ts';
 import { mountDiagnostics } from './diagnostics-view.ts';
 
 export interface BootOptions {
+  liveEditing?: boolean;
+  // Editors already retain the full native media library; load only what is used.
+  preloadAssets?: boolean;
+  // A cold editor start creates this inside the trusted run-button gesture.
+  audioContext?: AudioContext;
   signal?: AbortSignal;
   projectUrl?: string;
   project?: EntryProjectLike;
@@ -48,6 +53,8 @@ export interface BootOptions {
   saveStore?: SaveHost | null;
   // Wait for all assets by default; disabling this allows loading during the run.
   waitForAssets?: boolean;
+  // Editors may already have decoded the same file in their native player.
+  readAudioBuffer?(sound: Sound): AudioBuffer | undefined;
 }
 
 export interface EntropyHandle {
@@ -220,6 +227,7 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
     quality: options.quality ?? 1,
     svg: options.svg ?? true,
     boost,
+    lazyAssets: options.preloadAssets === false,
   });
   try { await renderer.init(); }
   catch (error) { renderer.destroy(); view.remove(); throw error; }
@@ -241,11 +249,26 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
   try {
     signal?.throwIfAborted();
 
-    const audio = new WebAudioEngine();
+    const audio = new WebAudioEngine(options.readAudioBuffer, options.audioContext);
+    if (options.preloadAssets === false) audio.prepare();
     cleanups.push(() => audio.close());
+    const unlockAudio = () => audio.unlock();
+    const audioTarget = options.keyTarget ?? container;
+    for (const type of ['pointerdown', 'touchend', 'keydown']) {
+      audioTarget.addEventListener(type, unlockAudio, true);
+      cleanups.push(() => audioTarget.removeEventListener(type, unlockAudio, true));
+    }
+    const visibleAudio = () => { if (document.visibilityState === 'visible') audio.unlock(); };
+    document.addEventListener('visibilitychange', visibleAudio);
+    window.addEventListener('focus', unlockAudio);
+    cleanups.push(() => {
+      document.removeEventListener('visibilitychange', visibleAudio);
+      window.removeEventListener('focus', unlockAudio);
+    });
     const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop';
     const vm = new Vm({
+      liveEditing: options.liveEditing,
       renderer,
       audio,
       speech: new EntryTtsEngine(),
@@ -283,7 +306,9 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       const sounds = vm.targets.flatMap((target) => target.sounds);
       audio.retain(sounds);
       const waitForAssets = options.waitForAssets ?? true;
-      const total = PixiRenderer.costumeCount(vm.targets) + sounds.length;
+      const fullPreload = options.preloadAssets !== false;
+      const total = fullPreload ? PixiRenderer.costumeCount(vm.targets) + sounds.length
+        : vm.targets.filter(target => target.sceneId === vm.currentSceneId && target.entity.visible && target.entity.picture).length;
       let loaded = 0;
       let failed = 0;
       let reported = 0;
@@ -302,9 +327,10 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       // Start both preloads regardless of whether the caller waits for them.
       beginAssetBulk();
       const costumes = renderer
-        .preload(vm.targets, vm.currentSceneId, arrived)
+        .preload(vm.targets, vm.currentSceneId, arrived, !fullPreload)
         .catch((error) => console.warn('[entropy] 모양을 미리 받지 못했습니다', error));
-      const files = audio.preload(sounds, 6, arrived).catch((error) => console.warn('[entropy] 소리를 미리 받지 못했습니다', error));
+      const files = fullPreload ? audio.preload(sounds, 6, arrived)
+        .catch((error) => console.warn('[entropy] 소리를 미리 받지 못했습니다', error)) : Promise.resolve();
       const assets = Promise.all([costumes, files]).finally(endAssetBulk);
       if (waitForAssets) {
         await wait(assets);
@@ -436,6 +462,7 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       defaultDeviceType: deviceType,
       defaultUser: vm.user,
       start: () => {
+        audio.unlock();
         // Focus the player before it starts so keyboard input can reach the work.
         (options.keyTarget ?? view).focus?.({ preventScroll: true });
         vm.start();

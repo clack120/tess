@@ -216,8 +216,10 @@ export function serveProject({
         close: () => {
           for (const client of reloadClients) client.end();
           reloadClients.clear();
-          server.closeAllConnections?.();
-          return new Promise<void>((done) => { server.close(() => done()); });
+          return new Promise<void>((done) => {
+            server.close(() => done());
+            server.closeAllConnections?.();
+          });
         },
         update({ project: nextProject, assets: nextAssets = [], sourceMap: nextSourceMap = {} }) {
           currentProject = nextProject;

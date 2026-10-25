@@ -704,7 +704,11 @@ export interface CompiledScript {
 // A number yields the frame, 1 marks a promise wait, and a generator starts a nested call.
 export type Yielded = number | CallFrame;
 
-export type CallFrame = Generator<Yielded, unknown, unknown> & { finishes?: boolean };
+export type CallFrame = Generator<Yielded, unknown, unknown> & {
+  finishes?: boolean;
+  liveBlock?: { id: string; sequence: string; type?: string };
+  liveTrace?: import('./diagnostics.ts').GeneratedTrace;
+};
 
 // Throw into a value call to finish through its return expression.
 const FINISH = Symbol('finish');
@@ -716,7 +720,7 @@ export type CompiledFunction = (entity: Entity, thread: Thread, args: unknown[])
 export class Thread {
   readonly target: Target;
   readonly entity: Entity;
-  readonly script: CompiledScript;
+  script: CompiledScript;
   iterator: Generator<Yielded, void, unknown>;
   // Keep nested call frames off the JavaScript stack.
   private frames: CallFrame[];
@@ -737,6 +741,29 @@ export class Thread {
     this.script = script;
     this.iterator = script.body(entity, this);
     this.frames = [this.iterator as CallFrame];
+  }
+
+  // Preserve this thread's identity so send-and-wait callers keep waiting for
+  // the receiver when its code is replaced during a debugging session.
+  restart(script: CompiledScript): void {
+    this.stop();
+    this.script = script;
+    this.iterator = script.body(this.entity, this);
+    this.frames = [this.iterator as CallFrame];
+    this.waitingAsync = false;
+    this.failedFrames = null;
+    this.state = {};
+    this.depth = 0;
+    this.done = false;
+  }
+
+  pruneLiveFrames(contains: (frame: CallFrame) => boolean): void {
+    const at = this.frames.findIndex(frame => !contains(frame));
+    if (at === -1 || this.running) return;
+    for (let index = this.frames.length - 1; index >= at; index--) this.frames[index]!.return(undefined);
+    this.frames.length = at;
+    this.waitingAsync = false;
+    if (!this.frames.length) this.done = true;
   }
 
   step(): void {

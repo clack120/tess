@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import { stub } from './stub.ts';
 import { WebAudioEngine } from '../packages/vm/src/audio/sound.ts';
 
-function setup(t: any, fetchFile: (input?: unknown, options?: RequestInit) => Promise<Response>) {
+function setup(t: any, fetchFile: (input?: unknown, options?: RequestInit) => Promise<Response>, initialState = 'running',
+  readBuffer?: ConstructorParameters<typeof WebAudioEngine>[0]) {
   const contexts: any[] = [];
   const decodes: Array<{ bytes: ArrayBuffer; resolve: (value: AudioBuffer) => void }> = [];
   const sources: any[] = [];
   let hold = false;
   class Context {
-    state = 'running';
+    state = initialState;
+    resumes = 0;
     currentTime = 0;
     destination = {};
     constructor() { contexts.push(this); }
@@ -25,12 +27,13 @@ function setup(t: any, fetchFile: (input?: unknown, options?: RequestInit) => Pr
       return new Promise<AudioBuffer>(resolve => decodes.push({ bytes, resolve }));
     }
     close() { this.state = 'closed'; return Promise.resolve(); }
-    resume() { return Promise.resolve(); }
+    resume() { this.resumes++; this.state = 'running'; return Promise.resolve(); }
+    suspend() { this.state = 'suspended'; return Promise.resolve(); }
   }
   const original = Object.getOwnPropertyDescriptor(globalThis, 'AudioContext');
   Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: Context });
   stub(t, globalThis, 'fetch', fetchFile);
-  const engine = new WebAudioEngine();
+  const engine = new WebAudioEngine(readBuffer);
   t.after(() => {
     engine.close();
     if (original) Object.defineProperty(globalThis, 'AudioContext', original);
@@ -40,6 +43,38 @@ function setup(t: any, fetchFile: (input?: unknown, options?: RequestInit) => Pr
 }
 const sound = (id: string, url: string) => ({ id, name: id, fileurl: url, duration: 1 });
 const bytes = () => Promise.resolve(new Response(new Uint8Array([1, 2, 3])));
+
+test('the editor can share decoded native buffers without downloading or decoding them a second time', async t => {
+  const native = { duration: 1 } as AudioBuffer;
+  const { engine, decodes, contexts, sources } = setup(t, () => { throw new Error('duplicate download'); }, 'suspended', () => native);
+  await engine.preload([sound('a', '/native.wav'), sound('alias', '/native.wav')]);
+  assert.equal(decodes.length, 0); assert.equal(contexts.length, 1);
+  engine.unlock(); assert.equal(contexts[0].resumes, 1, 'the playback context exists before the start gesture');
+  engine.play(sound('a', '/native.wav'), 'actor');
+  assert.equal(sources[0].buffer, native);
+});
+
+test('a replaced native audio host falls back to the normal download path', async t => {
+  let requests = 0;
+  const { engine, decodes } = setup(t, () => { requests++; return bytes(); }, 'running', () => { throw new Error('queue replaced'); });
+  await engine.preload([sound('a', '/new.wav')]);
+  assert.equal(requests, 1); assert.equal(decodes.length, 1);
+});
+
+test('preloading does not repeatedly resume suspended audio, and input unlock recovers Safari interruptions', async t => {
+  const { engine, contexts, sources } = setup(t, bytes, 'suspended');
+  await engine.preload(Array.from({ length: 40 }, (_, i) => sound(String(i), `/${i}.wav`)));
+  const context = contexts[0];
+  assert.equal(context.resumes, 0, 'background decoding does not consume or queue resume attempts');
+  engine.unlock(); assert.equal(context.resumes, 1); assert.equal(context.state, 'running');
+  context.state = 'interrupted';
+  engine.play(sound('0', '/0.wav'), 'actor');
+  assert.equal(context.resumes, 2); assert.equal(sources.length, 1);
+  engine.pause(); context.state = 'interrupted';
+  engine.unlock(); assert.equal(context.resumes, 2, 'input does not undo an intentional project pause');
+  engine.resume(); assert.equal(context.resumes, 3);
+  engine.close(); engine.unlock(); assert.equal(contexts.length, 1, 'unlock does not create contexts after disposal');
+});
 
 test('audio shares downloads and decoded buffers by URL while keeping playback instances separate', async t => {
   let requests = 0, progress = 0;

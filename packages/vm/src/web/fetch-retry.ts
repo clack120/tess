@@ -87,7 +87,8 @@ export function setAssetCache(on: boolean): void {
   if (cacheOn === on) return;
   cacheOn = on;
   cacheVersion++;
-  cacheChanged();
+  // Changing a preference does not change stored files. In particular, do not
+  // trigger a full size census when an editor page first applies its setting.
 }
 
 export function clearAssetCache(): Promise<void> {

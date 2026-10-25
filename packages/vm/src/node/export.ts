@@ -11,6 +11,8 @@ import { zipFiles, type ZipFile } from './zip.ts';
 import { DEFAULT_STAGE_HEIGHT, DEFAULT_STAGE_WIDTH } from '../runtime/model.ts';
 
 const SRC_DIR = fileURLToPath(new URL('../', import.meta.url));
+const CORE_DIR = fileURLToPath(new URL('../../../core/', import.meta.url));
+const CORE_PREFIX = 'core/';
 const PIXI_FILE = fileURLToPath(new URL('../../node_modules/pixi.js/dist/pixi.mjs', import.meta.url));
 const DEXIE_FILE = fileURLToPath(new URL('../../node_modules/dexie/dist/modern/dexie.mjs', import.meta.url));
 
@@ -56,8 +58,9 @@ function collectModules(entries: string[]): Map<string, string> {
     if (found.has(relative)) {
       continue;
     }
-    const file = path.join(SRC_DIR, relative);
-    if (!file.startsWith(SRC_DIR) || !fs.existsSync(file)) {
+    const root = relative.startsWith(CORE_PREFIX) ? CORE_DIR : SRC_DIR;
+    const file = path.join(root, relative.startsWith(CORE_PREFIX) ? relative.slice(CORE_PREFIX.length) : relative);
+    if (!file.startsWith(root) || !fs.existsSync(file)) {
       throw new Error(`실행기 모듈을 찾지 못했습니다: ${relative}`);
     }
     const source = fs.readFileSync(file, 'utf-8');
@@ -74,13 +77,14 @@ function collectModules(entries: string[]): Map<string, string> {
 
 function* relativeSpecifiers(code: string): Generator<string> {
   for (const match of code.matchAll(SPECIFIER)) {
-    if (match[3]!.startsWith('.')) {
+    if (match[3]!.startsWith('.') || match[3] === '@entropy/core') {
       yield match[3]!;
     }
   }
 }
 
 function resolveFrom(relative: string, specifier: string): string {
+  if (specifier === '@entropy/core') return `${CORE_PREFIX}index.ts`;
   return path.posix.normalize(path.posix.join(path.posix.dirname(relative), specifier));
 }
 
@@ -90,7 +94,7 @@ function rewriteSpecifiers(
   name: (target: string, specifier: string) => string,
 ): string {
   return code.replace(SPECIFIER, (whole, head: string, quote: string, specifier: string) =>
-    specifier.startsWith('.')
+    (specifier.startsWith('.') || specifier === '@entropy/core')
       ? `${head}${quote}${name(resolveFrom(relative, specifier), specifier)}${quote}`
       : whole);
 }
@@ -293,7 +297,10 @@ export function exportZip(options: ExportOptions): ExportResult {
   for (const [relative, code] of built.modules) {
     files.push({
       name: `${VM_PREFIX}${asJs(relative)}`,
-      data: rewriteSpecifiers(relative, code, (_target, specifier) => asJs(specifier)),
+      data: rewriteSpecifiers(relative, code, (target) => {
+        const link = path.posix.relative(path.posix.dirname(relative), target);
+        return asJs(link.startsWith('.') ? link : `./${link}`);
+      }),
     });
   }
   for (const asset of built.assets) {

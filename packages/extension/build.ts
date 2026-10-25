@@ -11,16 +11,20 @@ import { crxIdText, packCrx, publicKeyOf, signingKey, zipDirectory } from './pac
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const SRC = path.join(ROOT, 'src');
 const VM_SRC = path.resolve(ROOT, '../vm/src');
-const DIST = path.join(ROOT, 'dist');
+const CORE_ROOT = path.resolve(ROOT, '../core');
+const OUTPUT = path.join(ROOT, 'dist');
+const STAGING = fs.mkdtempSync(path.join(ROOT, '.build-'));
+process.on('exit', () => fs.rmSync(STAGING, { recursive: true, force: true }));
+const DIST = path.join(STAGING, 'dist');
 const VENDOR = path.join(DIST, 'vendor');
 const VM_OUT = path.join(VENDOR, 'entropy');
+const CORE_OUT = path.join(VENDOR, 'core');
 const PIXI_OUT = path.join(VENDOR, 'pixi.mjs');
 const DEXIE_OUT = path.join(VENDOR, 'dexie.mjs');
 
-const ZIP = path.join(ROOT, 'entropy-extension.zip');
-const CHROME_ZIP = path.join(ROOT, 'entropy-extension-chrome.zip');
+const ZIP = path.join(STAGING, 'entropy-extension.zip');
 const CRX = path.join(ROOT, 'entropy-extension.crx');
-const USERSCRIPT = path.join(ROOT, 'entropy.user.js');
+const USERSCRIPT = path.join(STAGING, 'entropy.user.js');
 // The signing key determines the extension ID, so keep it stable.
 const CRX_KEY = path.join(ROOT, 'crx-key.pem');
 
@@ -43,6 +47,7 @@ function outputFor(file: string): string {
   const roots = [
     { src: SRC, out: DIST },
     { src: VM_SRC, out: VM_OUT },
+    { src: CORE_ROOT, out: CORE_OUT },
   ];
   for (const root of roots) {
     const inside = path.relative(root.src, file);
@@ -71,6 +76,11 @@ function emitModule(file: string): string[] {
   const out = outputFor(file);
   const found: string[] = [];
   const code = read(file)
+    .replace(/(\bfrom\s*)(['"])@entropy\/core\2/g, (_match, lead: string, quote: string) => {
+      const target = path.join(CORE_ROOT, 'index.ts');
+      found.push(target);
+      return `${lead}${quote}${link(out, outputFor(target))}${quote}`;
+    })
     .replace(RELATIVE_IMPORT, (_match, quote: string, specifier: string) => {
       const target = path.resolve(path.dirname(file), specifier);
       found.push(target);
@@ -150,6 +160,9 @@ function checkLinks(): void {
       continue;
     }
     const source = fs.readFileSync(file, 'utf-8');
+    if (/\bfrom\s*['"]@entropy\//.test(source)) {
+      throw new Error(`${path.relative(DIST, file)} 에 브라우저가 읽을 수 없는 패키지 import 가 남았습니다`);
+    }
     for (const [, , specifier] of source.matchAll(/(['"])(\.\.?\/[^'"]*\.m?js)\1/g)) {
       const target = path.resolve(path.dirname(file), specifier!);
       if (!fs.existsSync(target)) {
@@ -216,16 +229,9 @@ function copyVendor(from: string, name: string, inside: string, out: string): vo
 
 const rel = (file: string) => path.relative(process.cwd(), file);
 
-// Remove Firefox-only manifest keys from Chrome builds.
-function writeManifest(target: 'chrome' | 'firefox' | 'shared'): void {
+// Chrome and Firefox 121+ select their supported background environment.
+function writeManifest(): void {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf-8'));
-  if (target === 'chrome') {
-    delete manifest.browser_specific_settings;
-    // Chrome uses a service worker; Firefox uses an event page.
-    manifest.background = { service_worker: 'background.js' };
-  } else if (target === 'firefox') {
-    delete manifest.background.service_worker;
-  }
   fs.writeFileSync(path.join(DIST, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
@@ -244,11 +250,21 @@ function writeIcons(): void {
 
 function buildUserscript(): number {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf-8'));
+  // A new commit must compare newer even while the package version stays the same.
+  let builtAt = Date.now();
+  try {
+    const committed = Number(execFileSync('git', ['log', '-1', '--format=%ct'], { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' }).trim());
+    if (Number.isFinite(committed) && committed > 0) builtAt = committed * 1000;
+  } catch {} // Source archives do not carry Git metadata.
+  const revision = new Date(builtAt).toISOString().replace(/\D/g, '').slice(0, 14);
+  const run = /^\d+$/.test(process.env.GITHUB_RUN_NUMBER ?? '') ? process.env.GITHUB_RUN_NUMBER : '0';
   const metadata = [
     '// ==UserScript==',
     '// @name         Entropy for Entry',
     '// @namespace    https://playentry.org/entropy',
-    `// @version      ${manifest.version}`,
+    `// @version      ${manifest.version}.${revision}.${run}`,
+    '// @downloadURL  https://github.com/clack120/tess/releases/latest/download/entropy.user.js',
+    '// @updateURL    https://github.com/clack120/tess/releases/latest/download/entropy.user.js',
     '// @description  엔트리 작품과 에디터를 Entropy 실행기로 실행합니다.',
     '// @match        https://playentry.org/*',
     '// @exclude-match https://playentry.org/iframe/*',
@@ -281,7 +297,6 @@ function buildUserscript(): number {
   return Buffer.byteLength(code);
 }
 
-fs.rmSync(DIST, { recursive: true, force: true });
 const modules = emitModules(MODULE_ENTRIES.map((entry) => path.join(SRC, entry)));
 let flattened = 0;
 for (const entry of CLASSIC_ENTRIES) {
@@ -305,28 +320,37 @@ for (const file of ['LICENSE', 'LICENSE-TESS']) copy(path.resolve(ROOT, '../..',
 writeIcons();
 checkLinks();
 
-// Pack each browser's manifest before writing the next one over it.
-writeManifest('firefox');
+writeManifest();
 checkManifest();
 zipDirectory(DIST, ZIP);
-writeManifest('chrome');
-checkManifest();
-zipDirectory(DIST, CHROME_ZIP);
-// Unpacked loading uses either browser's supported background environment.
-writeManifest('shared');
-checkManifest();
+fs.rmSync(path.join(ROOT, 'entropy-extension-chrome.zip'), { force: true });
 const userscriptBytes = buildUserscript();
 
+// Keep the installed unpacked extension readable while watch builds run. Each
+// file is replaced only after the complete build has passed its link checks.
+function publish(directory: string, destination: string): void {
+  fs.mkdirSync(destination, { recursive: true });
+  const entries = fs.readdirSync(directory, { withFileTypes: true })
+    .sort((a, b) => Number(a.name === 'manifest.json') - Number(b.name === 'manifest.json'));
+  for (const entry of entries) {
+    const source = path.join(directory, entry.name), target = path.join(destination, entry.name);
+    if (entry.isDirectory()) publish(source, target);
+    else fs.renameSync(source, target);
+  }
+}
+publish(DIST, OUTPUT);
+fs.renameSync(ZIP, path.join(ROOT, 'entropy-extension.zip'));
+fs.renameSync(USERSCRIPT, path.join(ROOT, 'entropy.user.js'));
+
 const lines = [
-  `확장을 만들었습니다: ${rel(DIST)} (모듈 ${modules.size}개 · 내용 스크립트 ${flattened}개)`,
-  `파이어폭스용 묶음: ${rel(ZIP)}`,
-  `크롬용 묶음: ${rel(CHROME_ZIP)} (웹스토어에 올리는 것은 이 zip 입니다)`,
-  `유저스크립트: ${rel(USERSCRIPT)} (${(userscriptBytes / 1024 / 1024).toFixed(2)} MiB · 단일 파일)`,
+  `확장을 만들었습니다: ${rel(OUTPUT)} (모듈 ${modules.size}개 · 내용 스크립트 ${flattened}개)`,
+  `브라우저 확장 묶음: ${rel(path.join(ROOT, 'entropy-extension.zip'))} (Chromium·Firefox 121 이상)`,
+  `유저스크립트: ${rel(path.join(ROOT, 'entropy.user.js'))} (${(userscriptBytes / 1024 / 1024).toFixed(2)} MiB · 단일 파일)`,
 ];
 if (process.argv.includes('--crx')) {
   const fresh = !fs.existsSync(CRX_KEY);
   const key = signingKey(CRX_KEY);
-  fs.writeFileSync(CRX, packCrx(fs.readFileSync(CHROME_ZIP), key));
+  fs.writeFileSync(CRX, packCrx(fs.readFileSync(path.join(ROOT, 'entropy-extension.zip')), key));
   lines.push(`크롬 crx: ${rel(CRX)} · 확장 id ${crxIdText(publicKeyOf(key))}`);
   lines.push(
     fresh

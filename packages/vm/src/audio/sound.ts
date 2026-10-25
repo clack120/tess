@@ -11,6 +11,7 @@ interface Playing {
 }
 
 export class WebAudioEngine implements AudioEngine {
+  private readonly readBuffer: ((sound: Sound) => AudioBuffer | undefined) | undefined;
   private context: AudioContext | null = null;
   private controller = new AbortController();
   // Entry keeps background music separate from sounds, so volume, speed, and stop affect sounds only.
@@ -25,12 +26,20 @@ export class WebAudioEngine implements AudioEngine {
   // Track pending loads so stops and scene changes also cancel sounds that have not started.
   private readonly pending = new Set<{ entityId: string; bgm: boolean; live: boolean }>();
 
+  constructor(readBuffer?: (sound: Sound) => AudioBuffer | undefined, context?: AudioContext) {
+    this.readBuffer = readBuffer;
+    if (context) {
+      this.context = context;
+      this.master = context.createGain();
+      this.master.gain.value = this.volume;
+      this.master.connect(context.destination);
+    }
+  }
+
   // Browsers require a gesture, so create the audio context lazily.
-  private ensure(): AudioContext | null {
+  private ensure(wake = false): AudioContext | null {
     if (this.context) {
-      if (this.context.state === 'suspended' && !this.paused) {
-        void this.context.resume().catch(() => undefined);
-      }
+      if (wake) this.unlock();
       return this.context;
     }
     const Ctor = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
@@ -41,8 +50,19 @@ export class WebAudioEngine implements AudioEngine {
     this.master = this.context.createGain();
     this.master.gain.value = this.volume;
     this.master.connect(this.context.destination);
+    if (wake) this.unlock();
     return this.context;
   }
+
+  // Safari may require resume inside the input handler rather than a later VM
+  // frame, and can report "interrupted" after the page loses focus.
+  unlock(): void {
+    const context = this.context;
+    if (!context || this.paused || context.state === 'running' || context.state === 'closed') return;
+    void context.resume().catch(() => undefined);
+  }
+
+  prepare(): void { this.ensure(); }
 
   // Limit parallel sound loads so they do not starve costume downloads.
   async preload(sounds: Sound[], limit = 6, onLoaded?: (ok: boolean) => void): Promise<void> {
@@ -86,6 +106,13 @@ export class WebAudioEngine implements AudioEngine {
     if (inFlight) {
       return inFlight;
     }
+    let shared: AudioBuffer | undefined;
+    try { shared = this.readBuffer?.(sound); } catch {} // Hosts may replace their sound queue during navigation.
+    if (shared) {
+      if (!this.ensure()) return Promise.resolve(null);
+      this.buffers.set(url, shared);
+      return Promise.resolve(shared);
+    }
     const context = this.ensure();
     if (!context) return Promise.resolve(null);
     // close() swaps the controller, so keep the signal this load was started with.
@@ -112,7 +139,7 @@ export class WebAudioEngine implements AudioEngine {
 
   play(sound: Sound, entityId: string, startMs = 0, durationMs?: number): (() => void) | void {
     if (!sound.duration) return;
-    const context = this.ensure();
+    const context = this.ensure(true);
     if (!context) {
       return;
     }
@@ -139,6 +166,7 @@ export class WebAudioEngine implements AudioEngine {
     // Cancel earlier background music requests so overlapping loads cannot start duplicate tracks.
     this.stopBgm();
     if (!sound.duration) return;
+    if (!this.ensure(true)) return;
     const buffer = this.buffers.get(sound.fileurl);
     if (!buffer) {
       const ticket = this.ticket('', true);
@@ -180,7 +208,7 @@ export class WebAudioEngine implements AudioEngine {
     durationMs: number | undefined,
     bgm: boolean,
   ): Playing | undefined {
-    const context = this.ensure();
+    const context = this.ensure(true);
     if (!context || !this.master) {
       return;
     }

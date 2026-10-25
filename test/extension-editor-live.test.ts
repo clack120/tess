@@ -1,0 +1,173 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { JSDOM } from 'jsdom';
+import { stripTypes } from '@entropy/core/strip-types';
+
+function setup(t: any) {
+  const dom = new JSDOM('<div id="view"></div>', { runScripts: 'outside-only' });
+  t.after(() => dom.window.close());
+  const w = dom.window as any;
+  class Code {
+    data: any;
+    destroyed = false;
+    object?: any;
+    constructor(data: any, object?: any) { this.data = structuredClone(data); this.object = object; }
+    toJSON() { return structuredClone(this.data); }
+    stringify() { return JSON.stringify(this.data); }
+    destroy() { this.destroyed = true; }
+  }
+  const block = (id: string) => [[{ id, type: 'when_run_button_click', params: [] }]];
+  const first = { id: 'first', script: new Code(block('hat-first')) };
+  const second = { id: 'second', script: new Code(block('hat-second')) };
+  const fn = { id: 'fn', type: 'normal', content: new Code([[{ id: 'function', type: 'function_create',
+    params: [{ id: 'label', type: 'function_field_label', params: ['fn', null] }], statements: [[]] }]]) };
+  const original = { first: first.script, second: second.script, fn: fn.content };
+  const board = { readOnly: true, code: first.script };
+  const overlayBoard = { readOnly: false, code: fn.content };
+  const workspace = { board, overlayBoard, blockMenu: { readOnly: false },
+    changeBoardCode(code: any) { board.code = code; },
+    changeOverlayBoardCode(code: any) { overlayBoard.code = code; } };
+  const playground = { object: first, view_: w.document.getElementById('view'), mode: 'code',
+    injectCode() { workspace.changeBoardCode(this.object.script); },
+    getViewMode() { return this.mode; }, changeViewMode(mode: string) { this.mode = mode; } };
+  const undo = { before: true }, redo = { after: true };
+  let schemaUpdates = 0;
+  const entry = { Code, readOnly: false, getMainWS: () => workspace, playground, engine: { state: 'run', togglePause() { this.state = this.state === 'run' ? 'pause' : 'run'; vm.state = this.state; } },
+    Func: { isEdit: false, initEditView(code: any) { workspace.changeOverlayBoardCode(code); },
+      endEdit() { this.isEdit = false; }, generateWsBlock(_fn: any) { schemaUpdates++; } },
+    variableContainer: { functions_: { fn }, removeFunction({ id }: { id: string }) {
+      second.script.data[0][0].params.push('removed call'); delete (this.functions_ as any)[id];
+    } }, stateManager: { undoStack_: [undo], redoStack_: [redo] } };
+  const work = { objects: [], functions: [{ id: 'fn', content: original.fn.stringify() }] };
+  const patches: any[] = [];
+  const vm = { state: 'pause', pause(_finish: boolean) { this.state = 'pause'; }, async patchCodeAsync(value: any) { patches.push(value); return 0; } };
+  const source = stripTypes(fs.readFileSync(new URL('../packages/extension/src/page/editor-live.ts', import.meta.url), 'utf8'))
+    .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+  w.loadYield = () => () => undefined;
+  w.eval(source + '\nwindow.begin = beginLiveEditing;');
+  const live = w.begin(entry, work, () => vm);
+  t.after(() => live.restore());
+  return { w, entry, playground, board, workspace, overlayBoard, first, second, fn, original, undo, redo, live, patches, work, vm,
+    schemaUpdates: () => schemaUpdates,
+    apply: () => w.document.querySelector('.entropy-editor-live button').onclick() };
+}
+
+test('running block edits use copies, preserve native history and restore the exact original code on stop', async t => {
+  const s = setup(t);
+  assert.notEqual(s.first.script, s.original.first);
+  assert.equal(s.board.code, s.first.script);
+  assert.equal(s.entry.engine.state, 'run'); assert.equal(s.board.readOnly, false);
+  s.first.script.data[0][0].params.push('temporary');
+  s.entry.stateManager.undoStack_.push({ temporary: true } as never);
+  assert.deepEqual(s.original.first.toJSON()[0][0].params, []);
+  await s.apply(); assert.equal(s.live.applied, true); assert.equal(s.patches.length, 1);
+  assert.equal(JSON.parse(s.patches[0].objects[0].script)[0][0].params[0], 'temporary');
+  s.entry.engine.state = 'stop'; s.live.restore();
+  assert.equal(s.first.script, s.original.first); assert.equal(s.board.code, s.original.first);
+  assert.equal(s.board.readOnly, true);
+  assert.deepEqual(s.entry.stateManager.undoStack_, [s.undo]);
+  assert.deepEqual(s.entry.stateManager.redoStack_, [s.redo]);
+});
+
+test('other objects are copied only when opened, and function body edits are isolated too', async t => {
+  const s = setup(t);
+  assert.equal(s.second.script, s.original.second);
+  s.playground.object = s.second; s.playground.injectCode();
+  assert.notEqual(s.second.script, s.original.second);
+  s.entry.Func.initEditView(s.fn.content);
+  assert.notEqual(s.fn.content, s.original.fn); assert.equal(s.overlayBoard.code, s.fn.content);
+  s.fn.content.data[0][0].statements[0].push({ id: 'body', type: 'dialog', params: ['changed'] });
+  await s.apply(); assert.equal(JSON.parse(s.patches[0].functions[0].content)[0][0].statements[0][0].params[0], 'changed');
+  s.playground.changeViewMode('sound');
+  assert.equal(s.w.document.querySelector('.entropy-editor-live').hidden, true);
+  s.playground.changeViewMode('code');
+  assert.equal(s.w.document.querySelector('.entropy-editor-live').hidden, false);
+  s.entry.engine.state = 'stop'; s.live.restore();
+  assert.equal(s.second.script, s.original.second); assert.equal(s.fn.content, s.original.fn);
+});
+
+test('native function removal cannot rewrite call blocks in unopened originals during a run', async t => {
+  const s = setup(t);
+  s.entry.variableContainer.removeFunction({ id: 'fn' });
+  assert.equal(s.entry.variableContainer.functions_.fn, s.fn);
+  assert.deepEqual(s.original.second.toJSON()[0][0].params, []);
+  s.entry.engine.state = 'stop'; s.live.restore();
+  s.entry.variableContainer.removeFunction({ id: 'fn' });
+  assert.equal(s.entry.variableContainer.functions_.fn, undefined);
+});
+
+test('function signature edits cannot mutate global call schemas or be applied to the live VM', async t => {
+  const s = setup(t);
+  s.entry.Func.initEditView(s.fn.content);
+  s.fn.content.data[0][0].params[0].params[0] = 'renamed';
+  s.entry.Func.generateWsBlock(s.fn);
+  assert.equal(s.schemaUpdates(), 0);
+  await s.apply(); assert.equal(s.patches.length, 0);
+  assert.match(s.w.document.querySelector('.entropy-editor-live').textContent, /이름·매개변수/);
+  s.entry.engine.state = 'stop'; s.live.restore();
+  assert.equal(s.fn.content, s.original.fn);
+});
+
+test('native view cleanup errors cannot prevent restoration of the original code and history', async t => {
+  const s = setup(t);
+  s.entry.Func.isEdit = true;
+  s.entry.Func.endEdit = () => { throw new Error('native view changed'); };
+  s.first.script.data[0][0].params.push('temporary');
+  s.entry.engine.state = 'stop'; s.live.restore();
+  assert.equal(s.first.script, s.original.first); assert.equal(s.board.readOnly, true);
+  assert.deepEqual(s.entry.stateManager.undoStack_, [s.undo]);
+});
+
+test('native read-only workspaces keep their edit restrictions', async t => {
+  const s = setup(t); s.live.restore();
+  s.entry.readOnly = true;
+  assert.equal(s.w.begin(s.entry, s.work, () => s.vm), null);
+  assert.equal(s.first.script, s.original.first);
+});
+
+test('live editing clears the native curtain without relying on stylesheet delivery and restores it', async t => {
+  const s = setup(t); s.live.restore();
+  const curtain = s.w.document.createElement('div'); curtain.id = 'entryCurtain';
+  curtain.style.setProperty('display', 'block', 'important');
+  s.playground.view_.append(curtain);
+  const live = s.w.begin(s.entry, s.work, () => s.vm);
+  assert.equal(curtain.style.display, 'none');
+  s.playground.changeViewMode('sound'); assert.equal(curtain.style.display, 'block');
+  s.playground.changeViewMode('code'); assert.equal(curtain.style.display, 'none');
+  live.restore(); assert.equal(curtain.style.display, 'block');
+  assert.equal(curtain.style.getPropertyPriority('display'), 'important');
+});
+
+test('applying edits pauses first, shows progress, prevents duplicate updates and resumes only a running session', async t => {
+  const s = setup(t);
+  const applying = s.apply();
+  assert.equal(s.entry.engine.state, 'pause');
+  assert.equal(s.w.document.querySelector('.entropy-editor-live button').disabled, true);
+  assert.match(s.w.document.querySelector('.entropy-editor-live').textContent, /갱신 중/);
+  s.entry.engine.togglePause(); assert.equal(s.entry.engine.state, 'pause', 'the player cannot resume halfway through an update');
+  await s.apply(); await applying;
+  assert.equal(s.patches.length, 1); assert.equal(s.entry.engine.state, 'run');
+  s.entry.engine.state = 'pause'; s.vm.state = 'pause';
+  await s.apply(); assert.equal(s.entry.engine.state, 'pause');
+});
+
+test('stopping during an update aborts it and never resumes or overwrites restored board permissions', async t => {
+  const s = setup(t);
+  const applying = s.apply();
+  s.entry.engine.state = 'stop'; s.vm.state = 'stop'; s.live.restore();
+  await applying;
+  assert.equal(s.patches.length, 0); assert.equal(s.entry.engine.state, 'stop');
+  assert.equal(s.board.readOnly, true); assert.equal(s.first.script, s.original.first);
+});
+
+test('function removal is rejected during live editing and stop restores the original function registry', async t => {
+  const s = setup(t);
+  s.entry.Func.initEditView(s.fn.content);
+  delete (s.entry.variableContainer.functions_ as any).fn;
+  await s.apply(); assert.equal(s.patches.length, 0);
+  assert.match(s.w.document.querySelector('.entropy-editor-live').textContent, /함수 추가·삭제/);
+  s.entry.engine.state = 'stop'; s.live.restore();
+  assert.equal(s.entry.variableContainer.functions_.fn, s.fn);
+  assert.equal(s.fn.content, s.original.fn);
+});

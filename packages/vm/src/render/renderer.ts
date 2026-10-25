@@ -204,6 +204,7 @@ interface OwnedContainer extends Container {
 }
 
 export interface RendererOptions {
+  lazyAssets?: boolean;
   canvas?: HTMLCanvasElement;
   parent?: HTMLElement;
   /** Extra sharpness on top of the device pixel ratio. */
@@ -723,6 +724,9 @@ export class PixiRenderer implements Renderer {
     for (const [id, layer] of this.sceneLayers) {
       layer.visible = id === sceneId;
     }
+    // Inactive scenes may never have loaded their first costume in an editor.
+    // Refresh even static backgrounds when their layer becomes visible.
+    for (const [entity] of this.views) if (entity.target.sceneId === sceneId) entity.dirty = true;
   }
 
   // Insert clones directly below their source entity, after skipping its strokes and stamps.
@@ -826,6 +830,7 @@ export class PixiRenderer implements Renderer {
     targets: Target[],
     sceneId?: string,
     onLoaded?: (ok: boolean) => void,
+    onlyCurrent = false,
   ): Promise<void> {
     const wanted = new Map(targets.flatMap(target => target.pictures).map(picture => [picture.id, picture]));
     const release: Array<() => void> = [];
@@ -847,6 +852,10 @@ export class PixiRenderer implements Renderer {
     const inScene: Picture[] = [];
     const rest: Picture[] = [];
     for (const target of targets) {
+      if (onlyCurrent) {
+        if ((!sceneId || target.sceneId === sceneId) && target.entity.visible && target.entity.picture) inScene.push(target.entity.picture);
+        continue;
+      }
       const bucket = !sceneId || target.sceneId === sceneId ? inScene : rest;
       bucket.push(...target.pictures);
     }
@@ -1084,11 +1093,15 @@ export class PixiRenderer implements Renderer {
 
     if (view.sprite) {
       const picture = entity.picture;
-      if (picture && view.pictureId !== picture.id) {
+      if (this.options.lazyAssets && (!entity.visible || !this.sceneLayers.get(entity.target.sceneId)?.visible)) return;
+      if (picture) {
         const texture = this.textures.get(picture.id);
+        view.sprite.visible = !!texture;
         if (texture) {
-          view.sprite.texture = texture;
-          view.pictureId = picture.id;
+          if (view.pictureId !== picture.id) {
+            view.sprite.texture = texture;
+            view.pictureId = picture.id;
+          }
         } else {
           void this.loadPicture(picture).then(() => {
             entity.dirty = true;

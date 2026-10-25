@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { stripTypes } from '@entropy/core/strip-types';
 import { compactLargeProject, PROJECT_JSON_LIMIT } from '../packages/extension/src/page/project-compact.ts';
+import { beginLiveEditing } from '../packages/extension/src/page/editor-live.ts';
 
 const test = 'Bun' in globalThis ? nodeTest.skip : nodeTest;
 
@@ -14,15 +15,22 @@ async function setup(t: any, delay = false) {
   t.after(() => w.close());
   let nativeTicks = 0, starts = 0, stops = 0, exports = 0;
   let cloudClients = 0, cloudConnects = 0, cloudDisposals = 0;
+  let audioResumes = 0, audioCloses = 0;
+  w.AudioContext = class {
+    async resume() { audioResumes++; }
+    async close() { audioCloses++; }
+  };
   const changeListeners = new Set<() => void>();
+  const scenes = [{ id: 'first' }, { id: 'second' }];
+  let startScene = scenes[1]!;
   const work = { objects: [{ sprite: { pictures: [{ fileurl: 'original' }] } }], variables: [{ id: 'score', value: 9 }], scenes: [] };
   const boots: any[] = [], handles: any[] = [], reloads: any[] = [];
   let release!: () => void;
   const gate = delay ? new Promise<void>(resolve => { release = resolve; }) : Promise.resolve();
   const engine = {
     state: 'stop', runButton: {},
-    toggleRun() { starts++; this.state = 'run'; this.raiseEvent(); },
-    async toggleStop() { stops++; this.state = 'stop'; },
+    toggleRun() { starts++; startScene = w.Entry.scene.selectedScene; this.state = 'run'; this.raiseEvent(); },
+    async toggleStop() { stops++; this.state = 'stop'; w.Entry.scene.selectedScene = startScene; },
     togglePause() { this.state = this.state === 'pause' ? 'run' : 'pause'; },
     computeFunction() { nativeTicks++; }, raiseEvent() { nativeTicks++; },
     update() { this.computeFunction(); },
@@ -32,7 +40,8 @@ async function setup(t: any, delay = false) {
   w.Entry = { type: 'workspace', engine, exportProject: () => { exports++; return work; },
     creationChangedEvent: { attach(_owner: unknown, listener: () => void) {
       changeListeners.add(listener); return { destroy() { changeListeners.delete(listener); } };
-    } }, scene: { selectedScene: { id: 'second' } },
+    } }, scene: { selectedScene: scenes[1], getSceneById: (id: string) => scenes.find(scene => scene.id === id),
+      selectScene(scene: typeof scenes[number]) { this.selectedScene = scene; } },
     getMainWS: () => ({ syncCode() {} }) };
   w.ResizeObserver = class { observe() {} disconnect() {} };
   w.withAssetUrls = (project: any) => ({ ...project, objects: project.objects.map((object: any) => ({
@@ -42,10 +51,11 @@ async function setup(t: any, delay = false) {
   w.signedInUser = () => null;
   w.compactLargeProject = compactLargeProject;
   w.PROJECT_JSON_LIMIT = PROJECT_JSON_LIMIT;
+  w.beginLiveEditing = beginLiveEditing;
   w.loadModule = async (specifier: string) => {
     if (specifier.endsWith('boot.ts')) return { boot: async (options: any) => {
       boots.push(options); await gate;
-      const handle = { disposed: false, vm: { state: 'stop', scene: '', unknownBlocks: new Map(), readStore() {},
+      const handle = { disposed: false, audio: { unlock() {} }, vm: { state: 'stop', scene: '', unknownBlocks: new Map(), readStore() {},
         setStartScene(scene: string) { this.scene = scene; } },
         start() { this.vm.state = 'run'; }, pause() { this.vm.state = 'pause'; },
         stop() { this.vm.state = 'stop'; },
@@ -71,7 +81,7 @@ async function setup(t: any, delay = false) {
   configure(true); await settle();
   return { w, engine, work, boots, handles, reloads, settle, configure, release, originalRun, originalTick,
     change: () => { for (const listener of changeListeners) listener(); },
-    counts: () => ({ nativeTicks, starts, stops, exports, cloudClients, cloudConnects, cloudDisposals }) };
+    counts: () => ({ nativeTicks, starts, stops, exports, cloudClients, cloudConnects, cloudDisposals, audioResumes, audioCloses }) };
 }
 
 test('editor runs current unsaved data and selected scene once, then restores native editing and execution', async t => {
@@ -104,6 +114,21 @@ test('editor runs current unsaved data and selected scene once, then restores na
   assert.equal(s.counts().nativeTicks, 2);
 });
 
+test('runtime scene changes follow the native editor focus and stop restores the starting scene', async t => {
+  const s = await setup(t);
+  s.engine.toggleRun(); await s.settle();
+  assert.equal(s.boots[0].scene, 'second', 'only the selected scene needs its first costumes loaded');
+  const vm = s.handles[0].vm;
+  vm.onSceneChange('first'); assert.equal(s.w.Entry.scene.selectedScene.id, 'first');
+  vm.onSceneChange('missing'); assert.equal(s.w.Entry.scene.selectedScene.id, 'first');
+  const original = s.w.Entry;
+  s.w.Entry = { ...original, scene: { selectedScene: { id: 'unrelated' } } };
+  vm.onSceneChange('second'); assert.equal(original.scene.selectedScene.id, 'first', 'a previous project cannot select a scene in its replacement');
+  s.w.Entry = original;
+  await s.engine.toggleStop(); assert.equal(s.w.Entry.scene.selectedScene.id, 'second');
+  vm.onSceneChange('first'); assert.equal(s.w.Entry.scene.selectedScene.id, 'second', 'late notifications cannot move a stopped editor');
+});
+
 test('stopping or disabling during editor asset loading cannot start a late player', async t => {
   const s = await setup(t, true);
   s.engine.toggleRun(); await s.settle();
@@ -114,6 +139,20 @@ test('stopping or disabling during editor asset loading cannot start a late play
   assert.equal(s.handles[0].disposed, true);
   assert.equal(s.handles[0].vm.state, 'stop');
   assert.equal(s.w.document.querySelector('.entropy-editor-player'), null);
+});
+
+test('a cold run unlocks audio in the click handler and stopping aborts unfinished preparation', async t => {
+  const s = await setup(t, true);
+  s.engine.toggleRun();
+  assert.equal(s.counts().audioResumes, 1, 'resume is called before asynchronous module loading');
+  await s.settle();
+  await s.engine.toggleStop();
+  assert.equal(s.boots[0].signal.aborted, true);
+  assert.equal(s.counts().audioCloses, 1);
+  assert.equal(s.w.document.querySelector('.entropy-editor-player'), null);
+  s.release(); await s.settle();
+  assert.equal(s.handles[0].disposed, true);
+  assert.equal(s.handles[0].vm.state, 'stop');
 });
 
 test('enabling Entropy stops a running native editor before the next run', async t => {
@@ -129,15 +168,31 @@ test('enabling Entropy stops a running native editor before the next run', async
   assert.equal(s.counts().nativeTicks, 1);
 });
 
-test('enabling preloads once and disabling releases the prepared player without a run', async t => {
+test('native decoded audio is reused only when the queued file URL still matches the project', async t => {
+  const s = await setup(t);
+  s.engine.toggleRun(); await s.settle();
+  let src = '/old.wav';
+  const buffer = { duration: 1, getChannelData() { return new Float32Array(1); } };
+  s.w.Entry.soundQueue = { getItem: () => ({ src }), getResult: () => buffer };
+  const read = s.boots[0].readAudioBuffer;
+  assert.equal(read({ id: 'tone', fileurl: 'https://playentry.org/new.wav' }), undefined);
+  src = '/new.wav';
+  assert.equal(read({ id: 'tone', fileurl: 'https://playentry.org/new.wav' }), buffer);
+  s.w.Entry.soundQueue.getResult = () => undefined;
+  assert.equal(read({ id: 'tone', fileurl: 'https://playentry.org/new.wav' }), undefined);
+});
+
+test('editing does not create a second media library before running, and disabling releases the player', async t => {
   const s = await setup(t);
   await new Promise(resolve => setTimeout(resolve, 650)); await s.settle();
-  assert.equal(s.boots.length, 1);
+  assert.equal(s.boots.length, 0);
   assert.equal(s.counts().starts, 0);
-  assert.equal(s.handles[0].vm.state, 'stop');
-  assert.equal(s.w.document.querySelector('.entropy-editor-player').hidden, true);
+  assert.equal(s.counts().exports, 0);
+  assert.equal(s.w.document.querySelector('.entropy-editor-player'), null);
   s.engine.toggleRun(); await s.settle();
   assert.equal(s.boots.length, 1);
+  assert.equal(s.boots[0].preloadAssets, false);
+  assert.equal(s.boots[0].liveEditing, true);
   assert.equal(s.handles[0].vm.state, 'run');
   await s.engine.toggleStop();
   assert.equal(s.handles[0].disposed, false);
@@ -148,14 +203,14 @@ test('enabling preloads once and disabling releases the prepared player without 
 
 test('editor reuses Entry autosave export instead of exporting a large changed work twice', async t => {
   const s = await setup(t);
-  await new Promise(resolve => setTimeout(resolve, 650)); await s.settle();
+  s.engine.toggleRun(); await s.settle(); await s.engine.toggleStop();
   assert.equal(s.counts().exports, 1);
 
   s.work.variables[0].value = 10;
   s.change();
   s.w.Entry.exportProject(); // Entry site's debounced autosave export.
   assert.equal(s.counts().exports, 2);
-  await new Promise(resolve => setTimeout(resolve, 650)); await s.settle();
+  s.engine.toggleRun(); await s.settle();
   assert.equal(s.counts().exports, 2, 'Entropy preparation reuses the autosave result');
   assert.equal(s.reloads.length, 1);
 });
@@ -197,7 +252,7 @@ test('ordinary editor changes keep the same cloud connection', async t => {
   Object.assign(s.work.variables[0], { _id: 'mongo-score', isCloud: true, variableType: 'variable' });
   s.engine.toggleRun(); await s.settle(); await s.engine.toggleStop();
   assert.deepEqual(s.counts(), { nativeTicks: 0, starts: 1, stops: 1, exports: 1,
-    cloudClients: 1, cloudConnects: 1, cloudDisposals: 0 });
+    cloudClients: 1, cloudConnects: 1, cloudDisposals: 0, audioResumes: 1, audioCloses: 0 });
 
   (s.work.objects[0] as any).entity = { x: 1 };
   s.change();

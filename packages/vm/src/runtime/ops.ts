@@ -123,6 +123,7 @@ function ensureBrush(entity: Entity, which: 'brush' | 'paint'): BrushState {
 }
 
 export function createOps(vm: Vm) {
+  let activeQuestion: object | null = null;
   function pen(entity: Entity): void {
     const brush = entity.brush;
     if (brush && !brush.stop) {
@@ -791,17 +792,28 @@ export function createOps(vm: Vm) {
 
     *askAndWait(entity: Entity, message: unknown) {
       ops.dialog(entity, message, 'ask');
+      const dialog = entity.dialog;
+      const request = {};
+      activeQuestion = request;
       vm.question = String(message);
       vm.pendingAnswer = null;
-      vm.renderer?.showQuestion?.(String(message));
-      while (vm.pendingAnswer === null) {
-        yield 0;
+      try {
+        vm.renderer?.showQuestion?.(String(message));
+        while (activeQuestion === request && vm.pendingAnswer === null) {
+          yield 0;
+        }
+        if (activeQuestion === request) vm.answer = vm.pendingAnswer!;
+      } finally {
+        // Closing a replaced generator must not dismiss a newer question or
+        // consume its answer, even when both questions have identical text.
+        if (activeQuestion === request) {
+          activeQuestion = null;
+          vm.pendingAnswer = null;
+          vm.question = null;
+          vm.renderer?.hideQuestion?.();
+        }
+        if (entity.dialog === dialog) ops.removeDialog(entity);
       }
-      vm.answer = vm.pendingAnswer;
-      vm.pendingAnswer = null;
-      vm.question = null;
-      vm.renderer?.hideQuestion?.();
-      ops.removeDialog(entity);
     },
 
     answer(): string | number {
@@ -1222,6 +1234,7 @@ export function createOps(vm: Vm) {
     },
 
     *blockCount(entity: Entity, target: unknown, counts: Record<string, number>): Generator<number, number> {
+      counts = vm.liveBlockCounts ?? counts;
       return yield* settle((async () => {
         if (!target) return 0;
         // Entry reads the dropdown directly without evaluating or coercing it.

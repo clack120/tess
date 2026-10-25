@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compactLargeProject, PROJECT_JSON_LIMIT } from '../packages/extension/src/page/project-compact.ts';
+import { compactLargeProject, PROJECT_JSON_LIMIT, type CompactionCache } from '../packages/extension/src/page/project-compact.ts';
+import { stub } from './stub.ts';
 
 const defaults = { movable: null, deletable: 1, emphasized: false, readOnly: null,
   copyable: true, assemble: true, extensions: [], params: [], statements: [], x: 0, y: 0 };
@@ -66,4 +67,40 @@ test('malformed scripts, unfamiliar metadata and array-form code survive compact
   assert.deepEqual(result.objects[1]!.script, [[{ id: 'hat', type: 'when_run_button_click', x: 0, y: 0 }]]);
   assert.equal(result.functions[0]!.content, '{broken');
   assert.deepEqual(result.sprite, work.sprite);
+});
+
+test('repeated autosaves compact only changed code and release code removed from the current export', t => {
+  const first = JSON.stringify([[{ id: 'first', type: 'when_run_button_click', ...defaults }]]);
+  const second = JSON.stringify([[{ id: 'second', type: 'when_run_button_click', ...defaults }]]);
+  const work = { objects: [{ script: first }, { script: second }], functions: [{ content: second }] };
+  const cache: CompactionCache = new Map();
+  const parse = JSON.parse;
+  let parses = 0;
+  stub(t, JSON, 'parse', (text: string) => { parses++; return parse(text); });
+  const result = compactLargeProject(work, 1, cache);
+  assert.equal(parses, 2, 'identical function/object code is compacted once');
+  assert.deepEqual(compactLargeProject(structuredClone(work), 1, cache).project, result.project);
+  assert.equal(parses, 2, 'the next autosave reuses all unchanged code');
+  work.objects[0]!.script = first.replace('first', 'edited');
+  compactLargeProject(work, 1, cache);
+  assert.equal(parses, 3);
+  assert.equal(cache.has(first), false);
+  assert.equal(cache.has(second), true);
+});
+
+test('incremental byte counts match JSON for escaped code, Unicode, PNG-only records and omitted fields', () => {
+  const cache: CompactionCache = new Map();
+  for (let i = 0; i < 40; i++) {
+    const code = JSON.stringify([[{ id: 'hat', type: 'when_run_button_click', ...defaults,
+      params: ['한글😀"\\\n\ud800'.repeat(i)] }]]);
+    const work = { objects: [{ script: code, sprite: { pictures: [
+      { imageType: 'png' }, { imageType: 'png', omitted: undefined },
+      { id: 'picture', imageType: 'png', name: '한글😀' },
+      { imageType: 'svg', filename: 'keep' },
+    ] } }], functions: [{ content: code }], variables: [{ value: '글'.repeat(i) }], custom: { value: i } };
+    const result = compactLargeProject(work, 1, cache);
+    assert.equal(result.beforeBytes, new TextEncoder().encode(JSON.stringify(work)).byteLength);
+    assert.equal(result.afterBytes, new TextEncoder().encode(JSON.stringify(result.project)).byteLength);
+    assert.equal(work.objects[0]!.sprite.pictures[0]!.imageType, 'png');
+  }
 });

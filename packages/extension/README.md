@@ -11,19 +11,22 @@ bun run build:extension
 | 파일 | 용도 |
 | --- | --- |
 | `dist/` | Chromium·Firefox에서 압축 해제 확장으로 로드 |
-| `entropy-extension-chrome.zip` | Chromium용 ZIP |
-| `entropy-extension.zip` | Firefox용 ZIP |
+| `entropy-extension.zip` | Chromium·Firefox 121 이상용 공통 ZIP |
 | `entropy.user.js` | Violentmonkey·Safari Userscripts용 단일 파일 |
 
-- Chromium: 확장 관리 화면에서 개발자 모드를 켜고 `dist/`를 압축 해제된 확장으로 불러옵니다.
-- Firefox 121 이상: `about:debugging#/runtime/this-firefox`에서 `dist/manifest.json` 또는 Firefox용 ZIP을 불러옵니다.
-- 유저스크립트: 유저스크립트 관리자에서 `entropy.user.js`를 설치합니다. 캐시는 기본으로 켜지며 실행 화면의 우클릭 메뉴에서 끄거나 비울 수 있습니다.
+- Chromium 121 이상: 확장 관리 화면에서 개발자 모드를 켜고 `dist/` 또는 ZIP을 푼 폴더를 압축 해제된 확장으로 불러옵니다.
+- Firefox 121 이상: `about:debugging#/runtime/this-firefox`에서 `dist/manifest.json` 또는 `entropy-extension.zip`을 불러옵니다.
+- 유저스크립트: 유저스크립트 관리자에서 [최신 `entropy.user.js`](https://github.com/clack120/tess/releases/latest/download/entropy.user.js)를 설치합니다. 캐시는 기본으로 켜지며 실행 화면의 우클릭 메뉴에서 끄거나 비울 수 있습니다.
 
 ## 설정과 기능
 
 툴바 창에서 실행기, SVG 사용, 에셋 캐시와 작품 저장값을 관리할 수 있습니다. 확장 캐시는 기본으로 꺼져 있습니다.
 
 에디터에서 내보내는 작품 JSON이 설정된 크기 경고선을 넘으면 생략할 수 있는 기본값을 줄여 저장을 돕습니다. 그래도 너무 크면 저장이 실패할 수 있습니다.
+
+실행 중에도 기존 블록과 함수 본문을 임시로 편집하고 **실행에 적용**할 수 있습니다. 잠시 일시정지해 갱신한 뒤 자동 재개하며, 원래 일시정지 상태였다면 그대로 둡니다. 실행 위치·대기·남은 반복 횟수를 유지하고 다음 블록부터 수정 내용을 반영합니다. 이미 지난 블록은 다시 실행하지 않습니다. 정지하면 원래 블록과 되돌리기 기록을 복원하며, 임시 편집은 저장하지 않습니다. 함수 추가·삭제와 이름·매개변수 변경은 정지 후 편집하세요.
+
+소리가 많은 오브젝트의 목록은 나눠 준비하며, 선택한 소리를 읽는 동안에도 다른 탭으로 이동할 수 있습니다.
 
 실행 화면의 우클릭 메뉴에서 디버거를 열 수 있습니다. 장면·오브젝트·클론을 고르고 상태를 확인하거나 수정할 수 있으며, 패널은 이동하고 높이를 조절할 수 있습니다.
 

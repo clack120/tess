@@ -38,26 +38,82 @@ function compactCode(code: unknown): unknown {
   return typeof code === 'string' ? JSON.stringify(threads) : threads;
 }
 
-export function compactLargeProject<T>(project: T, limit = PROJECT_JSON_LIMIT): {
+export type CompactionCache = Map<string, { bytes: number; compacted?: string }>;
+
+export function compactLargeProject<T>(project: T, limit = PROJECT_JSON_LIMIT, cache: CompactionCache = new Map()): {
   project: T; beforeBytes: number; afterBytes: number;
 } {
-  const serialized = JSON.stringify(project);
-  const beforeBytes = bytes(serialized);
-  if (beforeBytes <= limit) return { project, beforeBytes, afterBytes: beforeBytes };
-  // Work on the exported JSON copy, never on the editor's mutable model.
-  const copy: unknown = JSON.parse(serialized);
-  if (!record(copy)) return { project, beforeBytes, afterBytes: beforeBytes };
-  if (Array.isArray(copy.objects)) for (const object of copy.objects) {
-    if (!record(object)) continue;
-    if ('script' in object) object.script = compactCode(object.script);
-    if (record(object.sprite) && Array.isArray(object.sprite.pictures)) {
-      for (const picture of object.sprite.pictures) {
-        if (record(picture) && picture.imageType === 'png') delete picture.imageType;
-      }
+  if (!record(project)) {
+    const size = bytes(JSON.stringify(project));
+    return { project, beforeBytes: size, afterBytes: size };
+  }
+  // Native exports are JSON records. Normalize unusual custom serializers
+  // before measuring them, just as the original JSON-copy path did.
+  if (typeof project.toJSON === 'function') {
+    const serialized = JSON.stringify(project), beforeBytes = bytes(serialized);
+    if (beforeBytes <= limit) return { project, beforeBytes, afterBytes: beforeBytes };
+    return compactLargeProject(JSON.parse(serialized), limit, cache);
+  }
+  const used = new Set<string>();
+  const codeSize = (code: string) => {
+    used.add(code);
+    let entry = cache.get(code);
+    if (!entry) { entry = { bytes: bytes(JSON.stringify(code)) }; cache.set(code, entry); }
+    return entry;
+  };
+  let codeBytes = 0;
+  const measureCode = (owner: unknown, field: string) => {
+    if (!record(owner) || !Object.hasOwn(owner, field) || typeof owner[field] !== 'string' || typeof owner.toJSON === 'function') return owner;
+    codeBytes += codeSize(owner[field]).bytes - 4; // JSON null occupies four bytes.
+    return { ...owner, [field]: null };
+  };
+  // Measure metadata once. Unchanged code strings already have a size from the
+  // previous autosave, so neither the whole work nor its code needs cloning.
+  const measured: JsonRecord = { ...project };
+  if (Object.hasOwn(project, 'objects') && Array.isArray(project.objects)) measured.objects = project.objects.map(object => measureCode(object, 'script'));
+  if (Object.hasOwn(project, 'functions') && Array.isArray(project.functions)) measured.functions = project.functions.map(fn => measureCode(fn, 'content'));
+  const beforeBytes = bytes(JSON.stringify(measured)) + codeBytes;
+  const finish = (copy: T, afterBytes: number) => {
+    for (const code of cache.keys()) if (!used.has(code)) cache.delete(code);
+    return { project: copy, beforeBytes, afterBytes };
+  };
+  if (beforeBytes <= limit) return finish(project, beforeBytes);
+  let difference = 0;
+  const compact = (code: unknown) => {
+    if (typeof code === 'string') {
+      const entry = codeSize(code);
+      entry.compacted ??= compactCode(code) as string;
+      difference += codeSize(entry.compacted).bytes - entry.bytes;
+      return entry.compacted;
     }
-  }
-  if (Array.isArray(copy.functions)) for (const fn of copy.functions) {
-    if (record(fn) && 'content' in fn) fn.content = compactCode(fn.content);
-  }
-  return { project: copy as T, beforeBytes, afterBytes: bytes(JSON.stringify(copy)) };
+    const copy = compactCode(code);
+    if (copy !== code) difference += bytes(JSON.stringify(copy)) - bytes(JSON.stringify(code));
+    return copy;
+  };
+  // Copy only the exported branches whose defaults change. Editor code models
+  // and the unmodified metadata are never serialized back into a second work.
+  const copy: JsonRecord = { ...project };
+  if (Object.hasOwn(project, 'objects') && Array.isArray(project.objects)) copy.objects = project.objects.map(object => {
+    if (!record(object) || typeof object.toJSON === 'function') return object;
+    const next = { ...object };
+    if (Object.hasOwn(object, 'script')) next.script = compact(object.script);
+    if (record(object.sprite) && Array.isArray(object.sprite.pictures)) {
+      const pictures = object.sprite.pictures.map(picture => {
+        if (!record(picture) || !Object.hasOwn(picture, 'imageType') || picture.imageType !== 'png' || typeof picture.toJSON === 'function') return picture;
+        const next = { ...picture }; delete next.imageType;
+        // Removing a property also removes one comma if any other property
+        // survives JSON serialization. Values outside JSON records are omitted.
+        const other = Object.values(next).some(value => value !== undefined && typeof value !== 'function' && typeof value !== 'symbol');
+        difference -= '"imageType":"png"'.length + Number(other);
+        return next;
+      });
+      next.sprite = { ...object.sprite, pictures };
+    }
+    return next;
+  });
+  if (Object.hasOwn(project, 'functions') && Array.isArray(project.functions)) copy.functions = project.functions.map(fn => {
+    if (!record(fn) || typeof fn.toJSON === 'function' || !Object.hasOwn(fn, 'content')) return fn;
+    return { ...fn, content: compact(fn.content) };
+  });
+  return finish(copy as T, beforeBytes + difference);
 }

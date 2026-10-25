@@ -76,6 +76,35 @@ test('project edits keep unchanged textures and release only replaced or removed
   renderer.destroy(); await settle(); assert.equal(cache.size, 0);
 });
 
+test('entering an unloaded scene refreshes static costumes and never stretches a stale costume while loading', async () => {
+  const s = setup(), renderer = s.create();
+  renderer.options.lazyAssets = true;
+  renderer.app.renderer.render = () => {};
+  renderer.applyEffects = () => {};
+  const first = s.picture('first'), second = s.picture('second', '/second.png');
+  const entity = { target: { sceneId: 'second' }, picture: first, visible: true, dirty: true,
+    x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, effect: { alpha: 1 }, width: 10, height: 10, regX: 0, regY: 0 };
+  const sprite: any = { texture: {}, visible: true };
+  const view = { root: { position: { set() {} }, scale: { set() {} }, pivot: { set() {} }, destroy() {} }, sprite, stamps: [] };
+  renderer.views.set(entity, view);
+  renderer.sceneLayers.set('first', { visible: true, destroy() {} });
+  renderer.sceneLayers.set('second', { visible: false, destroy() {} });
+  renderer.flush(); assert.equal(entity.dirty, false); assert.equal(renderer.textures.size, 0);
+  renderer.setScene('second'); assert.equal(entity.dirty, true);
+  renderer.flush(); await s.settle(); renderer.flush();
+  const kept = sprite.texture;
+  assert.equal(kept, renderer.textures.get('first')); assert.equal(sprite.visible, true);
+  s.hold(); entity.picture = second; entity.width = 300; entity.dirty = true;
+  renderer.flush(); await s.settle(); assert.equal(sprite.visible, false);
+  entity.picture = first; entity.width = 10; entity.dirty = true;
+  renderer.flush(); assert.equal(sprite.visible, true); assert.equal(sprite.texture, kept);
+  s.pending[0]!(); await s.settle();
+  entity.picture = second; entity.width = 300; entity.dirty = true; renderer.flush();
+  assert.equal(sprite.visible, true); assert.equal(sprite.texture, renderer.textures.get('second'));
+  assert.equal(sprite.width, 300, 'the requested width is applied to the loaded costume');
+  renderer.destroy(); await s.settle();
+});
+
 test('a late costume load cannot repopulate a destroyed renderer or retain its global texture', async () => {
   const { create, picture, cache, aliases, pending, hold, settle } = setup();
   hold(); const renderer = create(); const job = renderer.loadPicture(picture());

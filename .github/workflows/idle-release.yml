@@ -81,7 +81,6 @@ jobs:
         run: |
           gh release create "$RELEASE_TAG" \
             packages/extension/entropy-extension.zip \
-            packages/extension/entropy-extension-chrome.zip \
             packages/extension/entropy.user.js \
             --target "$GITHUB_SHA" \
             --title "$GITHUB_SHA" \

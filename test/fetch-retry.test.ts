@@ -39,6 +39,18 @@ test('aborting stops a pending retry', async t => {
   await assert.rejects(pending);
 });
 
+test('initial cache preferences and toggles never report a content change or read stored files', async t => {
+  const { setAssetCache, onAssetCacheChange } = await import('../packages/vm/src/web/fetch-retry.ts');
+  let scans = 0;
+  let reads = 0;
+  stub(t, globalThis, 'caches', { async open() { reads++; }, async has() { reads++; return false; } });
+  const unsubscribe = onAssetCacheChange(() => { scans++; });
+  t.after(unsubscribe);
+  setAssetCache(false); setAssetCache(true); setAssetCache(false);
+  assert.equal(scans, 0);
+  assert.equal(reads, 0);
+});
+
 test('the asset cache survives switching off and is removed only by explicit deletion', async t => {
   const { fetchAsset, setAssetCache, assetCacheSize, onAssetCacheChange, clearAssetCache } = await import('../packages/vm/src/web/fetch-retry.ts');
   const stores = new Map<string, Map<string, Response>>();

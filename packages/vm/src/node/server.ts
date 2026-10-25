@@ -51,6 +51,7 @@ export interface RunningServer {
 }
 
 const SRC_DIR = fileURLToPath(new URL('../', import.meta.url));
+const CORE_DIR = fileURLToPath(new URL('../../../core/', import.meta.url));
 const PIXI_FILE = fileURLToPath(
   new URL('../../node_modules/pixi.js/dist/pixi.mjs', import.meta.url),
 );
@@ -195,12 +196,15 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
 
     if (url.startsWith('/vm/')) {
       const relative = url.slice('/vm/'.length);
-      const file = path.join(SRC_DIR, relative);
-      if (!inside(SRC_DIR, file) || !fs.existsSync(file)) {
+      const core = relative.startsWith('core/');
+      const root = core ? CORE_DIR : SRC_DIR;
+      const file = path.join(root, core ? relative.slice('core/'.length) : relative);
+      if (!inside(root, file) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
         return send(response, 404, 'text/plain', 'not found');
       }
       const source = fs.readFileSync(file, 'utf-8');
-      const code = file.endsWith('.ts') ? stripTypes(source) : source;
+      const code = (file.endsWith('.ts') ? stripTypes(source) : source)
+        .replace(/(\bfrom\s*)(['"])@entropy\/core\2/g, '$1$2/vm/core/index.ts$2');
       return send(response, 200, MIME['.js']!, code);
     }
 
@@ -221,7 +225,10 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
       for (const listener of listeners) {
         listener.end();
       }
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections?.();
+      });
     },
     update(next) {
       routes = assetRoutes(next.assets, options.assetDirs);

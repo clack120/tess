@@ -354,6 +354,12 @@ test('실행 서버가 패널과 소스맵을 함께 내보낸다', async () => 
     const preactFile = ui.text.match(/from ["']\/preact\/([^"']+)["']/)![1];
     assert.equal((await get('/preact/' + preactFile)).status, 200);
     assert.equal((await get('/preact/' + encodeURIComponent('../../../package.json'))).status, 404);
+    const codegen = await get('/vm/compile/codegen.ts');
+    assert.match(codegen.text, /from ['"]\/vm\/core\/index\.ts['"]/);
+    assert.equal((await get('/vm/core/index.ts')).status, 200);
+    assert.equal((await get('/vm/core/src/expansion.ts')).status, 200);
+    assert.equal((await get('/vm/core/')).status, 404);
+    assert.equal((await get('/vm/core/' + encodeURIComponent('../../../package.json'))).status, 404);
 
     const sourceMap = JSON.parse((await get('/sourcemap.json')).text);
     assert.ok(Object.keys(sourceMap).length > 0, '블록마다 원본 위치가 있어야 한다');

@@ -10,6 +10,7 @@ import { expansionBlock } from '@entropy/core';
 let nextSourceId = 0;
 
 export interface CompileInput {
+  liveEditing?: boolean;
   objects: Array<{ id: string; scene?: string; script: string | RawBlock[][] }>;
   // sharedList marks lists no object owns; generated code then reads them without an entity lookup.
   variables: Array<{ id: string; variableType?: string; sharedList?: boolean }>;
@@ -162,6 +163,10 @@ export class Codegen {
   private readonly plans: ScriptPlan[] = [];
   private readonly bodies: string[] = [];
   private readonly functionSources: string[] = [];
+  private readonly liveBlocks = new Map<string, string>();
+  private readonly liveSequences = new Map<string, string[]>();
+  private readonly liveChecks = new Map<string, string>();
+  private readonly liveTypes = new Map<string, string>();
   readonly unknown = new Map<string, number>();
   private needsBlockCounts = false;
   private keys: Set<number> | null = new Set();
@@ -193,10 +198,29 @@ export class Codegen {
   }
 
   compile(): CompiledProgram {
+    const steps = this.compileSteps();
+    let result = steps.next();
+    while (!result.done) result = steps.next();
+    return result.value;
+  }
+
+  async compileAsync(pause: () => Promise<void> | undefined, signal?: AbortSignal): Promise<CompiledProgram> {
+    const steps = this.compileSteps();
+    for (;;) {
+      signal?.throwIfAborted();
+      const result = steps.next();
+      if (result.done) return result.value;
+      const pending = pause();
+      if (pending) await pending;
+    }
+  }
+
+  private *compileSteps(): Generator<void, CompiledProgram, unknown> {
     for (const fn of this.input.functions) {
       this.functionSources.push(this.compileFunction(fn));
+      yield;
     }
-    this.input.objects.forEach((object, targetIndex) => {
+    for (const [targetIndex, object] of this.input.objects.entries()) {
       const script = parseScript(object.script);
       for (const stack of script) {
         const hat = stack[0];
@@ -212,7 +236,7 @@ export class Codegen {
         const filter =
           filterIndex === undefined ? null : text(hat.params[filterIndex]);
         if (event === 'keyPress') this.keys?.add(Number(filter));
-        const body = this.compileStack(stack.slice(1));
+        const body = this.compileStack(stack.slice(1), '  ', `object:${object.id}:${hat.id}`);
         this.plans.push({
           targetIndex,
           event,
@@ -220,9 +244,12 @@ export class Codegen {
           blockId: hat.id,
           index: this.bodies.length,
         });
-        this.bodies.push(`function* (e, th) {\n${body}}`);
+        this.bodies.push(this.input.liveEditing
+          ? `function* (e, th) { const ctx = { entity: e }; try {\n${body}} catch (x) { if (x !== R.liveCode.exit) throw x; } }`
+          : `function* (e, th) {\n${body}}`);
+        yield;
       }
-    });
+    }
     return { source: this.emitModule(), plans: this.plans, unknown: this.unknown, keys: this.keys, trace: this.trace };
   }
 
@@ -254,7 +281,10 @@ export class Codegen {
     this.functionSources.forEach((source, index) => {
       parts.push(`F[${index}] = ${source};`);
     });
-    parts.push(`return { scripts: [\n${this.bodies.join(',\n')}\n], functions: F };`);
+    const live = this.input.liveEditing
+      ? `, blocks: {${[...this.liveBlocks].map(([id, source]) => `${literal(id)}: ${source}`).join(',\n')}}, sequences: ${literal(Object.fromEntries(this.liveSequences))}, blockTypes: ${literal(Object.fromEntries(this.liveTypes))}, checks: {${[...this.liveChecks].map(([id, source]) => `${literal(id)}: ${source}`).join(',\n')}}`
+      : '';
+    parts.push(`return { scripts: [\n${this.bodies.join(',\n')}\n], functions: F${live} };`);
     const source = parts.join('\n');
     let line = 3, column = 1, previous = 0; // new Function adds two header lines.
     const clean: string[] = [];
@@ -303,22 +333,27 @@ export class Codegen {
       .join(', ');
     const previousLabel = this.funcLabel;
     this.funcLabel = 'fn';
-    const body = this.compileStack(functionBody(stack!), '    ');
+    const body = this.compileStack(functionBody(stack!), '    ', `function:${fn.id}`);
     this.funcLabel = previousLabel;
 
     // Beyond the depth limit, a call runs no body and produces no value.
     const returnsValue = define.type === 'function_create_value';
-    const result = returnsValue ? this.value(define.params[3]).code : '';
+    const result = returnsValue ? this.liveCheck(`return:${fn.id}`, this.value(define.params[3]).code) : '';
     // On pause, finish skips the value function body and evaluates its return expression.
     let source =
       `function* (e, th, P) {\n` +
       `  if (th.depth >= ${CALL_DEPTH_LIMIT}) throw new RangeError('함수 호출이 너무 깊습니다 (끝나지 않는 재귀)');\n` +
       `  th.depth += 1;\n` +
       `  try {\n` +
-      `  const L = {${locals}};\n`;
+      `  const L = {${locals}};\n` +
+      (this.input.liveEditing ? '  const ctx = { entity: e, params: P, locals: L };\n' : '');
+    const liveExit = this.input.liveEditing ? ' && x !== R.liveCode.exit' : '';
+    const syncEntity = this.input.liveEditing ? '  e = ctx.entity;\n' : '';
     source += returnsValue
-      ? `  try {\n  fn: {\n${body}  }\n  } catch (x) { if (x !== th.finish) throw x; }\n  return ${result};\n`
-      : `  fn: {\n${body}  }\n`;
+      ? `  try {\n  fn: {\n${body}  }\n  } catch (x) { if (x !== th.finish${liveExit}) throw x; }\n${syncEntity}  return ${result};\n`
+      : this.input.liveEditing
+        ? `  try {\n${body}  } catch (x) { if (x !== R.liveCode.exit) throw x; }\n`
+        : `  fn: {\n${body}  }\n`;
     source += '  } finally { th.depth -= 1; }\n}';
 
     this.paramSlots = null;
@@ -331,10 +366,22 @@ export class Codegen {
 
   // Ending a function executor leaves its caller alive and still evaluates its return expression.
   private endExecutor(): string {
+    if (this.input.liveEditing) return 'throw R.liveCode.exit;';
     return this.funcLabel ? `break ${this.funcLabel};` : 'return;';
   }
 
-  private compileStack(blocks: RawBlock[], indent = '  '): string {
+  private compileStack(blocks: RawBlock[], indent = '  ', sequenceId = 'probe'): string {
+    if (this.input.liveEditing) {
+      const ids = blocks.map((block, index) => block.id ?? `${sequenceId}:${index}`);
+      this.liveSequences.set(sequenceId, ids);
+      blocks.forEach((block, index) => {
+        const id = ids[index]!;
+        this.liveTypes.set(id, block.type);
+        const body = this.statement({ ...block, id }, '  ');
+        this.liveBlocks.set(id, `function* (ctx, th) { let e = ctx.entity; const P = ctx.params, L = ctx.locals;\n${body}}`);
+      });
+      return `${indent}yield R.liveCode.sequence(${literal(sequenceId)}, ctx, th);\n`;
+    }
     let out = '';
     for (const block of blocks) {
       out += this.statement(block, indent);
@@ -458,26 +505,26 @@ export class Codegen {
       case 'repeat_basic':
         return this.repeatBasic(block, ind);
       case 'repeat_inf':
-        return this.loop(`while (true) {`, block.statements?.[0] ?? [], ind);
+        return this.loop(`while (${this.liveCheck(block.id, 'true')}) {`, block.statements?.[0] ?? [], ind, false, block.id);
       // Maze loops cost no frame; guard nonempty bodies and skip empty ones, matching Entry.
       case 'ai_repeat_until_reach':
         return block.statements?.[0]?.length
-          ? this.loop(`while (true) {`, block.statements[0], ind, true)
+          ? this.loop(`while (true) {`, block.statements[0], ind, true, block.id)
           : '';
       case 'repeat_while_true':
         return this.repeatWhile(block, ind);
       case '_if':
         return (
           line(`if (${this.bool(p[0])}) {`) +
-          this.compileStack(block.statements?.[0] ?? [], `${ind}  `) +
+          this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`) +
           line('}')
         );
       case 'if_else':
         return (
           line(`if (${this.bool(p[0])}) {`) +
-          this.compileStack(block.statements?.[0] ?? [], `${ind}  `) +
+          this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`) +
           line('} else {') +
-          this.compileStack(block.statements?.[1] ?? [], `${ind}  `) +
+          this.compileStack(block.statements?.[1] ?? [], `${ind}  `, `${block.id}:1`) +
           line('}')
         );
       case 'wait_until_true': {
@@ -486,12 +533,12 @@ export class Codegen {
         if (trick) {
           return line(this.trickCode(trick));
         }
-        return line(`while (!(${this.bool(p[0])})) { yield 0; }`);
+        return line(`while (!(${this.liveCheck(block.id, this.bool(p[0]))})) { yield 0; }`);
       }
       case 'stop_repeat':
-        return this.loopDepth > 0 ? line('break;') : line(this.endExecutor());
+        return line(this.trickCode('break'));
       case 'continue_repeat':
-        return this.loopDepth > 0 ? line('{ yield 0; continue; }') : line('yield 0;');
+        return this.loopDepth > 0 ? line(`{ yield 0; ${this.trickCode('continue')} }`) : line('yield 0;');
       case 'stop_object':
         return this.stopObject(text(p[0]), ind);
       case 'restart_project':
@@ -515,7 +562,7 @@ export class Codegen {
       case 'start_neighbor_scene':
         return line(`O.startNeighborScene(${this.field(p[0])}); O.die();`);
       case 'switch_scope':
-        return line(`e = O.entityOf(${this.field(p[0])}) || e;`);
+        return line(`${this.input.liveEditing ? 'ctx.entity = ' : ''}e = O.entityOf(${this.field(p[0])}) || e;`);
 
       case 'set_variable':
         return line(`O.setVariable(e, ${this.varRef(p[0])}, ${this.raw(p[1])});`);
@@ -676,6 +723,7 @@ export class Codegen {
         // This iteration skips yielding, so the enclosing loop needs a guard.
         this.spinning[this.spinning.length - 1] = true;
       }
+      if (this.input.liveEditing) return `throw R.liveCode.${trick};`;
       return trick === 'break' ? 'break;' : 'continue;';
     }
     return trick === 'break' ? this.endExecutor() : 'yield 0;';
@@ -697,7 +745,7 @@ export class Codegen {
     const varName = `i${depth}`;
     this.loopDepth += 1;
     this.spinning.push(false);
-    const inner = this.compileStack(block.statements?.[0] ?? [], `${ind}  `);
+    const inner = this.loopBody(this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`), ind);
     const spins = this.spinning.pop() ?? false;
     this.loopDepth -= 1;
     const head = spins ? `, s${depth} = 0, m${depth} = O.frame()` : '';
@@ -713,16 +761,28 @@ export class Codegen {
   private repeatWhile(block: RawBlock, ind: string): string {
     const until = text(block.params[1] ?? 'until') === 'until';
     const condition = until ? `!(${this.bool(block.params[0])})` : this.bool(block.params[0]);
-    return this.loop(`while (${condition}) {`, block.statements?.[0] ?? [], ind);
+    return this.loop(`while (${this.liveCheck(block.id, condition)}) {`, block.statements?.[0] ?? [], ind, false, block.id);
+  }
+
+  private liveCheck(id: string, expression: string): string {
+    if (!this.input.liveEditing) return expression;
+    this.liveChecks.set(id, `function* (ctx, th) { const e = ctx.entity, P = ctx.params, L = ctx.locals; return ${expression}; }`);
+    return `(yield R.liveCode.check(${literal(id)}, ctx, th))`;
+  }
+
+  private loopBody(body: string, ind: string): string {
+    return this.input.liveEditing
+      ? `${ind}  try {\n${body}${ind}  } catch (x) { if (x === R.liveCode.break) break; if (x === R.liveCode.continue) continue; throw x; }\n${ind}  e = ctx.entity;\n`
+      : body;
   }
 
   // Loop iterations cost a frame unless the body skips yielding.
   // Frameless loops still need the spin guard to yield when stuck.
-  private loop(header: string, body: RawBlock[], ind: string, frameless = false): string {
+  private loop(header: string, body: RawBlock[], ind: string, frameless = false, id = ''): string {
     const depth = this.loopDepth;
     this.loopDepth += 1;
     this.spinning.push(false);
-    const inner = this.compileStack(body, `${ind}  `);
+    const inner = this.loopBody(this.compileStack(body, `${ind}  `, `${id}:0`), ind);
     const spins = (this.spinning.pop() ?? false) || frameless;
     this.loopDepth -= 1;
     const tail = frameless ? '' : `${ind}  yield 0;\n`;
@@ -1137,7 +1197,7 @@ export class Codegen {
     // Preserve empty argument slots so later arguments keep their declaration indices.
     const args = block.params.map((param) => this.raw(param));
     // Yield calls onto the thread's stack so recursion does not grow the JS stack.
-    const call = `(yield F[${index}](e, th, [${args.join(', ')}]))`;
+    const call = `(yield ${this.input.liveEditing ? 'R.liveCode.functions' : 'F'}[${index}](e, th, [${args.join(', ')}]))`;
     return { code: asValue ? call : `${ind}${call};\n` };
   }
 

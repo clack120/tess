@@ -56,6 +56,8 @@ test('zip 으로 내보내면 페이지·작품·모듈·에셋이 모두 들어
   assert.ok(files.has('project.json'));
   assert.ok(files.has('vm/web/boot.js'));
   assert.ok(files.has('vm/pixi.mjs'));
+  assert.ok(files.has('vm/core/index.js'));
+  assert.ok(files.has('vm/core/src/expansion.js'));
   assert.equal(made.assets, 1);
   assert.equal(made.kernel, false);
 
@@ -66,6 +68,10 @@ test('zip 으로 내보내면 페이지·작품·모듈·에셋이 모두 들어
   const boot = files.get('vm/web/boot.js')!.toString('utf-8');
   assert.match(boot, /from ['"]\.\.\/runtime\/engine\.js['"]/);
   assert.doesNotMatch(boot, /from ['"][^'"]*\.ts['"]/);
+  for (const [name, bytes] of files) {
+    if (name.endsWith('.js')) assert.doesNotMatch(bytes.toString('utf8'), /from ['"]@entropy\//, name);
+  }
+  assert.match(files.get('vm/compile/codegen.js')!.toString('utf8'), /from ['"]\.\.\/core\/index\.js['"]/);
 
   const served = JSON.parse(files.get('project.json')!.toString('utf-8'));
   const fileurl = served.objects[0].sprite.pictures[0].fileurl;
@@ -81,6 +87,8 @@ test('단일 html 은 모듈·작품·에셋을 글 안에 담고 커널을 끈 
   // Rewrite relative module imports because blob URLs have no directory base.
   assert.match(html, /entropy\/web\/boot\.ts/);
   assert.match(html, /entropy\/runtime\/engine\.ts/);
+  assert.match(html, /entropy\/core\/index\.ts/);
+  assert.doesNotMatch(html, /from ['"]@entropy\//);
   assert.ok(!html.includes('../runtime/engine.ts'));
   // Decode textures on this thread so they can access the page's in-memory assets.
   assert.match(html, /preferWorkers = false/);

@@ -3,6 +3,8 @@ import type { CloudClient } from './cloud.ts';
 import { withAssetUrls, type EntryWork } from './entry-project.ts';
 import { signedInUser } from './signed-in.ts';
 import { compactLargeProject, PROJECT_JSON_LIMIT } from './project-compact.ts';
+import { improveSoundLoading } from './editor-sounds.ts';
+import { beginLiveEditing, type LiveEditing } from './editor-live.ts';
 
 interface Editor {
   type: string;
@@ -10,12 +12,14 @@ interface Editor {
   engine: Record<string, any>;
   tickTime: number;
   playground?: Record<string, any>;
+  soundQueue?: { getItem(id: string): { src?: unknown } | undefined; getResult(id: string): unknown };
   creationChangedEvent?: { attach(owner: unknown, fn: () => void): { destroy(): void } };
   exportProject(): EntryWork | false;
   getMainWS(): any;
-  scene: { selectedScene?: { id: string } };
+  scene: { selectedScene?: { id: string }; getSceneById?(id: string): unknown; selectScene?(scene: unknown): void };
 }
 interface Prepared {
+  audioContext?: AudioContext;
   root: HTMLElement;
   status: HTMLElement;
   controller: AbortController;
@@ -41,25 +45,40 @@ let attached: Editor | null = null;
 let attachedEngine: Record<string, any> | null = null;
 let restore: (() => void) | null = null;
 let prepared: Prepared | null = null;
-let active: { cleanup(): void } | null = null;
-let preparingTimer: ReturnType<typeof setTimeout> | undefined;
+let active: { live?: LiveEditing | null; cleanup(): void } | null = null;
 let dirty = true;
 let editRevision = 0;
 let cachedExport: { entry: Editor; revision: number; work: EntryWork } | null = null;
 let exportingEntry: Editor | null = null;
 let wrappedExport: Editor['exportProject'] | null = null;
 let restoreExport: (() => void) | null = null;
+let soundEditor: unknown = null;
+let restoreSound: (() => void) | null = null;
+
+function traceEditor(phase: string): void {
+  if (document.documentElement) document.documentElement.dataset.entropyEditorPhase = phase;
+  try {
+    const key = 'entropy-editor-trace';
+    const previous = JSON.parse(sessionStorage.getItem(key) ?? '[]');
+    const trace = Array.isArray(previous) ? previous.slice(-23) : [];
+    trace.push({ time: Date.now(), phase });
+    sessionStorage.setItem(key, JSON.stringify(trace));
+  } catch {}
+}
+traceEditor('loaded');
 
 function observeExport(entry: Editor | undefined): void {
   if (exportingEntry === entry && entry?.type === 'workspace' && entry.exportProject === wrappedExport) return;
   restoreExport?.(); restoreExport = null; exportingEntry = null; wrappedExport = null;
   if (entry?.type !== 'workspace' || typeof entry.exportProject !== 'function') return;
   const original = entry.exportProject;
+  const compactionCache = new Map();
   const observed = function(this: Editor, ...args: unknown[]) {
+    if (active?.live && attached === entry) return active.live.work;
     let work = Reflect.apply(original, this, args) as EntryWork | false;
     if (work) {
       try {
-        const result = compactLargeProject(work);
+        const result = compactLargeProject(work, PROJECT_JSON_LIMIT, compactionCache);
         work = result.project;
         if (result.beforeBytes > PROJECT_JSON_LIMIT) {
           const message = `[Entropy] 저장 JSON 축약: ${result.beforeBytes.toLocaleString()} → ${result.afterBytes.toLocaleString()} bytes`;
@@ -85,7 +104,8 @@ function observeExport(entry: Editor | undefined): void {
   };
 }
 
-function finish(): void {
+function finish(): () => void {
+  traceEditor('stopping');
   const old = active;
   active = null;
   prepared?.handle?.stop();
@@ -94,7 +114,13 @@ function finish(): void {
     prepared.root.tabIndex = -1;
     prepared.root.setAttribute('aria-hidden', 'true');
   }
-  old?.cleanup();
+  if (prepared?.busy) discard();
+  // Restore native code only after toggleStop has restored Entry's edit state.
+  return () => {
+    old?.cleanup();
+    if (old?.live?.applied && prepared) { prepared.source = ''; prepared.requested = ''; }
+    if (old?.live) cachedExport = null;
+  };
 }
 
 function discard(): void {
@@ -102,9 +128,11 @@ function discard(): void {
   prepared = null;
   old?.controller.abort();
   old?.handle?.dispose();
+  if (old?.audioContext && !old.handle) void old.audioContext.close().catch(() => undefined);
   old?.cloud?.dispose();
   old?.cleanup();
   old?.root.remove();
+  if (old) traceEditor('disposed');
 }
 
 // Block and comment coordinates in saved scripts only place them on the board; the runner never reads them.
@@ -134,16 +162,13 @@ function snapshot(entry: Editor): EditorSnapshot | null {
 
 function schedule(): void {
   dirty = true;
-  clearTimeout(preparingTimer);
-  if (!settings.enabled) return;
-  preparingTimer = setTimeout(() => {
-    if (!attached || attached.engine.state !== 'stop' || prepared?.busy || !settings.enabled) return;
-    const current = snapshot(attached);
-    if (current) void prepare(attached, current).catch(error => console.warn('[entropy] 미리 준비하지 못했습니다', error));
-  }, 600);
+  // Entry already owns the editor's decoded media. Do not create another
+  // renderer or decode a second copy of every asset while the user is editing.
 }
 
 function createPrepared(canvas: HTMLCanvasElement): Prepared {
+  let audioContext: AudioContext | undefined;
+  try { if (typeof AudioContext === 'function') audioContext = new AudioContext(); } catch {}
   const root = document.createElement('div');
   root.className = 'entropy-player entropy-editor-player';
   root.hidden = true;
@@ -182,7 +207,7 @@ function createPrepared(canvas: HTMLCanvasElement): Prepared {
     if (active && prepared?.handle?.vm.state === 'stop' && !prepared.busy) void attached?.engine.toggleStop();
     if (active) layout();
   }, 100);
-  return { root, status, controller: new AbortController(), source: '', requested: '', requestedWork: null,
+  return { root, status, audioContext, controller: new AbortController(), source: '', requested: '', requestedWork: null,
     promise: Promise.resolve(),
     busy: false, svg: settings.svg, escape: settings.escape,
     cleanup() {
@@ -202,6 +227,7 @@ function prepare(entry: Editor, snapshot: EditorSnapshot): Promise<void> {
   current.requested = snapshot.source;
   if (current.busy) return current.promise;
   current.busy = true;
+  traceEditor('preparing');
   current.status.hidden = false;
   current.status.textContent = '실행기를 준비하는 중';
   // Serialize updates in one renderer/context; unchanged assets stay in RAM and GPU memory.
@@ -215,6 +241,7 @@ function prepare(entry: Editor, snapshot: EditorSnapshot): Promise<void> {
       const [{ boot }, { ensureStageStyle }, { bridgeSaveStore }, { CloudClient }] = await Promise.all([
         import('../../../vm/src/web/boot.ts'), import('./player.ts'), import('./save-bridge.ts'), import('./cloud.ts'),
       ]);
+      traceEditor('modules-ready');
       if (prepared !== current) return;
       ensureStageStyle();
       const work = withAssetUrls(exported);
@@ -234,21 +261,42 @@ function prepare(entry: Editor, snapshot: EditorSnapshot): Promise<void> {
         current.cloud = new CloudClient(id, document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '',
           work.variables ?? [], ids, ids, mongo);
         current.cloudSource = cloudSource;
+        traceEditor('cloud');
         await current.cloud.connect();
       }
       if (prepared !== current) return;
       if (current.handle) await current.handle.reload(work);
       else {
+        traceEditor('booting');
         const handle = await boot({ signal: current.controller.signal, project: work,
+          scene: entry.scene.selectedScene?.id,
+          liveEditing: true,
+          preloadAssets: false,
+          audioContext: current.audioContext,
           container: current.root, autoStart: false, keyTarget: current.root, boost: true,
           svg: current.svg, get cacheAssets() { return settings.cache; }, grabEscape: current.escape,
           store: { read: key => current.cloud?.read(key), write: (key, value) => current.cloud?.write(key, value) },
           saveStore: bridgeSaveStore(id, document.title), user: signedInUser(),
           tableColumnName: (window as any).Lang?.DataAnalytics?.new_attribute,
-          onProgress(done, all) { current.status.textContent = all ? `읽어들이는 중: ${((done / all) * 100).toFixed(2)}%` : '읽어들이는 중'; },
+          readAudioBuffer(sound) {
+            const queue = entry.soundQueue;
+            const src = queue?.getItem(sound.id)?.src;
+            if (typeof src !== 'string' || new URL(src, location.href).href !== new URL(sound.fileurl, location.href).href) return;
+            const buffer = queue?.getResult(sound.id) as AudioBuffer | undefined;
+            return buffer && typeof buffer.getChannelData === 'function' && buffer.duration > 0 ? buffer : undefined;
+          },
+          onProgress(done, all) {
+            if (done === 0) traceEditor('assets');
+            current.status.textContent = all ? `읽어들이는 중: ${((done / all) * 100).toFixed(2)}%` : '읽어들이는 중';
+          },
         });
         if (prepared !== current) { handle.dispose(); return; }
         current.handle = handle;
+        handle.vm.onSceneChange = id => {
+          if (!active || prepared !== current || attached !== entry || (window as any).Entry !== entry || entry.scene.selectedScene?.id === id) return;
+          const scene = entry.scene.getSceneById?.(id);
+          if (scene) entry.scene.selectScene?.(scene);
+        };
         handle.vm.onError = error => {
           console.error('[entropy] 에디터 실행 오류', error);
           void entry.engine.toggleStop();
@@ -258,10 +306,12 @@ function prepare(entry: Editor, snapshot: EditorSnapshot): Promise<void> {
       current.cloud.setChangeListener(() => current.handle?.vm.readStore());
       current.source = source;
       current.status.hidden = true;
+      traceEditor('ready');
     } while (prepared === current && current.source !== current.requested);
   }).catch(error => {
     current.requested = '';
     current.requestedWork = null;
+    traceEditor('prepare-error');
     throw error;
   }).finally(() => {
     current.busy = false;
@@ -309,17 +359,24 @@ function attach(entry: Editor): void {
   patch('toggleRun', function(...args: any[]) {
     if (active) { if (engine.state === 'pause') engine.togglePause(); return; }
     if (!settings.enabled || engine.state !== 'stop') return originalRun.apply(engine, args);
+    traceEditor('run-requested');
+    prepared?.handle?.audio.unlock();
     const currentSnapshot = snapshot(entry);
     if (!currentSnapshot) return;
     const canvas = document.getElementById('entryCanvas') as HTMLCanvasElement;
     const visibility = canvas.style.visibility;
-    const current = { cleanup() { canvas.style.visibility = visibility; unbrowse(); } };
+    const current: { live?: LiveEditing | null; cleanup(): void } = {
+      cleanup() { canvas.style.visibility = visibility; unbrowse(); },
+    };
     let unbrowse = () => {};
     active = current;
-    try { originalRun.apply(engine, args); } catch (error) { finish(); throw error; }
-    unbrowse = browse(entry);
+    try { originalRun.apply(engine, args); } catch (error) { finish()(); throw error; }
+    try { current.live = beginLiveEditing(entry, currentSnapshot.work, () => prepared?.handle?.vm, traceEditor); }
+    catch (error) { console.warn('[entropy] 실행 중 편집을 준비하지 못해 탐색만 허용합니다', error); }
+    unbrowse = current.live ? () => current.live?.restore() : browse(entry);
     const scene = entry.scene.selectedScene?.id;
     const ready = prepare(entry, currentSnapshot);
+    void prepared?.audioContext?.resume().catch(() => undefined);
     if (prepared) {
       prepared.root.hidden = false; prepared.root.tabIndex = 0; prepared.root.removeAttribute('aria-hidden');
       canvas.style.visibility = 'hidden';
@@ -332,19 +389,22 @@ function attach(entry: Editor): void {
       if (unknown.length) (window as any).Entry.toast?.alert('실행기 안내',
         `이 실행기가 아직 모르는 블록이 ${unknown.length}종 있습니다: ${unknown.slice(0, 6).join(', ')}`);
       handle.relayout(); handle.start();
+      traceEditor('running');
       if (engine.state === 'pause') handle.pause();
     }).catch(error => {
       if (active === current && prepared) {
-        prepared.status.hidden = false;
-        prepared.status.textContent = error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
+        traceEditor('run-error');
+        console.warn('[entropy] 실행기를 준비하지 못했습니다', error);
+        void engine.toggleStop().finally(() => discard());
+        (entry as any).toast?.alert('실행기를 준비하지 못했습니다', message);
       }
     });
   });
   patch('toggleStop', async function(...args: any[]) {
-    finish();
-    const result = await originalStop.apply(engine, args);
-    schedule();
-    return result;
+    const cleanup = finish();
+    try { return await originalStop.apply(engine, args); }
+    finally { cleanup(); schedule(); }
   });
   patch('togglePause', function(...args: any[]) {
     const result = originalPause.apply(engine, args);
@@ -359,12 +419,13 @@ function attach(entry: Editor): void {
     schedule();
   });
   restore = () => {
-    clearTimeout(preparingTimer); changed?.destroy();
+    changed?.destroy();
     for (const [name, original] of originals) engine[name] = original;
     if (cachedExport?.entry === entry) cachedExport = null;
     restartTicker();
   };
   attached = entry; attachedEngine = engine;
+  traceEditor('attached');
   if (engine.state === 'run' || engine.state === 'pause') void engine.toggleStop();
   schedule();
 }
@@ -372,6 +433,14 @@ function attach(entry: Editor): void {
 function reconcile(): void {
   const entry = (window as Window & { Entry?: Editor }).Entry;
   observeExport(entry); // Save compaction also works with the VM toggle disabled.
+  const sound = entry?.type === 'workspace' && settings.enabled ? entry.playground?.soundEditor : null;
+  if (soundEditor !== sound) {
+    restoreSound?.(); restoreSound = null; soundEditor = null;
+    if (sound) {
+      restoreSound = improveSoundLoading(entry?.playground, (window as any).EntrySoundEditor);
+      if (restoreSound) soundEditor = sound;
+    }
+  }
   if (attached && (!settings.enabled || attached !== entry || attachedEngine !== entry?.engine || entry?.type !== 'workspace')) {
     if (active) void attachedEngine?.toggleStop();
     restore?.(); discard(); restore = null; attached = null; attachedEngine = null;

@@ -1,6 +1,9 @@
 import { api, readSettings, CACHE_KEY, CACHE_CLEAR_KEY, CACHE_SIZE_KEY, ENABLED_KEY, SVG_KEY, ESCAPE_KEY } from './browser.ts';
 
 const editor = /^\/ws(?:\/|$)/.test(location.pathname);
+const markEditor = (phase: string) => {
+  if (editor && document.documentElement) document.documentElement.dataset.entropyEditorLoader = phase;
+};
 const editorSettings = { enabled: true, svg: true, escape: true };
 const editorChanged = new Set<string>();
 let editorReady = false;
@@ -43,7 +46,16 @@ window.addEventListener('message', event => {
   void api.storage.local.set({ [CACHE_SIZE_KEY]: size }).catch(error => console.warn('[entropy] 캐시 용량을 기록하지 못했습니다', error));
 });
 
-void readSettings().then(settings => {
+void readSettings().catch(error => {
+  console.warn('[entropy] 설정을 읽지 못해 기본 설정을 사용합니다', error);
+  return { enabled: true, svg: true, escape: true, cache: false, cacheClear: 0 };
+}).then(async settings => {
+  if (!document.head && !document.documentElement) await new Promise<void>(resolve => {
+    const observer = new MutationObserver(() => {
+      if (document.head || document.documentElement) { observer.disconnect(); resolve(); }
+    });
+    observer.observe(document, { childList: true });
+  });
   if (!changed) on = settings.cache;
   if (!clearChanged) clear = settings.cacheClear;
   const script = document.createElement('script');
@@ -63,7 +75,12 @@ void readSettings().then(settings => {
     style.href = api.runtime.getURL('player.css');
     runner.src = api.runtime.getURL('page/editor.js');
     runner.type = 'module';
-    runner.onload = () => { editorReady = true; sendEditor(); };
+    markEditor('loading');
+    runner.onload = () => { editorReady = true; markEditor('ready'); sendEditor(); };
+    runner.onerror = () => {
+      markEditor('error');
+      console.warn('[entropy] 에디터 모듈을 불러오지 못했습니다. 확장을 다시 불러온 뒤 페이지를 새로고침해주세요.');
+    };
     (document.head ?? document.documentElement).append(style, runner);
   }
 });

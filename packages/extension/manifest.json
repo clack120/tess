@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "minimum_chrome_version": "121",
   "name": "Entropy",
   "version": "0.4.0",
   "description": "엔트리 작품 실행 화면을 Entropy 실행기로 바꿉니다.",

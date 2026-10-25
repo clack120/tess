@@ -10,11 +10,53 @@
   display: none !important;
 }
 
+.entropy-editor-editing #entryCurtain {
+  display: none !important;
+}
+
+.entropy-editor-live {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  font: 13px sans-serif;
+}
+
+.entropy-editor-live[hidden] {
+  display: none !important;
+}
+
 .entropy-editor-browsing .entryBoard * {
   pointer-events: none !important;
 }
 
 .entropy-editor-player[hidden] {
+  display: none !important;
+}
+
+.entropy-editor-sound-status {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  font: 13px sans-serif;
+}
+
+.entropy-editor-sound-status[hidden] {
   display: none !important;
 }
 
