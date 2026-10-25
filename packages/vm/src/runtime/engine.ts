@@ -612,11 +612,18 @@ export class Vm implements Project {
       return item;
     });
     const objects = new Map(project.objects.map(object => [String(object.id), object]));
+    const objectScripts = new Map(this.objectScripts);
     const functionScripts = new Map<number, ParsedSource>();
     const input: CompileInput = { ...previous,
-      objects: previous.objects.map(object => ({ ...object,
-        script: objects.has(object.id) ? parseScript(objects.get(object.id)!.script as string) : object.script,
-      })),
+      objects: previous.objects.map((object, index) => {
+        if (!objects.has(object.id)) return object;
+        const raw = objects.get(object.id)!.script;
+        const cached = this.objectScripts.get(index);
+        const script = typeof raw === 'string' && cached?.raw === raw ? cached.parsed : parseScript(raw as string);
+        if (typeof raw === 'string') objectScripts.set(index, { raw, parsed: script });
+        else objectScripts.delete(index);
+        return { ...object, script };
+      }),
       functions: project.functions.map((fn, index) => {
         const raw = fn.content;
         const cached = this.functionScripts.get(index);
@@ -634,12 +641,20 @@ export class Vm implements Project {
     if (!functionsChanged && input.objects.every((object, index) => {
       const old = previous.objects[index]!;
       return old.script === object.script || key(old.script) === key(object.script);
-    })) return null;
-    return { previous, input, functionsChanged, key, functionScripts };
+    })) {
+      // Layout/default-only changes are equivalent to the installed code. Keep
+      // its parsed identity so repeated Apply skips both parsing and comparison.
+      for (const [index, cached] of objectScripts) cached.parsed = previous.objects[index]!.script as RawBlock[][];
+      for (const [index, cached] of functionScripts) cached.parsed = previous.functions[index]!.content as RawBlock[][];
+      this.objectScripts = objectScripts;
+      this.functionScripts = functionScripts;
+      return null;
+    }
+    return { previous, input, functionsChanged, key, objectScripts, functionScripts };
   }
 
   private commitCodePatch(change: NonNullable<ReturnType<Vm['prepareCodePatch']>>, factoryProgram: CompiledProgram): number {
-    const { previous, input, functionsChanged, key, functionScripts } = change;
+    const { previous, input, functionsChanged, key, objectScripts, functionScripts } = change;
     const unsupported = [...factoryProgram.unknown].filter(([type, count]) => count > (this.unknownBlocks.get(type) ?? 0));
     if (unsupported.length) {
       throw new Error(`현재 실행기에 없는 블록 또는 변수가 있습니다: ${unsupported.slice(0, 6).map(([type]) => type).join(', ')}`);
@@ -712,7 +727,7 @@ export class Vm implements Project {
     this.liveBlockCounts = counts;
     this.compiledProgram = factoryProgram;
     this.compiledFactory = factory;
-    this.objectScripts.clear(); this.functionScripts = functionScripts;
+    this.objectScripts = objectScripts; this.functionScripts = functionScripts;
     this.unknownBlocks = new Map(factoryProgram.unknown);
     this.usedKeys = factoryProgram.keys ? new Set(factoryProgram.keys) : null;
     return restarted;

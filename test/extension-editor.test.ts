@@ -16,6 +16,7 @@ async function setup(t: any, delay = false) {
   let nativeTicks = 0, starts = 0, stops = 0, exports = 0;
   let cloudClients = 0, cloudConnects = 0, cloudDisposals = 0;
   let audioResumes = 0, audioCloses = 0;
+  let stopGate: Promise<void> | undefined;
   w.AudioContext = class {
     async resume() { audioResumes++; }
     async close() { audioCloses++; }
@@ -30,7 +31,7 @@ async function setup(t: any, delay = false) {
   const engine = {
     state: 'stop', runButton: {},
     toggleRun() { starts++; startScene = w.Entry.scene.selectedScene; this.state = 'run'; this.raiseEvent(); },
-    async toggleStop() { stops++; this.state = 'stop'; w.Entry.scene.selectedScene = startScene; },
+    async toggleStop() { stops++; this.state = 'stop'; w.Entry.scene.selectedScene = startScene; if (stopGate) await stopGate; },
     togglePause() { this.state = this.state === 'pause' ? 'run' : 'pause'; },
     computeFunction() { nativeTicks++; }, raiseEvent() { nativeTicks++; },
     update() { this.computeFunction(); },
@@ -81,6 +82,7 @@ async function setup(t: any, delay = false) {
     { source: w, data: { __entropy: 'editor-settings', enabled, cache, svg: true, escape: true } }));
   configure(true); await settle();
   return { w, engine, work, boots, handles, reloads, settle, configure, release, originalRun, originalTick,
+    holdStop: () => { let release!: () => void; stopGate = new Promise<void>(resolve => { release = resolve; }); return release; },
     change: () => { for (const listener of changeListeners) listener(); },
     counts: () => ({ nativeTicks, starts, stops, exports, cloudClients, cloudConnects, cloudDisposals, audioResumes, audioCloses }) };
 }
@@ -414,4 +416,47 @@ test('detach preserves native methods that Entry replaced after the extension at
   s.engine.togglePause = newPause;
   s.configure(false); await s.settle();
   assert.equal(s.engine.togglePause, newPause); assert.equal(s.engine.toggleRun, s.originalRun);
+});
+
+test('an asynchronous native stop protects saving and blocks new runs until temporary code is restored', async t => {
+  const s = await setup(t);
+  let restored = 0;
+  s.w.beginLiveEditing = (_entry: any, work: any) => {
+    const original = structuredClone(work);
+    (s.work.objects[0] as any).script = 'temporary code';
+    return { work: original, applied: false, restore() {
+      restored++; delete (s.work.objects[0] as any).script;
+    } };
+  };
+  s.engine.toggleRun(); await s.settle();
+  const release = s.holdStop();
+  const stopping = s.engine.toggleStop();
+  const repeated = s.engine.toggleStop();
+  s.engine.toggleRun();
+  const saved = s.w.Entry.exportProject();
+  assert.equal(saved.objects[0].script, undefined, 'autosave cannot capture temporary code during native stop');
+  assert.equal(s.counts().starts, 1, 'a new run must wait for original code restoration');
+  assert.equal(s.counts().stops, 1, 'duplicate stop clicks share one cleanup');
+  release(); await Promise.all([stopping, repeated]);
+  assert.equal(restored, 1);
+  s.engine.toggleRun(); await s.settle(); assert.equal(s.counts().starts, 2);
+});
+
+test('disabling during native stop restores live wrappers before detaching the engine', async t => {
+  const s = await setup(t);
+  s.configure(false); await s.settle();
+  const nativePause = s.engine.togglePause;
+  s.configure(true); await s.settle();
+  s.w.beginLiveEditing = (_entry: any, work: any) => {
+    const pause = s.engine.togglePause;
+    s.engine.togglePause = () => pause.call(s.engine);
+    return { work, applied: false, restore() { s.engine.togglePause = pause; } };
+  };
+  s.engine.toggleRun(); await s.settle();
+  const release = s.holdStop();
+  s.configure(false); await s.settle();
+  assert.notEqual(s.engine.toggleRun, s.originalRun, 'detach waits for native cleanup');
+  release(); await s.settle();
+  assert.equal(s.engine.togglePause, nativePause); assert.equal(s.engine.toggleRun, s.originalRun);
+  assert.equal(s.handles[0].disposed, true);
 });

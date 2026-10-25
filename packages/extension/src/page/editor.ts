@@ -48,6 +48,7 @@ let restore: (() => void) | null = null;
 let prepared: Prepared | null = null;
 interface RunningEditor { live?: LiveEditing | null; actors?: ActorEditing; cleanup(): void }
 let active: RunningEditor | null = null;
+let stopping: { entry: Editor; live?: LiveEditing | null; promise: Promise<unknown> } | null = null;
 let dirty = true;
 let editRevision = 0;
 let cachedExport: { entry: Editor; revision: number; work: EntryWork } | null = null;
@@ -78,6 +79,7 @@ function observeExport(entry: Editor | undefined): void {
   const compactionCache = new Map();
   const observed = function(this: Editor, ...args: unknown[]) {
     if (active?.live && attached === entry) return active.live.work;
+    if (stopping?.entry === entry && stopping.live) return stopping.live.work;
     let work = Reflect.apply(original, this, args) as EntryWork | false;
     if (work) {
       try {
@@ -419,6 +421,7 @@ function attach(entry: Editor): void {
       patch(name, function(this: unknown, ...args: any[]) { if (!active) return original.apply(this, args); });
     }
     patch('toggleRun', function(...args: any[]) {
+      if (stopping) return;
       if (active) { if (engine.state === 'pause') engine.togglePause(); return; }
       if (!settings.enabled || engine.state !== 'stop') return originalRun.apply(engine, args);
       traceEditor('run-requested');
@@ -481,10 +484,21 @@ function attach(entry: Editor): void {
         }
       });
     });
-    patch('toggleStop', async function(...args: any[]) {
-      const cleanup = finish();
-      try { return await originalStop.apply(engine, args); }
-      finally { cleanup(); schedule(); }
+    patch('toggleStop', function(...args: any[]) {
+      if (stopping) return stopping.promise;
+      // Native stop can await editor work. Keep saving on the original snapshot
+      // and prevent reentry until its temporary code and wrappers are restored.
+      const pending = { entry, live: active?.live, promise: Promise.resolve() as Promise<unknown> };
+      stopping = pending;
+      pending.promise = (async () => {
+        let cleanup = () => {};
+        try { cleanup = finish(); return await originalStop.apply(engine, args); }
+        finally {
+          try { cleanup(); schedule(); }
+          finally { if (stopping === pending) stopping = null; }
+        }
+      })();
+      return pending.promise;
     });
     patch('togglePause', function(...args: any[]) {
       const result = originalPause.apply(engine, args);
@@ -519,7 +533,11 @@ function reconcile(): void {
     }
   }
   if (attached && (!settings.enabled || attached !== entry || attachedEngine !== entry?.engine || entry?.type !== 'workspace')) {
-    if (active) void attachedEngine?.toggleStop();
+    if (stopping) return;
+    if (active) {
+      void attachedEngine?.toggleStop().finally(reconcile);
+      return;
+    }
     restore?.(); discard(); restore = null; attached = null; attachedEngine = null;
   }
   if (!attached && settings.enabled && entry?.type === 'workspace' && !incompatible.has(entry) && entry.engine?.runButton &&

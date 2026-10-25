@@ -206,3 +206,27 @@ test('function removal is rejected during live editing and stop restores the ori
   assert.equal(s.entry.variableContainer.functions_.fn, s.fn);
   assert.equal(s.fn.content, s.original.fn);
 });
+
+for (const [owner, field] of [['Func', 'initEditView'], ['variableContainer', 'removeFunction'], ['engine', 'togglePause']] as const) {
+  test(`failed live initialization at ${owner}.${field} rolls back all earlier changes`, t => {
+    const s = setup(t); s.live.restore();
+    const inject = s.playground.injectCode, pause = s.entry.engine.togglePause;
+    const edit = s.entry.Func.initEditView, remove = s.entry.variableContainer.removeFunction;
+    Object.defineProperty(s.entry[owner], field, { writable: false });
+    assert.throws(() => s.w.begin(s.entry, s.work, () => s.vm));
+    assert.equal(s.playground.injectCode, inject); assert.equal(s.entry.engine.togglePause, pause);
+    assert.equal(s.entry.Func.initEditView, edit); assert.equal(s.entry.variableContainer.removeFunction, remove);
+    assert.equal(s.board.readOnly, true); assert.equal(s.first.script, s.original.first);
+    assert.equal(s.w.document.querySelector('.entropy-editor-live'), null);
+    assert.deepEqual(s.references, new Set([s.original.first, s.original.second, s.original.fn]));
+  });
+}
+
+test('a read-only reference renderer does not block restoration of temporary code', t => {
+  const s = setup(t);
+  Object.defineProperty(s.entry.variableContainer, 'updateList', { writable: false });
+  s.live.restore();
+  assert.equal(s.first.script, s.original.first); assert.equal(s.board.readOnly, true);
+  assert.equal(s.w.document.querySelector('.entropy-editor-live'), null);
+  assert.deepEqual(s.references, new Set([s.original.first, s.original.second, s.original.fn]));
+});

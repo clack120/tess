@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Vm } from '@entropy/vm';
 import { compileProject } from '@entropy/compiler';
+import { stub } from './stub.ts';
 
 const block = (id: string, type: string, params: unknown[] = [], statements?: unknown[][]) => ({ id, type, params, ...(statements ? { statements } : {}) });
 const stack = (id: string, value: number) => [block(id, 'when_run_button_click'),
@@ -174,5 +175,30 @@ test('function edits replace calls without resetting the running project', () =>
   vm.patchCode(project as never); vm.tick();
   assert.equal(target.entity.x, 123);
   assert.equal(Number(vm.variables.find(value => value.name === 'out')!.value), 7);
+  assert.deepEqual(vm.errors, []);
+});
+
+test('repeated live apply reuses unchanged object parsing after partial patches and layout-only edits', t => {
+  const { vm, project, target } = setup();
+  const parse = JSON.parse;
+  let parses = 0;
+  stub(t, JSON, 'parse', (text: string, ...args: any[]) => {
+    if (text.startsWith('[[{"id":"first"')) parses++;
+    return parse(text, ...args);
+  });
+  assert.equal(vm.patchCode(project), 0); assert.equal(parses, 0);
+  project.objects[0]!.script = JSON.stringify([stack('first', 20), stack('second', 3)]);
+  vm.patchCode(project); assert.equal(parses, 1);
+  const threads = [...target.threads];
+  vm.patchCode({ objects: [], functions: [] });
+  assert.equal(vm.patchCode(project), 0); assert.equal(parses, 1);
+  const blocks = parse(project.objects[0]!.script); blocks[0][0].x = 23;
+  project.objects[0]!.script = JSON.stringify(blocks);
+  assert.equal(vm.patchCode(project), 0); assert.equal(parses, 2);
+  assert.equal(vm.patchCode(project), 0); assert.equal(parses, 2);
+  assert.deepEqual(target.threads, threads);
+  project.objects[0]!.script = JSON.stringify([stack('first', 42)]);
+  vm.stop(); vm.load(project); vm.start(); vm.tick();
+  assert.equal(vm.variables[0]!.value, 42, 'reload reads edited source instead of the previous cache');
   assert.deepEqual(vm.errors, []);
 });

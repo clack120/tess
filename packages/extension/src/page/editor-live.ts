@@ -25,7 +25,6 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
   const undo = history?.undoStack_?.slice(), redo = history?.redoStack_?.slice();
   const boards = [...new Set([workspace.board, workspace.overlayBoard, workspace.blockMenu].filter(Boolean))] as any[];
   const readOnly = boards.map(board => [board, board.readOnly] as const);
-  for (const board of boards) board.readOnly = false;
   // Native addRef/removeRef repaint the entire variable list for every block.
   // Keep reference registration intact, but paint once after synchronous bulk work.
   const batchReferences = <T>(action: () => T, refresh = (update: () => void) => update()): T => {
@@ -34,7 +33,7 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     if (typeof update !== 'function') return action();
     let requested = false;
     const defer = () => { requested = true; };
-    container.updateList = defer;
+    if (!Reflect.set(container, 'updateList', defer) || container.updateList !== defer) return action();
     try { return action(); }
     finally {
       if (container.updateList === defer) container.updateList = update;
@@ -70,8 +69,6 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     const fn = Object.values(functions ?? {}).find((candidate: any) => candidate.content === code) as any;
     return initEdit.call(this, fn ? copy(fn, 'content') : code, ...args);
   };
-  playground.injectCode = inject;
-  if (typeof initEdit === 'function') functionEditor.initEditView = edit;
   const panel = document.createElement('div');
   panel.className = 'entropy-editor-live';
   const label = document.createElement('span');
@@ -83,7 +80,6 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
   panel.append(label, apply);
   const host = [playground.boardView_, playground.codeView_, workspace.board.wrapper, playground.view_]
     .find(node => node?.namespaceURI === 'http://www.w3.org/1999/xhtml') ?? playground.view_;
-  host.append(panel);
   const session: LiveEditing = { work, applied: false, restore };
   const signature = (code: any, type: unknown) => {
     const header = code.toJSON().find((stack: any[]) => /^function_create(?:_value)?$/.test(stack[0]?.type))?.[0];
@@ -95,6 +91,13 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     return before?.field === 'content' && signature(before.original, before.options?.type) !== signature(fn.content, fn.type);
   };
   const guards: Array<() => void> = [];
+  const replace = (owner: any, name: string, replacement: any) => {
+    const original = owner[name];
+    guards.push(() => { if (owner[name] === replacement) Reflect.set(owner, name, original); });
+    if (!Reflect.set(owner, name, replacement) || owner[name] !== replacement) {
+      throw new Error(`Entry.${name} 연결을 지원하지 않습니다`);
+    }
+  };
   const guard = (owner: any, name: string, blocked: (...args: any[]) => boolean) => {
     const original = owner?.[name];
     if (typeof original !== 'function') return;
@@ -105,23 +108,13 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
       }
       return original.apply(this, args);
     };
-    owner[name] = wrapped;
-    guards.push(() => { if (owner[name] === wrapped) owner[name] = original; });
+    replace(owner, name, wrapped);
   };
-  // Native function deletion/signature changes rewrite call blocks throughout
-  // the project, including unopened originals. Keep those operations out of a run.
-  for (const name of ['createFunction', 'removeFunction', 'appendFunctions']) guard(entry.variableContainer, name, () => true);
-  guard(functionEditor, 'changeType', () => true);
-  guard(functionEditor, 'generateWsBlock', fn => changedSignature(fn?.content ? fn : functionEditor.targetFunc));
   let updating: AbortController | null = null;
   const togglePause = entry.engine.togglePause;
   const pause = function(this: any, ...args: any[]) {
     if (!updating) return togglePause.apply(this, args);
   };
-  if (typeof togglePause === 'function') {
-    entry.engine.togglePause = pause;
-    guards.push(() => { if (entry.engine.togglePause === pause) entry.engine.togglePause = togglePause; });
-  }
   apply.onclick = async () => {
     if (updating) return;
     const vm = runtime();
@@ -195,12 +188,26 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     else restoreCurtain();
   };
   const changeView = function(this: any, ...args: any[]) { const result = viewMode.apply(this, args); sync(); return result; };
-  if (typeof viewMode === 'function') playground.changeViewMode = changeView;
   const variableView = playground.toggleOnVariableView;
   const showVariables = function(this: any, ...args: any[]) { const result = variableView.apply(this, args); sync(); return result; };
-  if (typeof variableView === 'function') playground.toggleOnVariableView = showVariables;
   let restored = false;
   try {
+    // Install as one transaction: any changed native API must leave no live
+    // wrappers, permissions or controls behind when browsing takes over.
+    for (const board of boards) {
+      if (!Reflect.set(board, 'readOnly', false) || board.readOnly !== false) throw new Error('Entry board 연결을 지원하지 않습니다');
+    }
+    replace(playground, 'injectCode', inject);
+    if (typeof initEdit === 'function') replace(functionEditor, 'initEditView', edit);
+    host.append(panel);
+    // Native function deletion/signature changes rewrite call blocks throughout
+    // the project, including unopened originals. Keep those operations out of a run.
+    for (const name of ['createFunction', 'removeFunction', 'appendFunctions']) guard(entry.variableContainer, name, () => true);
+    guard(functionEditor, 'changeType', () => true);
+    guard(functionEditor, 'generateWsBlock', fn => changedSignature(fn?.content ? fn : functionEditor.targetFunc));
+    if (typeof togglePause === 'function') replace(entry.engine, 'togglePause', pause);
+    if (typeof viewMode === 'function') replace(playground, 'changeViewMode', changeView);
+    if (typeof variableView === 'function') replace(playground, 'toggleOnVariableView', showVariables);
     if (editingBefore && functionEditor.targetFunc) {
       overlayCode.call(workspace, copy(functionEditor.targetFunc, 'content'));
     }
@@ -215,10 +222,6 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     batchReferences(() => {
       for (const restoreGuard of guards) restoreView(restoreGuard);
       if (!editingBefore && functionEditor?.isEdit) restoreView(() => functionEditor.endEdit('cancelEdit'));
-      if (playground.injectCode === inject) playground.injectCode = injectCode;
-      if (functionEditor?.initEditView === edit) functionEditor.initEditView = initEdit;
-      if (playground.changeViewMode === changeView) playground.changeViewMode = viewMode;
-      if (playground.toggleOnVariableView === showVariables) playground.toggleOnVariableView = variableView;
       if (originalFunctions) {
         for (const id of Object.keys(functions)) delete functions[id];
         Object.assign(functions, originalFunctions);
@@ -233,7 +236,7 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
       }
       if (undo) history.undoStack_ = undo;
       if (redo) history.redoStack_ = redo;
-      for (const [board, previous] of readOnly) board.readOnly = previous;
+      for (const [board, previous] of readOnly) restoreView(() => { if (board.readOnly !== previous) board.readOnly = previous; });
       playground.view_.classList.remove('entropy-editor-editing');
       restoreCurtain();
       panel.remove();

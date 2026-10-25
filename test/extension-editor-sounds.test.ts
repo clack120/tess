@@ -114,3 +114,40 @@ test('a stalled audio decoder times out and leaves a retry action in the sound p
   s.decoded[0]!.resolve({ tag: 'late' }); await s.settle();
   assert.deepEqual(s.loaded, []);
 });
+
+test('switching from a loading large sound list to a small list clears its progress message', async t => {
+  const s = setup(t);
+  let now = 0;
+  stub(t, performance, 'now', () => { now += 9; return now; });
+  s.object.sounds = Array.from({ length: 500 }, (_, i) => sound(String(i)));
+  s.playground.injectSound();
+  s.object.sounds = [sound('new')]; s.playground.injectSound();
+  await s.settle();
+  assert.equal(s.counts().injected, 1);
+  assert.equal(s.playground.soundView_!.querySelectorAll('.entropy-editor-sound-status:not([hidden])').length, 0);
+});
+
+test('changing the selected object during a decode releases the old selection and progress', async t => {
+  const s = setup(t); s.hold();
+  stub(t, globalThis, 'fetch', async () => new Response(new Uint8Array([1])));
+  const loading = s.editor.updateSound(sound('old'), s.object);
+  await s.settle();
+  s.playground.object = { id: 'new' };
+  s.decoded[0]!.resolve({ tag: 'old' }); await loading;
+  assert.deepEqual(s.loaded, []);
+  assert.equal(s.editor.sound, null); assert.equal(s.status().hidden, true);
+});
+
+for (const field of ['updateSound', 'hide']) {
+  test(`read-only sound ${field} leaves native methods and panel intact`, t => {
+    const s = setup(t); s.restore();
+    const inject = s.playground.injectSound, hide = s.editor.hide;
+    Object.defineProperty(s.editor, field, { writable: false });
+    const restore = improveSoundLoading(s.playground, { loadSound() {}, clearSound() {} });
+    restore?.();
+    assert.equal(s.editor.updateSound, s.original); assert.equal(s.editor.hide, hide);
+    assert.equal(s.playground.injectSound, inject);
+    assert.equal(s.playground.soundView_!.querySelectorAll('.entropy-editor-sound-status').length, 0);
+    assert.equal(s.playground.soundView_!.style.position, '');
+  });
+}

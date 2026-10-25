@@ -14,20 +14,18 @@ export function improveSoundLoading(playground: any, api: any): (() => void) | n
   status.className = 'entropy-editor-sound-status';
   status.setAttribute('role', 'status');
   status.hidden = true;
-  view.append(status);
   const position = view.style.position;
-  if (getComputedStyle(view).position === 'static') view.style.position = 'relative';
   let context: AudioContext | null = null;
   let pending: AbortController | null = null;
   let disposed = false;
   let listVersion = 0;
   const listStatus = status.cloneNode() as HTMLElement;
-  view.append(listStatus);
   const originalInject = playground.injectSound;
   const inject = function(this: any, ...args: any[]) {
     const object = this.object;
     const sounds = object?.sounds;
     const version = ++listVersion;
+    listStatus.hidden = true;
     if (!Array.isArray(sounds) || sounds.length < 200) return originalInject.apply(this, args);
     listStatus.textContent = '소리 목록을 준비하는 중…'; listStatus.hidden = false;
     const current = () => !disposed && version === listVersion && playground.object === object && object.sounds === sounds;
@@ -45,7 +43,6 @@ export function improveSoundLoading(playground: any, api: any): (() => void) | n
     }).finally(() => { if (version === listVersion) listStatus.hidden = true; });
   };
   const chunkedList = typeof originalInject === 'function' && typeof playground.generateSoundElement === 'function';
-  if (chunkedList) playground.injectSound = inject;
   const cancel = () => {
     const request = pending;
     pending = null;
@@ -75,13 +72,14 @@ export function improveSoundLoading(playground: any, api: any): (() => void) | n
         context ??= new AudioContext();
         const response = await fetchAsset(sound.path, controller.signal);
         const bytes = await response.arrayBuffer();
+        controller.signal.throwIfAborted();
         return context.decodeAudioData(bytes);
       })()]);
       if (pending !== controller || controller.signal.aborted || playground.object?.id !== object.id) return;
       await Promise.race([aborted, Promise.resolve(api.loadSound(buffer))]);
       if (pending === controller) status.hidden = true;
     } catch (error) {
-      if (pending !== controller || disposed) return;
+      if (pending !== controller || disposed || playground.object?.id !== object.id) return;
       this.sound = null; // Entry permits selecting the same sound again after a failure.
       status.textContent = '소리를 읽지 못했습니다. ';
       const retry = document.createElement('button');
@@ -93,17 +91,19 @@ export function improveSoundLoading(playground: any, api: any): (() => void) | n
     } finally {
       clearTimeout(timeout);
       controller.signal.removeEventListener('abort', rejectAbort);
-      if (pending === controller) pending = null;
+      if (pending === controller) {
+        pending = null;
+        if (playground.object?.id !== object.id) { this.sound = null; status.hidden = true; }
+      }
     }
   };
-  editor.updateSound = update;
   const hide = function(this: any, ...args: any[]) {
     listVersion++; listStatus.hidden = true;
     cancel();
     return originalHide?.apply(this, args);
   };
-  editor.hide = hide;
-  return () => {
+  const restore = () => {
+    if (disposed) return;
     disposed = true;
     cancel();
     if (editor.updateSound === update) editor.updateSound = original;
@@ -114,4 +114,19 @@ export function improveSoundLoading(playground: any, api: any): (() => void) | n
     view.style.position = position;
     void context?.close().catch(() => undefined);
   };
+  try {
+    // Do not leave a partial sound override behind if Entry changes a method
+    // to a read-only property. This optional integration must not block run.
+    for (const [owner, name, replacement] of [
+      [editor, 'updateSound', update], [editor, 'hide', hide],
+      ...(chunkedList ? [[playground, 'injectSound', inject]] : []),
+    ] as const) {
+      if (!Reflect.set(owner, name, replacement) || owner[name] !== replacement) {
+        throw new Error(`Entry.${name} 연결을 지원하지 않습니다`);
+      }
+    }
+    if (getComputedStyle(view).position === 'static') view.style.position = 'relative';
+    view.append(status, listStatus);
+  } catch { restore(); return null; }
+  return restore;
 }

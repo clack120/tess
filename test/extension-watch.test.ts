@@ -19,8 +19,9 @@ test('extension watch rebuilds VM and extension edits, ignores output, and recov
     const root = fileURLToPath(new URL('.', import.meta.url));
     fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
     fs.writeFileSync(path.join(root, 'dist/output.js'), 'build output');
+    const failed = fs.existsSync(path.join(root, 'src/fail'));
     console.log('test-build');
-    if (fs.existsSync(path.join(root, 'src/fail'))) process.exit(1);
+    if (failed) process.exit(1);
   `);
   const child = spawn(process.execPath, [path.join(extension, 'watch.ts')], { stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
@@ -46,7 +47,8 @@ test('extension watch rebuilds VM and extension edits, ignores output, and recov
   fs.writeFileSync(path.join(dir, 'packages/vm/src/engine.ts'), 'vm edit');
   await waitFor(() => builds() === 2);
   fs.writeFileSync(path.join(extension, 'src/fail'), 'broken edit');
-  await waitFor(() => output.includes('빌드 실패'));
+  // stdout and stderr can arrive in either order under load.
+  await waitFor(() => output.includes('빌드 실패') && builds() === 3);
   assert.equal(builds(), 3);
   fs.rmSync(path.join(extension, 'src/fail'));
   await waitFor(() => builds() === 4);
