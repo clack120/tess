@@ -246,7 +246,8 @@ export class PixiRenderer implements Renderer {
   private readonly loading = new Map<string, Promise<void>>();
   private readonly svgBaked = new Map<string, Baked>();
   private readonly rasterSources = new Map<string, string>();
-  private readonly rebaking = new Set<string>();
+  private readonly rebaking = new Map<string, object>();
+  private preloadVersion = 0;
   // Cache SVG markup so resized copies do not fetch it again.
   private readonly svgTexts = new Map<string, string>();
   private readonly pictures = new Map<string, Picture>();
@@ -432,7 +433,7 @@ export class PixiRenderer implements Renderer {
   // Keep old vector textures valid until their replacements are ready.
   private async rebakeVectors(): Promise<void> {
     if (this.destroyed) return;
-    const jobs: Array<{ id: string; url: string; resolution: number }> = [];
+    const jobs: Array<{ id: string; url: string; resolution: number; baked: Baked }> = [];
     for (const [id, baked] of this.svgBaked) {
       const picture = this.pictures.get(id);
       if (!picture) {
@@ -440,24 +441,27 @@ export class PixiRenderer implements Renderer {
       }
       const wanted = this.svgResolution(picture);
       if (wanted > baked.resolution * SVG_REBAKE_RATIO) {
-        jobs.push({ id, url: baked.url, resolution: wanted });
+        jobs.push({ id, url: baked.url, resolution: wanted, baked });
       }
     }
     // Limit parallel rasterization so loading many vectors cannot stall every frame.
-    await pool(jobs, LOAD_CONCURRENCY, (job) => this.bakeVector(job.id, job.url, job.resolution));
+    await pool(jobs, LOAD_CONCURRENCY, (job) => this.bakeVector(job.id, job.url, job.resolution, job.baked));
   }
 
-  private async bakeVector(id: string, url: string, resolution: number): Promise<void> {
+  private async bakeVector(id: string, url: string, resolution: number, expected = this.svgBaked.get(id)): Promise<void> {
     const previous = this.svgBaked.get(id);
     const picture = this.pictures.get(id);
-    if (!picture || this.destroyed || this.rebaking.has(id)) {
+    if (!picture || !previous || previous !== expected || this.destroyed || this.rebaking.has(id)) {
       return;
     }
-    this.rebaking.add(id);
+    const request = {};
+    this.rebaking.set(id, request);
+    const current = () => !this.destroyed && this.rebaking.get(id) === request;
     let src = url;
     try {
       const loaded = await this.loadVector(picture, url, resolution);
       src = loaded.src;
+      if (!current()) { releaseBaked(src); return; }
       this.keepBaked(id, { url, src, resolution });
       const texture = loaded.texture;
       this.textures.set(id, texture);
@@ -471,7 +475,7 @@ export class PixiRenderer implements Renderer {
       // Release unused rasterizations so each resize does not leak another texture.
       this.dropBaked(previous);
     } catch (error) {
-      if (this.destroyed) return;
+      if (!current()) return;
       console.warn('[entropy] 벡터 모양을 새 해상도로 다시 그리지 못했습니다', id, error);
       // Keep the currently visible texture if replacing it fails.
       const failed = this.svgBaked.get(id);
@@ -479,9 +483,9 @@ export class PixiRenderer implements Renderer {
         this.svgBaked.delete(id);
         this.dropBaked(failed);
       }
-      this.svgBaked.set(id, previous ?? { url, src, resolution });
+      this.svgBaked.set(id, previous);
     } finally {
-      this.rebaking.delete(id);
+      if (this.rebaking.get(id) === request) this.rebaking.delete(id);
     }
   }
 
@@ -679,6 +683,7 @@ export class PixiRenderer implements Renderer {
     this.textures.clear();
     this.images.clear();
     this.loading.clear();
+    this.rebaking.clear();
     // Unload shared textures only after the last runner releases them.
     for (const baked of this.svgBaked.values()) {
       this.dropBaked(baked);
@@ -832,12 +837,18 @@ export class PixiRenderer implements Renderer {
     onLoaded?: (ok: boolean) => void,
     onlyCurrent = false,
   ): Promise<void> {
+    const version = ++this.preloadVersion;
+    const current = () => !this.destroyed && this.preloadVersion === version;
     const wanted = new Map(targets.flatMap(target => target.pictures).map(picture => [picture.id, picture]));
     const release: Array<() => void> = [];
     for (const [id, old] of this.pictures) {
       const next = wanted.get(id);
       if (next && old.fileurl === next.fileurl && old.pngurl === next.pngurl && old.imageType === next.imageType &&
-        old.dimension.width === next.dimension.width && old.dimension.height === next.dimension.height) continue;
+        old.dimension.width === next.dimension.width && old.dimension.height === next.dimension.height &&
+        this.textures.get(id) !== Texture.EMPTY) continue;
+      // Invalidate old jobs before starting replacements with the same ID.
+      this.loading.delete(id);
+      this.rebaking.delete(id);
       const vector = this.svgBaked.get(id);
       const raster = this.rasterSources.get(id);
       if (vector) release.push(() => this.dropBaked(vector));
@@ -861,8 +872,9 @@ export class PixiRenderer implements Renderer {
     }
     this.setSvgBudget(targets);
     const one = async (picture: Picture) => {
+      if (!current()) return;
       await this.loadPicture(picture);
-      onLoaded?.(this.textures.get(picture.id) !== Texture.EMPTY);
+      if (current()) onLoaded?.(this.textures.get(picture.id) !== Texture.EMPTY);
     };
     try {
       await pool(inScene, LOAD_CONCURRENCY, one);
@@ -1007,9 +1019,11 @@ export class PixiRenderer implements Renderer {
       return;
     }
     this.pictures.set(picture.id, picture);
-    const job = (async () => {
+    const current = () => !this.destroyed && this.loading.get(picture.id) === job;
+    const job: Promise<void> = Promise.resolve().then(async () => {
       try {
         const url = await this.pickUrl(picture);
+        if (!current()) return;
         const resolution = this.svgResolution(picture);
         const vector = isVectorUrl(url);
         // Mipmaps keep raster costumes smooth when drawn much smaller than their source.
@@ -1017,6 +1031,7 @@ export class PixiRenderer implements Renderer {
           ? await this.loadVector(picture, url, resolution)
           : { texture: await this.loadTexture(url, { autoGenerateMipmaps: true }), src: url };
         const texture = loaded.texture;
+        if (!current()) { releaseBaked(loaded.src); return; }
         if (vector) {
           this.keepBaked(picture.id, { url, src: loaded.src, resolution });
         } else this.rasterSources.set(picture.id, loaded.src);
@@ -1026,13 +1041,13 @@ export class PixiRenderer implements Renderer {
           this.images.set(picture.id, resource);
         }
       } catch (error) {
-        if (this.destroyed) return;
+        if (!current()) return;
         console.warn('[entropy] 모양을 불러오지 못했습니다', picture.name, picture.fileurl, error);
         this.textures.set(picture.id, Texture.EMPTY);
       } finally {
-        this.loading.delete(picture.id);
+        if (this.loading.get(picture.id) === job) this.loading.delete(picture.id);
       }
-    })();
+    });
     this.loading.set(picture.id, job);
     await job;
   }

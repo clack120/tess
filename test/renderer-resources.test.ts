@@ -8,10 +8,12 @@ function setup() {
   const cache = new Map<string, any>(), aliases = new Set<string>(), unloads: string[] = [];
   const pending: Array<() => void> = [];
   let held = false, holdUnload = false;
+  const failures = new Set<string>();
   const unloadsPending: Array<() => void> = [];
   const assets = {
     resolver: { removeAlias: (src: string) => aliases.delete(src) },
     async load({ src }: { src: string }) {
+      if (failures.has(src)) throw new Error('broken image');
       aliases.add(src);
       if (held) await new Promise<void>(resolve => pending.push(resolve));
       if (!cache.has(src)) cache.set(src, { source: { resource: {} }, width: 10, height: 10, destroyed: false });
@@ -38,6 +40,7 @@ function setup() {
   const picture = (id = 'p', fileurl = '/picture.png') => ({ id, fileurl, imageType: 'png', dimension: { width: 10, height: 10 } });
   const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); };
   return { create, picture, cache, aliases, unloads, pending, context, settle, unloadsPending,
+    failures, resume: () => { held = false; },
     hold: () => { held = true; }, holdUnload: () => { holdUnload = true; } };
 }
 
@@ -160,4 +163,104 @@ test('the renderer counts completed draws rather than idle or failed flushes', a
   (renderer.app as any).renderer.render = () => { throw new Error('draw failed'); };
   assert.throws(() => renderer.flush(), /draw failed/);
   assert.equal(renderer.renderCount, 2);
+});
+
+test('reloading a replaced costume cannot wait for or publish its older pending download', async () => {
+  const s = setup(), renderer = s.create(); renderer.setSvgBudget = () => {};
+  s.hold(); const old = renderer.loadPicture(s.picture('p', '/old.png'));
+  await s.settle(); assert.equal(s.pending.length, 1);
+  s.resume();
+  const replacementLoad = renderer.preload([{ pictures: [s.picture('p', '/new.png')] }]);
+  await s.settle();
+  assert.ok(renderer.textures.has('p'), 'the replacement must load before the older request finishes');
+  await replacementLoad;
+  const texture = renderer.textures.get('p');
+  assert.equal(texture, s.cache.get('https://example.test/new.png'));
+  s.pending[0]!(); await old; await s.settle();
+  assert.equal(renderer.textures.get('p'), texture);
+  assert.equal(s.cache.has('https://example.test/old.png'), false);
+  renderer.destroy(); await s.settle(); assert.equal(s.cache.size, 0);
+});
+
+test('removing a costume while it loads does not resurrect its texture or collision image', async () => {
+  const s = setup(), renderer = s.create(); renderer.setSvgBudget = () => {};
+  s.hold(); const old = renderer.loadPicture(s.picture()); await s.settle();
+  await renderer.preload([]);
+  s.pending[0]!(); await old; await s.settle();
+  assert.equal(renderer.textures.size, 0); assert.equal(renderer.images.size, 0);
+  assert.equal(s.cache.size, 0); renderer.destroy();
+});
+
+test('a superseded preload does not continue downloading removed costumes or report old progress', async () => {
+  const s = setup(), renderer = s.create(); renderer.setSvgBudget = () => {};
+  s.hold(); let reports = 0;
+  const old = renderer.preload([{ pictures: Array.from({ length: 30 }, (_, i) => s.picture(String(i), `/${i}.png`)) }], undefined, () => reports++);
+  await s.settle(); assert.equal(s.pending.length, 12);
+  await renderer.preload([]); s.resume();
+  for (const resolve of s.pending) resolve();
+  await old; await s.settle();
+  assert.equal(reports, 0); assert.equal(renderer.textures.size, 0); assert.equal(s.cache.size, 0);
+  renderer.destroy();
+});
+
+test('failed costumes retry on project reload without retrying every frame', async () => {
+  const s = setup(), renderer = s.create(); renderer.setSvgBudget = () => {};
+  s.failures.add('https://example.test/picture.png');
+  await renderer.preload([{ pictures: [s.picture()] }]);
+  assert.equal(renderer.textures.get('p'), s.context.Texture.EMPTY);
+  s.failures.clear();
+  await renderer.loadPicture(s.picture());
+  assert.equal(renderer.textures.get('p'), s.context.Texture.EMPTY, 'one failed load stays cached for the current run');
+  await renderer.preload([{ pictures: [s.picture()] }]);
+  assert.notEqual(renderer.textures.get('p'), s.context.Texture.EMPTY);
+  renderer.destroy(); await s.settle(); assert.equal(s.cache.size, 0);
+});
+
+test('an old SVG rebake cannot replace a reloaded costume or leak its new rasterization', async () => {
+  const s = setup(), renderer = s.create(); renderer.setSvgBudget = () => {};
+  renderer.loadVector = async (_picture: unknown, url: string, resolution: number) => {
+    const src = url + '?scale=' + resolution;
+    return { texture: await renderer.loadTexture(src, {}), src };
+  };
+  const picture = { ...s.picture('p', '/old.svg'), imageType: 'svg' };
+  renderer.pictures.set('p', picture);
+  const texture = await renderer.loadTexture('/old.svg?scale=1', {});
+  renderer.svgBaked.set('p', { url: '/old.svg', src: '/old.svg?scale=1', resolution: 1 });
+  renderer.textures.set('p', texture);
+  s.hold(); const bake = renderer.bakeVector('p', '/old.svg', 2); await s.settle();
+  s.resume();
+  const replacementLoad = renderer.preload([{ pictures: [s.picture('p', '/new.png')] }]);
+  await s.settle();
+  assert.ok(renderer.textures.has('p'), 'the replacement must load before the older request finishes');
+  await replacementLoad;
+  const replacement = renderer.textures.get('p');
+  s.pending[0]!(); await bake; await s.settle();
+  assert.equal(renderer.textures.get('p'), replacement); assert.equal(renderer.svgBaked.size, 0);
+  assert.equal(s.cache.size, 1);
+  renderer.destroy(); await s.settle(); assert.equal(s.cache.size, 0);
+});
+
+test('finishing an obsolete load cannot remove a newer pending request for the same costume', async () => {
+  const s = setup(), renderer = s.create(); renderer.setSvgBudget = () => {};
+  s.hold(); const old = renderer.loadPicture(s.picture('p', '/old.png')); await s.settle();
+  const next = s.picture('p', '/new.png');
+  const loading = renderer.preload([{ pictures: [next] }]); await s.settle();
+  assert.equal(s.pending.length, 2);
+  const current = renderer.loading.get('p');
+  s.pending[0]!(); await old; await s.settle();
+  assert.equal(renderer.loading.get('p'), current);
+  const repeated = renderer.loadPicture(next); await s.settle(); assert.equal(s.pending.length, 2);
+  s.pending[1]!(); await Promise.all([loading, repeated]);
+  assert.equal(renderer.textures.get('p'), s.cache.get('https://example.test/new.png'));
+  renderer.destroy(); await s.settle(); assert.equal(s.cache.size, 0);
+});
+
+test('unchanged costumes share a pending load across project reloads', async () => {
+  const s = setup(), renderer = s.create(); renderer.setSvgBudget = () => {};
+  s.hold(); const old = renderer.loadPicture(s.picture()); await s.settle();
+  const loading = renderer.preload([{ pictures: [s.picture()] }]); await s.settle();
+  assert.equal(s.pending.length, 1);
+  s.pending[0]!(); await Promise.all([old, loading]);
+  assert.equal(renderer.textures.get('p'), s.cache.get('https://example.test/picture.png'));
+  renderer.destroy(); await s.settle(); assert.equal(s.cache.size, 0);
 });
