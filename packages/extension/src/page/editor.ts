@@ -166,7 +166,7 @@ function schedule(): void {
   // renderer or decode a second copy of every asset while the user is editing.
 }
 
-function createPrepared(canvas: HTMLCanvasElement): Prepared {
+function createPrepared(canvas: HTMLCanvasElement, entry: Editor): Prepared {
   let audioContext: AudioContext | undefined;
   try { if (typeof AudioContext === 'function') audioContext = new AudioContext(); } catch {}
   const root = document.createElement('div');
@@ -181,6 +181,25 @@ function createPrepared(canvas: HTMLCanvasElement): Prepared {
   status.setAttribute('role', 'status');
   Object.assign(status.style, { position: 'absolute', inset: '0', display: 'grid', placeItems: 'center', zIndex: '3' });
   root.append(status);
+  const fallbackMouseInput = document.querySelector<HTMLInputElement>('.entryMouseViewWorkspace_w > input');
+  const mousePosition = () => {
+    if (!active || prepared?.root !== root || !prepared.handle || attached !== entry || (window as any).Entry !== entry) return;
+    const input = entry.engine.mouseViewInput ?? fallbackMouseInput;
+    if (!input) return;
+    const vm = prepared.handle.vm;
+    const value = `X : ${vm.mouseX.toFixed(1)}, Y : ${vm.mouseY.toFixed(1)}`;
+    if (input.value !== value) input.value = value;
+    (entry.engine.mouseView ?? input.parentElement)?.classList.remove('entryHide');
+  };
+  const hideMousePosition = () => {
+    if (active && prepared?.root === root) {
+      (entry.engine.mouseView ?? fallbackMouseInput?.parentElement)?.classList.add('entryHide');
+    }
+  };
+  // The VM stage updates its coordinates before this bubbling listener runs.
+  // Do not run the native interpreter just to update its existing readout.
+  root.addEventListener('pointermove', mousePosition);
+  root.addEventListener('pointerleave', hideMousePosition);
   const parents = new Map<HTMLElement, string>();
   let size = '';
   const layout = () => {
@@ -212,6 +231,8 @@ function createPrepared(canvas: HTMLCanvasElement): Prepared {
     busy: false, svg: settings.svg, escape: settings.escape,
     cleanup() {
       observer.disconnect(); clearInterval(timer);
+      root.removeEventListener('pointermove', mousePosition);
+      root.removeEventListener('pointerleave', hideMousePosition);
       for (const [parent, position] of parents) parent.style.position = position;
     } };
 }
@@ -220,7 +241,7 @@ function prepare(entry: Editor, snapshot: EditorSnapshot): Promise<void> {
   if (prepared && (prepared.svg !== settings.svg || prepared.escape !== settings.escape)) discard();
   const canvas = document.getElementById('entryCanvas');
   if (!(canvas instanceof HTMLCanvasElement)) return Promise.reject(new Error('엔트리 실행 화면을 찾지 못했습니다'));
-  const current = prepared ?? (prepared = createPrepared(canvas));
+  const current = prepared ?? (prepared = createPrepared(canvas, entry));
   dirty = false;
   current.requestedWork = snapshot.work;
   if (current.requested === snapshot.source) return current.promise;

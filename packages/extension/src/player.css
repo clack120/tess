@@ -35,6 +35,48 @@
   display: none !important;
 }
 
+.entropy-editor-live > .entropy-editor-apply {
+  appearance: none;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 8px 14px;
+  border: 1px solid #3464df;
+  border-radius: 6px;
+  background: #4f80ff;
+  color: #fff;
+  box-shadow: 0 1px 2px #0002;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.entropy-editor-live > .entropy-editor-apply:hover:not(:disabled) {
+  background: #3b6de8;
+}
+
+.entropy-editor-live > .entropy-editor-apply:active:not(:disabled) {
+  background: #2e59c5;
+  box-shadow: inset 0 1px 3px #0003;
+}
+
+.entropy-editor-live > .entropy-editor-apply:focus-visible {
+  outline: 2px solid #254db3;
+  outline-offset: 3px;
+}
+
+.entropy-editor-live > .entropy-editor-apply:disabled {
+  border-color: #b8c6e5;
+  background: #dbe4f8;
+  color: #586b91;
+  box-shadow: none;
+  cursor: wait;
+}
+
 .entropy-editor-browsing .entryBoard * {
   pointer-events: none !important;
 }

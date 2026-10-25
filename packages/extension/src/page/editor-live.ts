@@ -62,8 +62,9 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
   const label = document.createElement('span');
   label.textContent = '임시 편집 · 정지하면 원래 블록으로 돌아갑니다.';
   const apply = document.createElement('button');
+  apply.className = 'entropy-editor-apply';
   apply.type = 'button'; apply.textContent = '실행에 적용';
-  apply.title = '현재 실행 위치·대기·반복 횟수를 유지합니다. 수정 내용은 다음 블록부터 적용하며, 이미 지난 블록은 다시 실행하지 않습니다.';
+  apply.title = '수정한 블록을 실행 중인 작품에 적용합니다.';
   panel.append(label, apply);
   const host = [playground.boardView_, playground.codeView_, workspace.board.wrapper, playground.view_]
     .find(node => node?.namespaceURI === 'http://www.w3.org/1999/xhtml') ?? playground.view_;
@@ -148,7 +149,7 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
       trace('compiling');
       await vm.patchCodeAsync({ objects, functions: patchedFunctions }, controller.signal);
       session.applied = true;
-      label.textContent = '적용됨 · 현재 위치와 대기를 유지하고 다음 블록부터 반영합니다. 정지하면 변경을 버립니다.';
+      label.textContent = '적용됨 · 정지하면 변경을 버립니다.';
       trace('updated');
     } catch (error) {
       trace(controller.signal.aborted ? 'update-cancelled' : 'update-error');

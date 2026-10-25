@@ -129,6 +129,29 @@ test('runtime scene changes follow the native editor focus and stop restores the
   vm.onSceneChange('first'); assert.equal(s.w.Entry.scene.selectedScene.id, 'second', 'late notifications cannot move a stopped editor');
 });
 
+test('the native mouse readout follows VM coordinates with one decimal while running and paused', async t => {
+  const s = await setup(t);
+  const view = s.w.document.createElement('div'); view.className = 'entryMouseViewWorkspace_w entryHide';
+  const input = s.w.document.createElement('input'); view.append(input); s.w.document.body.append(view);
+  Object.assign(s.engine, { mouseView: view, mouseViewInput: input });
+  s.engine.toggleRun(); await s.settle();
+  const root = s.w.document.querySelector('.entropy-editor-player');
+  const stage = s.w.document.createElement('div'); root.append(stage);
+  const vm = s.handles[0].vm;
+  stage.addEventListener('pointermove', () => { vm.mouseX = -12.345; vm.mouseY = 0; });
+  stage.dispatchEvent(new s.w.Event('pointermove', { bubbles: true }));
+  assert.equal(input.value, 'X : -12.3, Y : 0.0');
+  assert.equal(vm.mouseX, -12.345, 'formatting never rounds the runtime sensor value');
+  assert.equal(view.classList.contains('entryHide'), false);
+  s.engine.togglePause(); vm.mouseX = 2.36; vm.mouseY = -8.76;
+  root.dispatchEvent(new s.w.Event('pointermove'));
+  assert.equal(input.value, 'X : 2.4, Y : -8.8');
+  root.dispatchEvent(new s.w.Event('pointerleave')); assert.equal(view.classList.contains('entryHide'), true);
+  assert.equal(s.counts().nativeTicks, 0);
+  await s.engine.toggleStop(); input.value = 'native';
+  root.dispatchEvent(new s.w.Event('pointermove')); assert.equal(input.value, 'native');
+});
+
 test('stopping or disabling during editor asset loading cannot start a late player', async t => {
   const s = await setup(t, true);
   s.engine.toggleRun(); await s.settle();

@@ -434,7 +434,8 @@ export function mountPlayer(
         pauseButton.title = state === "pause" ? "이어서 하기" : "일시정지";
         pauseButton.setAttribute("aria-label", pauseButton.title);
       }
-      coords.textContent = `X: ${Math.round(live.vm.mouseX)}  Y: ${Math.round(live.vm.mouseY)}`;
+      const position = `X: ${live.vm.mouseX.toFixed(1)}  Y: ${live.vm.mouseY.toFixed(1)}`;
+      if (coords.textContent !== position) coords.textContent = position;
     };
     const start = () => {
       clearError();
