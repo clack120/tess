@@ -9,8 +9,6 @@
 
 ## 설치
 
-### 방법 1 — 폴더 복사 (가장 간단)
-
 이 폴더를 VS Code 확장 폴더에 복사하고 VS Code 를 다시 켜면 끝입니다.
 
 ```bash
@@ -25,13 +23,6 @@ Copy-Item -Recurse editors\vscode $env:USERPROFILE\.vscode\extensions\entropy-la
 
 ```bash
 ln -s "$(pwd)/editors/vscode" ~/.vscode/extensions/entropy-lang
-```
-
-### 방법 2 — .vsix 로 묶어서 설치
-
-```bash
-npx @vscode/vsce package          # editors/vscode 안에서 실행
-code --install-extension entropy-lang-1.0.0.vsix
 ```
 
 ### 확인

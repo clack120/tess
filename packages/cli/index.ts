@@ -65,11 +65,11 @@ import { serveVm } from "@entropy/vm";
 import * as out from "./src/output.ts";
 
 const USAGE = `사용법
-  node index.ts check      <파일.etp|파일.ent> 문법·의미 또는 3회 왕복 호환성 검사
-  node index.ts build      <파일.etp> [-o 출력] 엔트리 작품으로 컴파일
-  node index.ts run        <파일.etp>          컴파일 후 브라우저에서 실행 (entropy)
-  node index.ts ast        <파일.etp>          AST 구조 출력
-  node index.ts decompile  <파일.ent> [-o 폴더]  기존 엔트리 작품을 Entropy 소스로 디컴파일
+  entropy check      <파일.etp|파일.ent> 문법·의미 또는 3회 왕복 호환성 검사
+  entropy build      <파일.etp> [-o 출력] 엔트리 작품으로 컴파일
+  entropy run        <파일.etp>          컴파일 후 브라우저에서 실행
+  entropy ast        <파일.etp>          AST 구조 출력
+  entropy decompile  <파일.ent> [-o 폴더]  기존 엔트리 작품을 Entropy 소스로 디컴파일
 
 옵션
   -o, --out <경로>   출력 파일 또는 폴더를 지정합니다.
@@ -84,14 +84,11 @@ const USAGE = `사용법
                       사용 중인 경우 빈 포트 자동 할당)
   --no-open          run 명령 시 브라우저를 자동으로 열지 않도록 설정합니다.
   --no-reload        run 명령 시 소스가 변경되어도 자동 새로고침을 하지 않습니다.
-  --entry            run 명령을 엔트리 실행기(entryjs)로 돌립니다.
-                     (기본값은 Entropy 입니다 — 같은 규칙으로 훨씬 빠르게 돕니다.)
+  --entry            run 명령을 EntryJS로 돌립니다. 기본값은 Entropy입니다.
   --quality <배수>   run 명령 시 화질 배수 1 · 2 · 4 (Entropy 전용, 기본 1)
   --stage <가로x세로> run 명령 시 무대 크기 (Entropy 전용, 기본 480x270)
   --fps <값>         run 명령 시 틱 속도 (Entropy 전용, 기본은 작품이 정한 speed)
-  --boost            엔트리 실행기(--entry)를 WebGL 렌더러로 돌립니다.
-                     Entropy는 늘 WebGL 이라 '부스트 모드인가?' 가 언제나 참이고,
-                     이 옵션과 상관이 없습니다. (build 명령에는 적용되지 않습니다.)
+  --boost            --entry 실행기의 부스트 모드를 켭니다.
   --no-strict        느슨한 실행을 켭니다. 에러가 난 문장만 빼고 build/run을 계속하고,
                      '주의'를 경고로 올리지 않습니다. 기본값은 strict 입니다.
   --rounds <횟수>    .ent check 왕복 검사 횟수 (1~10, 기본 3)
@@ -663,7 +660,7 @@ async function runDecompile(
     else {
       out.log.warn(
         `되돌린 소스에 아직 컴파일 에러가 ${recheck.errors.length}개 있습니다.\n` +
-          out.dim(`node index.ts check ${mainFile}`),
+          out.dim(`entropy check ${mainFile}`),
       );
     }
   } catch {
