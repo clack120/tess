@@ -10,8 +10,8 @@
     "watch": "bun watch.ts"
   },
   "dependencies": {
+    "@entropy/core": "workspace:*",
     "@entropy/vm": "workspace:*",
-    "dexie": "^4.4.6",
-    "pixi.js": "^8.20.1"
+    "dexie": "^4.4.6"
   }
 }

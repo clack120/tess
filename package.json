@@ -22,8 +22,7 @@
     "watch:extension": "bun packages/extension/watch.ts"
   },
   "trustedDependencies": [
-    "core-js",
-    "esbuild"
+    "core-js"
   ],
   "devDependencies": {
     "@entrylabs/entry": "^4.0.23",

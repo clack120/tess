@@ -13,6 +13,7 @@
     "src"
   ],
   "dependencies": {
+    "@entropy/compiler": "workspace:*",
     "@entropy/core": "workspace:*",
     "@entropy/parser": "workspace:*",
     "@entropy/player": "workspace:*"
