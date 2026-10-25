@@ -26,7 +26,22 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
   const boards = [...new Set([workspace.board, workspace.overlayBoard, workspace.blockMenu].filter(Boolean))] as any[];
   const readOnly = boards.map(board => [board, board.readOnly] as const);
   for (const board of boards) board.readOnly = false;
-  const copy = (owner: any, field: string) => {
+  // Native addRef/removeRef repaint the entire variable list for every block.
+  // Keep reference registration intact, but paint once after synchronous bulk work.
+  const batchReferences = <T>(action: () => T, refresh = (update: () => void) => update()): T => {
+    const container = entry.variableContainer;
+    const update = container?.updateList;
+    if (typeof update !== 'function') return action();
+    let requested = false;
+    const defer = () => { requested = true; };
+    container.updateList = defer;
+    try { return action(); }
+    finally {
+      if (container.updateList === defer) container.updateList = update;
+      if (requested) refresh(() => update.call(container));
+    }
+  };
+  const copy = (owner: any, field: string) => batchReferences(() => {
     if (saved.has(owner)) return saved.get(owner)!.copy;
     const original = owner?.[field];
     if (typeof original?.toJSON !== 'function') return original;
@@ -43,7 +58,7 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     saved.set(owner, { field, original, copy: cloned, options });
     owner[field] = cloned;
     return cloned;
-  };
+  });
   const injectCode = playground.injectCode;
   const inject = function(this: any, ...args: any[]) {
     if (this.object) copy(this.object, 'script');
@@ -197,36 +212,38 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     updating?.abort();
     let failure: unknown;
     const restoreView = (action: () => void) => { try { action(); } catch (error) { failure ??= error; } };
-    for (const restoreGuard of guards) restoreView(restoreGuard);
-    if (!editingBefore && functionEditor?.isEdit) restoreView(() => functionEditor.endEdit('cancelEdit'));
-    if (playground.injectCode === inject) playground.injectCode = injectCode;
-    if (functionEditor?.initEditView === edit) functionEditor.initEditView = initEdit;
-    if (playground.changeViewMode === changeView) playground.changeViewMode = viewMode;
-    if (playground.toggleOnVariableView === showVariables) playground.toggleOnVariableView = variableView;
-    if (originalFunctions) {
-      for (const id of Object.keys(functions)) delete functions[id];
-      Object.assign(functions, originalFunctions);
-    }
-    for (const [owner, value] of saved) {
-      owner[value.field] = value.original;
-      if (value.options) {
-        Object.assign(owner, value.options);
-        restoreView(() => functionEditor?._generateFunctionSchema?.(owner.id, owner.type));
-        restoreView(() => functionEditor?.generateWsBlock?.(owner));
+    batchReferences(() => {
+      for (const restoreGuard of guards) restoreView(restoreGuard);
+      if (!editingBefore && functionEditor?.isEdit) restoreView(() => functionEditor.endEdit('cancelEdit'));
+      if (playground.injectCode === inject) playground.injectCode = injectCode;
+      if (functionEditor?.initEditView === edit) functionEditor.initEditView = initEdit;
+      if (playground.changeViewMode === changeView) playground.changeViewMode = viewMode;
+      if (playground.toggleOnVariableView === showVariables) playground.toggleOnVariableView = variableView;
+      if (originalFunctions) {
+        for (const id of Object.keys(functions)) delete functions[id];
+        Object.assign(functions, originalFunctions);
       }
-    }
-    if (undo) history.undoStack_ = undo;
-    if (redo) history.redoStack_ = redo;
-    for (const [board, previous] of readOnly) board.readOnly = previous;
-    playground.view_.classList.remove('entropy-editor-editing');
-    restoreCurtain();
-    panel.remove();
-    if (playground.object) restoreView(() => injectCode.call(playground));
-    const overlayBoard = workspace.overlayBoard;
-    const shown = [...saved.values()].find(value => value.copy === overlayBoard?.code);
-    if (shown) restoreView(() => overlayCode.call(workspace, shown.original));
-    for (const value of saved.values()) restoreView(() => value.copy.destroy?.());
-    saved.clear();
+      for (const [owner, value] of saved) {
+        owner[value.field] = value.original;
+        if (value.options) {
+          Object.assign(owner, value.options);
+          restoreView(() => functionEditor?._generateFunctionSchema?.(owner.id, owner.type));
+          restoreView(() => functionEditor?.generateWsBlock?.(owner));
+        }
+      }
+      if (undo) history.undoStack_ = undo;
+      if (redo) history.redoStack_ = redo;
+      for (const [board, previous] of readOnly) board.readOnly = previous;
+      playground.view_.classList.remove('entropy-editor-editing');
+      restoreCurtain();
+      panel.remove();
+      if (playground.object) restoreView(() => injectCode.call(playground));
+      const overlayBoard = workspace.overlayBoard;
+      const shown = [...saved.values()].find(value => value.copy === overlayBoard?.code);
+      if (shown) restoreView(() => overlayCode.call(workspace, shown.original));
+      for (const value of saved.values()) restoreView(() => value.copy.destroy?.());
+      saved.clear();
+    }, restoreView);
     if (failure) console.warn('[entropy] 블록 원본은 복원했지만 편집 화면 일부를 갱신하지 못했습니다', failure);
   }
   return session;

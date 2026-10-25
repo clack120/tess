@@ -5,6 +5,7 @@ import { signedInUser } from './signed-in.ts';
 import { compactLargeProject, PROJECT_JSON_LIMIT } from './project-compact.ts';
 import { improveSoundLoading } from './editor-sounds.ts';
 import { beginLiveEditing, type LiveEditing } from './editor-live.ts';
+import { beginActorEditing, type ActorEditing } from './editor-actors.ts';
 
 interface Editor {
   type: string;
@@ -45,7 +46,8 @@ let attached: Editor | null = null;
 let attachedEngine: Record<string, any> | null = null;
 let restore: (() => void) | null = null;
 let prepared: Prepared | null = null;
-let active: { live?: LiveEditing | null; cleanup(): void } | null = null;
+interface RunningEditor { live?: LiveEditing | null; actors?: ActorEditing; cleanup(): void }
+let active: RunningEditor | null = null;
 let dirty = true;
 let editRevision = 0;
 let cachedExport: { entry: Editor; revision: number; work: EntryWork } | null = null;
@@ -108,6 +110,7 @@ function finish(): () => void {
   traceEditor('stopping');
   const old = active;
   active = null;
+  old?.actors?.restore();
   prepared?.handle?.stop();
   if (prepared) {
     prepared.root.hidden = true;
@@ -224,7 +227,7 @@ function createPrepared(canvas: HTMLCanvasElement, entry: Editor): Prepared {
   const timer = setInterval(() => {
     if (!canvas.isConnected) { if (active) void attached?.engine.toggleStop(); discard(); return; }
     if (active && prepared?.handle?.vm.state === 'stop' && !prepared.busy) void attached?.engine.toggleStop();
-    if (active) layout();
+    if (active) { layout(); active.actors?.sync(); }
   }, 100);
   return { root, status, audioContext, controller: new AbortController(), source: '', requested: '', requestedWork: null,
     promise: Promise.resolve(),
@@ -386,7 +389,7 @@ function attach(entry: Editor): void {
     if (!currentSnapshot) return;
     const canvas = document.getElementById('entryCanvas') as HTMLCanvasElement;
     const visibility = canvas.style.visibility;
-    const current: { live?: LiveEditing | null; cleanup(): void } = {
+    const current: RunningEditor = {
       cleanup() { canvas.style.visibility = visibility; unbrowse(); },
     };
     let unbrowse = () => {};
@@ -410,6 +413,7 @@ function attach(entry: Editor): void {
       if (unknown.length) (window as any).Entry.toast?.alert('실행기 안내',
         `이 실행기가 아직 모르는 블록이 ${unknown.length}종 있습니다: ${unknown.slice(0, 6).join(', ')}`);
       handle.relayout(); handle.start();
+      current.actors = beginActorEditing(entry, handle);
       traceEditor('running');
       if (engine.state === 'pause') handle.pause();
     }).catch(error => {

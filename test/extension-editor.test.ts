@@ -52,6 +52,7 @@ async function setup(t: any, delay = false) {
   w.compactLargeProject = compactLargeProject;
   w.PROJECT_JSON_LIMIT = PROJECT_JSON_LIMIT;
   w.beginLiveEditing = beginLiveEditing;
+  w.beginActorEditing = () => undefined;
   w.loadModule = async (specifier: string) => {
     if (specifier.endsWith('boot.ts')) return { boot: async (options: any) => {
       boots.push(options); await gate;
@@ -127,6 +128,23 @@ test('runtime scene changes follow the native editor focus and stop restores the
   s.w.Entry = original;
   await s.engine.toggleStop(); assert.equal(s.w.Entry.scene.selectedScene.id, 'second');
   vm.onSceneChange('first'); assert.equal(s.w.Entry.scene.selectedScene.id, 'second', 'late notifications cannot move a stopped editor');
+});
+
+test('temporary actor controls attach after VM start and detach before native stop or disabling the runner', async t => {
+  const s = await setup(t);
+  const events: string[] = [];
+  s.w.beginActorEditing = (_entry: any, handle: any) => {
+    assert.equal(handle.vm.state, 'run'); events.push('attach');
+    return { sync() {}, restore() {
+      assert.notEqual(handle.vm.state, 'stop');
+      assert.notEqual(s.engine.state, 'stop'); events.push('restore');
+    } };
+  };
+  s.engine.toggleRun(); await s.settle();
+  await s.engine.toggleStop();
+  s.engine.toggleRun(); await s.settle();
+  s.configure(false); await s.settle();
+  assert.deepEqual(events, ['attach', 'restore', 'attach', 'restore']);
 });
 
 test('the native mouse readout follows VM coordinates with one decimal while running and paused', async t => {

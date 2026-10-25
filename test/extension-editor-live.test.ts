@@ -8,14 +8,15 @@ function setup(t: any) {
   const dom = new JSDOM('<div id="view"></div>', { runScripts: 'outside-only' });
   t.after(() => dom.window.close());
   const w = dom.window as any;
+  let added = (_code: any) => {}, removed = (_code: any) => {};
   class Code {
     data: any;
     destroyed = false;
     object?: any;
-    constructor(data: any, object?: any) { this.data = structuredClone(data); this.object = object; }
+    constructor(data: any, object?: any) { this.data = structuredClone(data); this.object = object; added(this); }
     toJSON() { return structuredClone(this.data); }
     stringify() { return JSON.stringify(this.data); }
-    destroy() { this.destroyed = true; }
+    destroy() { this.destroyed = true; removed(this); }
   }
   const block = (id: string) => [[{ id, type: 'when_run_button_click', params: [] }]];
   const first = { id: 'first', script: new Code(block('hat-first')) };
@@ -42,6 +43,12 @@ function setup(t: any) {
   const work = { objects: [], functions: [{ id: 'fn', content: original.fn.stringify() }] };
   const patches: any[] = [];
   const vm = { state: 'pause', pause(_finish: boolean) { this.state = 'pause'; }, async patchCodeAsync(value: any) { patches.push(value); return 0; } };
+  let referenceRenders = 0;
+  const references = new Set([original.first, original.second, original.fn]);
+  const renderReferences = () => { referenceRenders++; };
+  Object.assign(entry.variableContainer, { updateList: renderReferences });
+  added = code => { references.add(code); for (let i = 0; i < 5; i++) (entry.variableContainer as any).updateList(); };
+  removed = code => { references.delete(code); for (let i = 0; i < 5; i++) (entry.variableContainer as any).updateList(); };
   const source = stripTypes(fs.readFileSync(new URL('../packages/extension/src/page/editor-live.ts', import.meta.url), 'utf8'))
     .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
   w.loadYield = () => () => undefined;
@@ -49,6 +56,7 @@ function setup(t: any) {
   const live = w.begin(entry, work, () => vm);
   t.after(() => live.restore());
   return { w, entry, playground, board, workspace, overlayBoard, first, second, fn, original, undo, redo, live, patches, work, vm,
+    references, renderReferences, referenceRenders: () => referenceRenders,
     schemaUpdates: () => schemaUpdates,
     apply: () => w.document.querySelector('.entropy-editor-live button').onclick() };
 }
@@ -85,6 +93,33 @@ test('other objects are copied only when opened, and function body edits are iso
   assert.equal(s.w.document.querySelector('.entropy-editor-live').hidden, false);
   s.entry.engine.state = 'stop'; s.live.restore();
   assert.equal(s.second.script, s.original.second); assert.equal(s.fn.content, s.original.fn);
+});
+
+test('bulk native code copies and cleanup keep reference tracking but repaint the variable list only once', async t => {
+  const s = setup(t);
+  assert.equal(s.referenceRenders(), 1);
+  assert.equal(s.references.has(s.original.first), true); assert.equal(s.references.has(s.first.script), true);
+  s.playground.object = s.second; s.playground.injectCode();
+  s.entry.Func.initEditView(s.fn.content);
+  assert.equal(s.referenceRenders(), 3);
+  assert.equal(s.references.size, 6);
+  s.entry.engine.state = 'stop'; s.live.restore();
+  assert.equal(s.referenceRenders(), 4, 'all temporary code is destroyed in one repaint batch');
+  assert.deepEqual(s.references, new Set([s.original.first, s.original.second, s.original.fn]));
+  assert.equal((s.entry.variableContainer as any).updateList, s.renderReferences);
+});
+
+test('failed native code construction always restores the reference renderer and native run state', async t => {
+  const s = setup(t);
+  (s.entry as any).Code = class { constructor() {
+    (s.entry.variableContainer as any).updateList();
+    throw new Error('native code failed');
+  } };
+  s.playground.object = s.second;
+  assert.throws(() => s.playground.injectCode(), /native code failed/);
+  assert.equal((s.entry.variableContainer as any).updateList, s.renderReferences);
+  assert.equal(s.entry.engine.state, 'run');
+  assert.equal(s.second.script, s.original.second);
 });
 
 test('native function removal cannot rewrite call blocks in unopened originals during a run', async t => {

@@ -45,7 +45,7 @@ end`,
   const result = cli('check', path.join(dir, 'main.etp'));
   assert.equal(result.code, 1);
   assert.match(result.output, /없는장면/);
-  assert.doesNotMatch(result.output, /OK/);
+  assert.doesNotMatch(result.output, /\bOK\b/);
 });
 
 test('check 는 useobject 로 불러오는 조각 파일 안까지 검사한다', (t) => {
