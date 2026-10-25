@@ -12,9 +12,9 @@ import { didYouMean } from '@entropy/core';
 import { codeFrame, validate } from '@entropy/parser';
 import { isAutoParamName } from '@entropy/core';
 import type {
-  AssignNode, CostumeNode, EventNode, FunctionDeclNode, Expr, ListDeclNode, Node, ObjectNode,
+  AssignNode, CostumeNode, EventNode, FunctionDeclNode, Expr, ListDeclNode, ObjectNode,
   ProgramNode, ReturnNode, SceneMember, SoundNode, Stmt, TableChartNode, TableDeclNode,
-  TopLevelItem, VarDeclNode,
+  VarDeclNode,
 } from '@entropy/parser';
 import type {
   CompiledFunction, CompiledObject, CompileDiagnostic, CompileOptions,
@@ -158,8 +158,7 @@ function collectScenes(program: ProgramNode, ctx: Context) {
     ctx.sceneByName.set(item.name, scene);
   }
 
-  const hasLooseObject = program.body.some((item) => item.type === 'Object');
-  if (ctx.scenes.length === 0 || (hasLooseObject && ctx.scenes.length === 0)) {
+  if (ctx.scenes.length === 0) {
     const scene = { id: ctx.newId(), name: DEFAULT_SCENE_NAME };
     ctx.scenes.unshift(scene);
     ctx.sceneByName.set(scene.name, scene);

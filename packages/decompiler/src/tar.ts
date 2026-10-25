@@ -42,3 +42,8 @@ export async function readTar(bytes: Buffer): Promise<TarEntry[]> {
   }
   return entries;
 }
+
+export function findProjectEntry(entries: TarEntry[]): TarEntry | undefined {
+  return entries.find((entry) => entry.name === 'temp/project.json')
+    ?? entries.find((entry) => entry.name.replaceAll('\\', '/').split('/').at(-1) === 'project.json');
+}

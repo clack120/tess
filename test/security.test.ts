@@ -443,7 +443,10 @@ test('파일을 쓰는 자리가 폴더 밖 경로를 거부한다', () => {
 
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-function thumbReader(): (thumb: unknown) => string | null {
+function entryProjectReaders(): {
+  thumbUrl(thumb: unknown): string | null;
+  withAssetUrls(work: unknown): any;
+} {
   const source = stripTypes(fs.readFileSync(path.join(repoRoot, 'packages/extension/src/page/entry-project.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = {
     location: { origin: 'https://playentry.org' },
@@ -452,15 +455,15 @@ function thumbReader(): (thumb: unknown) => string | null {
   sandbox.globalThis = sandbox;
   vmModule.createContext(sandbox);
   vmModule.runInContext(
-    `${source.replace(/^import[^;]*;$/gm, '').replace(/^export /gm, '')}\nthis.read = thumbUrl;`,
+    `${source.replace(/^import[^;]*;$/gm, '').replace(/^export /gm, '')}\nthis.read = { thumbUrl, withAssetUrls };`,
     sandbox,
   );
-  return sandbox.read as (thumb: unknown) => string | null;
+  return sandbox.read as ReturnType<typeof entryProjectReaders>;
 }
 
 // Validate thumbnail URLs before inserting them into CSS so project text cannot redirect requests.
 test('미리보기 그림 주소는 playentry 를 벗어나지도, 따옴표를 남기지도 않는다', () => {
-  const thumbUrl = thumbReader();
+  const { thumbUrl } = entryProjectReaders();
   assert.equal(thumbUrl('/uploads/aa/bb/thumb/cc.png'), 'https://playentry.org/uploads/aa/bb/thumb/cc.png');
   assert.equal(thumbUrl('https://evil.example/x.png'), null);
   assert.equal(thumbUrl('//evil.example/x.png'), null);
@@ -472,6 +475,26 @@ test('미리보기 그림 주소는 playentry 를 벗어나지도, 따옴표를 
     assert.ok(url && !url.includes('"'), `따옴표가 남았습니다: ${url}`);
     assert.ok(url.startsWith('https://playentry.org/'), url);
   }
+});
+
+test('에셋 주소를 채울 때 엔트리에서 내보낸 원본을 바꾸지 않는다', () => {
+  const { withAssetUrls } = entryProjectReaders();
+  const picture: { filename: string; imageType: string; fileurl?: string } = { filename: 'aabbcc', imageType: 'svg' };
+  const sound: { filename: string; ext: string; fileurl?: string } = { filename: 'ddeeff', ext: '.mp3' };
+  const sprite = { pictures: [picture], sounds: [sound] };
+  const object = { sprite };
+  const work = { objects: [object] };
+  const normalized = withAssetUrls(work);
+
+  assert.equal(picture.fileurl, undefined);
+  assert.equal(sound.fileurl, undefined);
+  assert.notEqual(normalized, work);
+  assert.notEqual(normalized.objects[0], object);
+  assert.notEqual(normalized.objects[0].sprite, sprite);
+  assert.equal(normalized.objects[0].sprite.pictures[0].fileurl,
+    'https://playentry.org/uploads/aa/bb/image/aabbcc.svg');
+  assert.equal(normalized.objects[0].sprite.sounds[0].fileurl,
+    'https://playentry.org/uploads/dd/ee/ddeeff.mp3');
 });
 
 async function withVmServer(body: (server: { port: number }) => Promise<void>) {

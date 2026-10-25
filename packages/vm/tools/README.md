@@ -9,10 +9,10 @@ copy(JSON.stringify(Object.fromEntries(Object.entries(Entry.block).filter(([, sc
 }]))));
 ```
 
-Capture before loading a work so project-specific function schemas stay out of the snapshot. Run from the repository root with the installed Entry version:
+Capture before loading a work so project-specific function schemas stay out of the snapshot. Run from the repository root; the generator reads the installed Entry version itself:
 
 ```sh
-bun packages/vm/tools/update-block-shapes.ts snapshot.json 4.0.23
+bun packages/vm/tools/update-block-shapes.ts snapshot.json
 ```
 
-The runtime test checks that the generated version matches the installed dependency. Keep the snapshot outside Git.
+The runtime test checks that the generated version matches the installed dependency and prints this refresh command if it is stale. Keep the snapshot outside Git.

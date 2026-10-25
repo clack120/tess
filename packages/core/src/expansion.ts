@@ -1,3 +1,9 @@
+import { entryWeatherAreaValue, entryWeatherSubareaValue } from './entry-weather-locations.ts';
+import {
+  entryBehaviorCategoryValue, entryBehaviorSubcategoryValue,
+  entryGuidelineCategoryValue, entryGuidelineSubcategoryValue,
+} from './entry-disaster-options.ts';
+
 export interface ExpansionBlock {
   module: string;
   kind: string;
@@ -174,33 +180,34 @@ export function expansionBlock(name: string): ExpansionBlock | null {
 }
 
 // Entropy source uses the Korean labels shown by Entry; saved projects require dropdown values.
-const ENTRY_AREAS = {
-  서울: 'Seoul', 부산: 'Busan', 대구: 'Daegu', 인천: 'Incheon', 광주: 'Gwangju',
-  대전: 'Daejeon', 울산: 'Ulsan', 세종: 'Sejong',
-  경기: 'Gyeonggi-do', 강원: 'Gangwon', 충북: 'Chungcheongbuk-do',
-  충남: 'Chungcheongnam-do', 전북: 'Jeollabuk-do', 전남: 'Jeollanam-do',
-  경북: 'Gyeongsangbuk-do', 경남: 'Gyeongsangnam-do', 제주: 'Jeju',
-} as const;
+const WEATHER_LOCATION_SLOTS: Record<string, { area: number; sub?: number }> = {
+  get_korea_area_code: { area: 0, sub: 1 },
+  check_city_weather: { area: 1, sub: 2 },
+  check_city_finedust: { area: 0, sub: 1 },
+  get_city_weather_data: { area: 1, sub: 2 },
+  get_current_city_weather_data: { area: 0, sub: 1 },
+  get_today_city_temperature: { area: 0, sub: 1 },
+  get_weather_data: { area: 1 },
+  check_weather: { area: 1 },
+  get_current_weather_data: { area: 0 },
+  get_today_temperature: { area: 0 },
+  check_finedust: { area: 0 },
+  count_festival: { area: 0 },
+  get_festival_info: { area: 0 },
+};
 
-const SEOUL_DISTRICTS = {
-  'Jongno-gu': 'jongno_gu', 'Jung-gu': 'jung_gu', 'Yongsan-gu': 'yongsan_gu',
-  'Seongdong-gu': 'seongdong_gu', 'Gwangjin-gu': 'gwangjin_gu',
-  'Dongdaemun-gu': 'dongdaemun_gu', 'Jungnang-gu': 'jungnang_gu',
-  'Seongbuk-gu': 'seongbuk_gu', 'Gangbuk-gu': 'gangbuk_gu', 'Dobong-gu': 'dobong_gu',
-  'Nowon-gu': 'nowon_gu', 'Eunpyeong-gu': 'eunpyeong_gu',
-  'Seodaemun-gu': 'seodaemun_gu', 'Mapo-gu': 'mapo_gu', 'Yangcheon-gu': 'yangcheon_gu',
-  'Gangseo-gu': 'gangseo_gu', 'Guro-gu': 'guro_gu', 'Geumcheon-gu': 'geumcheon_gu',
-  'Yeongdeungpo-gu': 'yeongdeungpo_gu', 'Dongjak-gu': 'dongjak_gu',
-  'Gwanak-gu': 'gwanak_gu', 'Seocho-gu': 'seocho_gu', 'Gangnam-gu': 'gangnam_gu',
-  'Songpa-gu': 'songpa_gu', 'Gangdong-gu': 'gangdong_gu',
-  종로구: 'jongno_gu', 중구: 'jung_gu', 용산구: 'yongsan_gu', 성동구: 'seongdong_gu',
-  광진구: 'gwangjin_gu', 동대문구: 'dongdaemun_gu', 중랑구: 'jungnang_gu',
-  성북구: 'seongbuk_gu', 강북구: 'gangbuk_gu', 도봉구: 'dobong_gu', 노원구: 'nowon_gu',
-  은평구: 'eunpyeong_gu', 서대문구: 'seodaemun_gu', 마포구: 'mapo_gu',
-  양천구: 'yangcheon_gu', 강서구: 'gangseo_gu', 구로구: 'guro_gu', 금천구: 'geumcheon_gu',
-  영등포구: 'yeongdeungpo_gu', 동작구: 'dongjak_gu', 관악구: 'gwanak_gu',
-  서초구: 'seocho_gu', 강남구: 'gangnam_gu', 송파구: 'songpa_gu', 강동구: 'gangdong_gu',
-} as const;
+const DISASTER_OPTION_BLOCKS: Record<string, { kind: 'behavior' | 'guideline'; family: string }> = {
+  count_disaster_behavior: { kind: 'behavior', family: '01' },
+  get_disaster_behavior: { kind: 'behavior', family: '01' },
+  count_lifeSafety_behavior: { kind: 'behavior', family: '03' },
+  get_lifeSafety_behavior: { kind: 'behavior', family: '03' },
+  count_disaster_guideline: { kind: 'guideline', family: '01' },
+  get_disaster_guideline: { kind: 'guideline', family: '01' },
+  count_social_disaster_guideline: { kind: 'guideline', family: '02' },
+  get_social_disaster_guideline: { kind: 'guideline', family: '02' },
+  count_safety_accident_guideline: { kind: 'guideline', family: '03' },
+  get_safety_accident_guideline: { kind: 'guideline', family: '03' },
+};
 
 const ENTRY_DATES = {
   어제: 'yesterday', 오늘: 'today', 내일: 'tomorrow', 모레: 'After_2_days',
@@ -226,30 +233,20 @@ const WEATHER_KINDS = {
 const FINE_DUST_KINDS = { 좋음: 'good', 보통: 'normal', 나쁨: 'bad', '매우 나쁨': 'very_bad' } as const;
 
 const FIELD_ALIASES: Record<string, Record<number, Record<string, string>>> = {
-  get_korea_area_code: { 0: ENTRY_AREAS, 1: SEOUL_DISTRICTS },
-  check_city_weather: { 0: ENTRY_DATES, 1: ENTRY_AREAS, 2: SEOUL_DISTRICTS, 3: WEATHER_KINDS },
-  check_city_finedust: { 0: ENTRY_AREAS, 1: SEOUL_DISTRICTS, 2: FINE_DUST_KINDS },
-  get_city_weather_data: { 0: ENTRY_DATES, 1: ENTRY_AREAS, 2: SEOUL_DISTRICTS, 3: WEATHER_ELEMENTS },
-  get_current_city_weather_data: { 0: ENTRY_AREAS, 1: SEOUL_DISTRICTS, 2: CURRENT_WEATHER_ELEMENTS },
-  get_today_city_temperature: { 0: ENTRY_AREAS, 1: SEOUL_DISTRICTS },
+  check_city_weather: { 0: ENTRY_DATES, 3: WEATHER_KINDS },
+  check_city_finedust: { 2: FINE_DUST_KINDS },
+  get_city_weather_data: { 0: ENTRY_DATES, 3: WEATHER_ELEMENTS },
+  get_current_city_weather_data: { 2: CURRENT_WEATHER_ELEMENTS },
   get_weather_data: {
     0: ENTRY_DATES,
-    1: ENTRY_AREAS,
     2: WEATHER_ELEMENTS,
   },
   check_weather: {
     0: ENTRY_DATES,
-    1: ENTRY_AREAS,
     2: WEATHER_KINDS,
   },
-  get_current_weather_data: { 0: ENTRY_AREAS, 1: CURRENT_WEATHER_ELEMENTS },
-  get_today_temperature: {
-    0: ENTRY_AREAS,
-  },
-  check_finedust: {
-    0: ENTRY_AREAS,
-    1: FINE_DUST_KINDS,
-  },
+  get_current_weather_data: { 1: CURRENT_WEATHER_ELEMENTS },
+  check_finedust: { 1: FINE_DUST_KINDS },
   get_cur_weather_data: { 1: CURRENT_WEATHER_ELEMENTS },
   check_cur_weather: { 1: WEATHER_KINDS },
   check_cur_finddust: { 1: FINE_DUST_KINDS },
@@ -272,16 +269,29 @@ const FIELD_ALIASES: Record<string, Record<number, Record<string, string>>> = {
     0: { 전체: 'all', 안전안내: 'info', 긴급재난: 'exigency', 위급재난: 'urgency' },
     2: { 내용: 'MSG_CN', 수신지역: 'RCPTN_RGN_NM', 긴급단계: 'EMRG_STEP_NM', 재해구분: 'DST_SE_NM', 생성일시: 'REG_YMD' },
   },
-  count_disaster_guideline: {
-    0: { 태풍: '01001' },
-    1: { '태풍 예보 시': '01001001', '태풍 예보시': '01001001' },
-  },
-  get_disaster_guideline: {
-    0: { 태풍: '01001' },
-    1: { '태풍 예보 시': '01001001', '태풍 예보시': '01001001' },
-  },
 };
 
-export function expansionField(name: string, index: number, value: string): string {
+export function expansionField(
+  name: string,
+  index: number,
+  value: string,
+  fields: readonly string[] = [],
+): string {
+  const location = WEATHER_LOCATION_SLOTS[name];
+  if (location?.area === index) return entryWeatherAreaValue(value);
+  if (location?.sub === index) {
+    return entryWeatherSubareaValue(fields[location.area] ?? '', value);
+  }
+  const disaster = DISASTER_OPTION_BLOCKS[name];
+  if (disaster && index === 0) {
+    return disaster.kind === 'behavior'
+      ? entryBehaviorCategoryValue(disaster.family, value)
+      : entryGuidelineCategoryValue(disaster.family, value);
+  }
+  if (disaster && index === 1) {
+    return disaster.kind === 'behavior'
+      ? entryBehaviorSubcategoryValue(disaster.family, fields[0] ?? '', value)
+      : entryGuidelineSubcategoryValue(disaster.family, fields[0] ?? '', value);
+  }
   return FIELD_ALIASES[name]?.[index]?.[value] ?? value;
 }

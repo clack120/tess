@@ -8,9 +8,13 @@ interface Schema {
   statements: number;
 }
 
-const [, , snapshot, version] = process.argv;
-assert.ok(snapshot && /^\d+\.\d+\.\d+(?:[\w.-]*)$/.test(version ?? ''),
-  'Usage: bun packages/vm/tools/update-block-shapes.ts snapshot.json entry-version');
+const [, , snapshot, requestedVersion] = process.argv;
+const installed = JSON.parse(fs.readFileSync(
+  new URL('../../../node_modules/@entrylabs/entry/package.json', import.meta.url), 'utf8',
+));
+const version = requestedVersion ?? installed.version;
+assert.ok(snapshot && /^\d+\.\d+\.\d+(?:[\w.-]*)$/.test(version),
+  'Usage: bun packages/vm/tools/update-block-shapes.ts snapshot.json [entry-version]');
 const schemas = JSON.parse(fs.readFileSync(snapshot, 'utf8')) as Record<string, Schema>;
 const groups = new Map<string, string[]>();
 for (const [name, schema] of Object.entries(schemas)) {

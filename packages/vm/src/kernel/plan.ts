@@ -887,7 +887,7 @@ export function planKernel(
   for (const object of objects) {
     noteCalls(parseScript(object.script));
   }
-  functions.forEach((fn, index) => {
+  functions.forEach((_fn, index) => {
     if (!keep[index]) {
       noteCalls(contentOf(index));
     }

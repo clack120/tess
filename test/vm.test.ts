@@ -30,6 +30,42 @@ import {
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+test('editor-style reloads reuse generated code until executable project data changes', () => {
+  const result = compileProject(`var score = 1
+object "actor":
+  when start do
+    x = score
+  end
+end`);
+  assert.ok(result.project);
+  const project = result.project as unknown as EntryProject;
+  const vm = new Vm({ renderer: null, audio: null });
+  vm.load(project as never);
+  const first = (vm as unknown as { compiledProgram: unknown }).compiledProgram;
+
+  project.objects[0]!.entity.x = 90;
+  project.variables[0]!.value = 7;
+  vm.load(project as never);
+  assert.equal((vm as unknown as { compiledProgram: unknown }).compiledProgram, first);
+  vm.start(); vm.tick();
+  assert.equal(vm.targets[0]!.entity.x, 7, 'reused code reads the newly loaded variables and targets');
+
+  project.objects[0]!.script = String(project.objects[0]!.script).replace('locate_x', 'locate_y');
+  vm.stop();
+  vm.load(project as never);
+  assert.notEqual((vm as unknown as { compiledProgram: unknown }).compiledProgram, first);
+  vm.start(); vm.tick();
+  assert.equal(vm.targets[0]!.entity.y, 7);
+
+  const blocks = JSON.parse(String(project.objects[0]!.script));
+  project.objects[0]!.script = blocks as never;
+  vm.stop(); vm.load(project as never);
+  blocks[0][1].type = 'locate_x';
+  vm.stop(); vm.load(project as never);
+  vm.start(); vm.tick();
+  assert.equal(vm.targets[0]!.entity.x, 7, 'mutable block arrays are compiled again instead of cached');
+});
+
 test('stop and restart restore table cells, field names and shape', () => {
   const vm = new Vm({ renderer: null, audio: null });
   vm.load({ scenes: [{ id: 's', name: 's' }], objects: [], variables: [], functions: [], messages: [],
@@ -1280,7 +1316,6 @@ end`;
   const centerX = stage.worldWidth / 2;
   const centerY = stage.worldHeight / 2;
   const scaledW = 100 * stage.scale;
-  const scaledH = 40 * stage.scale;
   assert.ok(Math.abs(box.x - (centerX - scaledW / 2)) < 1e-6);
   assert.ok(Math.abs(box.width - scaledW) < 1e-6);
   assert.equal(collision.touchingMouse(entity, centerX, centerY), true);

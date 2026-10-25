@@ -108,18 +108,25 @@ function visitCalls(value: unknown, names: Set<string>, found: (call: CallNode) 
 function diagnoseInitialSceneEvents(ctx: Context): void {
   const firstScene = ctx.scenes[0];
   if (!firstScene) return;
+  const handlers: Array<{ objectName: string; node: Node }> = [];
   for (const object of ctx.objects) {
     if (object.scene.id !== firstScene.id) continue;
     for (const member of object.node.body) {
       if (member.type !== 'Event' || member.event !== 'scene_start') continue;
-      ctx.warn(
-        member,
-        `첫 장면 '${firstScene.name}' 의 'when scene start'는 Entry에서 작품을 처음 시작할 때 실행되지 않습니다.`,
-        {
-          code: 'W0005',
-          help: "처음 실행할 코드라면 'when start do'를 쓰세요. 다른 장면에서 이 장면으로 전환할 때만 실행할 코드라면 그대로 두어도 됩니다.",
-        },
-      );
+      handlers.push({ objectName: object.name, node: member });
     }
   }
+  const first = handlers[0];
+  if (!first) return;
+  ctx.warn(
+    first.node,
+    `첫 장면 '${firstScene.name}' 의 'when scene start' ${handlers.length}개는 Entry에서 작품을 처음 시작할 때 실행되지 않습니다.`,
+    {
+      code: 'W0005',
+      help: "처음 실행할 코드라면 'when start do'를 쓰세요. 다른 장면에서 이 장면으로 전환할 때만 실행할 코드라면 그대로 두어도 됩니다.",
+      related: handlers.slice(1, 8).map(({ objectName, node }) => (
+        ctx.diagnostic(node, `'${objectName}' 오브젝트의 같은 첫 장면 이벤트입니다.`)
+      )),
+    },
+  );
 }

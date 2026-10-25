@@ -170,5 +170,10 @@ test('invalid dropdown data is not evaluated and rejects with the original repor
 
 test('block schema traits match the installed Entry version', () => {
   const entry = JSON.parse(fs.readFileSync(new URL('../node_modules/@entrylabs/entry/package.json', import.meta.url), 'utf8'));
-  assert.equal(ENTRY_SCHEMA_VERSION, entry.version, 'Refresh block shapes after upgrading Entry');
+  assert.equal(
+    ENTRY_SCHEMA_VERSION,
+    entry.version,
+    '설치된 Entry가 바뀌었습니다. README 절차대로 snapshot을 만든 뒤 '
+      + 'bun packages/vm/tools/update-block-shapes.ts snapshot.json 을 실행하세요.',
+  );
 });

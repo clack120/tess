@@ -80,7 +80,7 @@ export function buildCommentMap(ast: Node, sources: Map<string, string>): Map<st
   for (const [file, nodes] of nodesByFile) {
     const source = sources.get(file);
     if (!source) continue;
-    attachInFile(source, file, nodes, map);
+    attachInFile(source, nodes, map);
   }
   return map;
 }
@@ -107,7 +107,7 @@ function collectNodes(node: unknown, out: Map<string, AnyNode[]>) {
   }
 }
 
-function attachInFile(source: string, file: string, nodes: AnyNode[], map: Map<string, string>) {
+function attachInFile(source: string, nodes: AnyNode[], map: Map<string, string>) {
   const comments = scanComments(source);
   if (comments.length === 0) return;
 

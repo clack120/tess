@@ -3,9 +3,9 @@ import type { IdFactory } from './ids.ts';
 import { commentKey, makeComment } from './comments.ts';
 import { lineIndex } from '@entropy/parser';
 import { BUILTIN_FUNCTIONS, OBJECT_PROPERTIES, STATE_VALUES, didYouMean } from '@entropy/core';
-import type { Expr, Node } from '@entropy/parser';
+import type { Node } from '@entropy/parser';
 import type {
-  CompileCache, CompileDiagnostic, CompiledFunction, CompiledObject,
+  CompileDiagnostic, CompiledFunction, CompiledObject,
   CompileOptions, EntryBlock, EntryMessage, EntryParam, EntryScene, EntryTable,
   EntryVariable, FunctionScope, ResourceRef, SourceMap, VariableRef,
 } from './types.ts';

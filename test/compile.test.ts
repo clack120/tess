@@ -875,6 +875,71 @@ for (const example of examples) {
   });
 }
 
+test('Entry 검증기는 손상된 project.json도 예외 대신 구체적인 문제로 돌려준다', () => {
+  const missing = verifyEntryProject({} as never);
+  assert.ok(missing.some((problem) => problem.includes("'objects' 항목이 없습니다")));
+  assert.ok(missing.some((problem) => problem.includes("'expansionBlocks' 항목이 없습니다")));
+
+  const wrong = verifyEntryProject({
+    objects: {}, scenes: [], variables: [], messages: [], functions: [], tables: [],
+    expansionBlocks: [], aiUtilizeBlocks: [], speed: 60, interface: {},
+  } as never);
+  assert.ok(wrong.some((problem) => problem.includes("'objects' 항목이 배열이 아닙니다")));
+
+  const malformed = verifyEntryProject({
+    objects: [null, { name: '깨진 오브젝트', sprite: { pictures: [null], sounds: {} },
+      script: JSON.stringify([[{ id: 'b', type: 'move_x', params: {}, statements: null }]]) }],
+    scenes: [null], variables: [null], messages: [null], functions: [null], tables: [null],
+    expansionBlocks: [], aiUtilizeBlocks: [], speed: 60, interface: {},
+  } as never);
+  assert.ok(malformed.some((problem) => problem.includes("'objects[0]' 항목이 객체가 아닙니다")));
+  assert.ok(malformed.some((problem) => problem.includes('sprite.pictures[0] 항목이 객체가 아닙니다')));
+  assert.ok(malformed.some((problem) => problem.includes('sprite.sounds 가 배열이 아닙니다')));
+  assert.ok(malformed.some((problem) => problem.includes('params 가 배열이 아닙니다')));
+  assert.ok(malformed.some((problem) => problem.includes('statements 가 배열이 아닙니다')));
+});
+
+test('Entry 검증기는 매우 깊은 블록도 호출 스택을 넘치지 않고 검사한다', () => {
+  const depth = 10_000;
+  const open = Array.from({ length: depth }, (_, index) =>
+    `{"id":"deep-${index}","x":0,"y":0,"type":"boolean_not","params":[null,`).join('');
+  const leaf = '{"id":"leaf","x":0,"y":0,"type":"number","params":[1],"statements":[]}';
+  const script = `[[${open}${leaf}${'],"statements":[]}'.repeat(depth)}]]`;
+  const compiled = compileProject('object "actor":\nend');
+  assert.ok(compiled.project);
+  compiled.project.objects[0]!.script = script;
+  const problems = verifyEntryProject(compiled.project);
+  assert.ok(Array.isArray(problems));
+});
+
+test('Entry 검증기는 옛 값 함수 호출의 끝 null 아이콘 칸을 인자로 세지 않는다', () => {
+  const { project, thread } = compileScript('say value(1)', {
+    before: 'function value(n):\n  return n\nend',
+  });
+  const type = `func_${project!.functions[0]!.id}`;
+  const find = (value: any): any => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = find(item);
+        if (found) return found;
+      }
+    } else if (value && typeof value === 'object') {
+      if (value.type === type) return value;
+      return find(value.params) ?? find(value.statements);
+    }
+    return null;
+  };
+  const call = find(thread);
+  assert.ok(call);
+  call.params.push(null);
+  project!.objects[0]!.script = JSON.stringify([thread]);
+  assert.deepEqual(verifyEntryProject(project!), []);
+
+  call.params.push(null);
+  project!.objects[0]!.script = JSON.stringify([thread]);
+  assert.ok(verifyEntryProject(project!).some((problem) => problem.includes('끝의 null 아이콘')));
+});
+
 test('.ent 묶음은 temp/project.json 을 담은 tar.gz 다', async () => {
   const file = path.join(root, 'examples/all_blocks.etp');
   const { project } = compileProject(fs.readFileSync(file, 'utf-8'), { path: file });

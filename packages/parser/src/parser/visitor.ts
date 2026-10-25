@@ -8,7 +8,7 @@ import type {
   AskNode, AssignNode, BooleanNode, CallNode, CenterNode, ClearNode, CloneNode,
   CostumeNode, CostumeStepNode, EventNode, Expr, ExpressionStatementNode,
   FlipNode, ForNode, ForeverNode, ForwardNode, FunctionDeclNode, GoNode, Identifier,
-  IfNode, IndexNode, JumpNode, ListAddNode, ListDeclNode, ListInsertNode,
+  IfNode, JumpNode, ListAddNode, ListDeclNode, ListInsertNode,
   ListLiteralNode, ListRemoveNode, Loc, LookNode, LValue, MoveNode,
   NullaryNode, NullaryStatementType, NumberNode, ObjectMember, ObjectNode,
   OrderNode, ParseRoot, PlayBgmNode, PlaySoundNode, ProgramNode, ProjectFieldNode,
@@ -548,7 +548,7 @@ export class EntropyAstVisitor extends BaseVisitor {
     };
   }
 
-  bounceStatement(ctx: Ctx, node: CstNode): NullaryNode {
+  bounceStatement(_ctx: Ctx, node: CstNode): NullaryNode {
     return { type: 'Bounce', loc: nodeLoc(node) };
   }
 
@@ -639,7 +639,7 @@ export class EntropyAstVisitor extends BaseVisitor {
     };
   }
 
-  penStatement(ctx: Ctx, node: CstNode): NullaryNode {
+  penStatement(_ctx: Ctx, node: CstNode): NullaryNode {
     return { type: 'Stamp', loc: nodeLoc(node) };
   }
 

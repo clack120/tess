@@ -26,6 +26,8 @@ export interface LoadedProject {
   // Set only when a Entropy copy was requested.
   decompiledTo?: string;
   decompileWarnings?: string[];
+  // Release temporary files extracted from an Entry archive. Safe to call more than once.
+  cleanup(): void;
 }
 
 export async function loadProject(file: string, options: LoadOptions = {}): Promise<LoadedProject> {
@@ -61,14 +63,14 @@ function loadEntropy(file: string, options: LoadOptions): LoadedProject {
     errors: result.errors,
     warnings: result.warnings,
     notices: result.notices,
+    cleanup() {},
   };
 }
 
 async function loadEnt(file: string, options: LoadOptions): Promise<LoadedProject> {
-  const { readTar, builtinAssets, decompileProject } = await import('@entropy/decompiler');
+  const { readTar, findProjectEntry, builtinAssets, decompileProject } = await import('@entropy/decompiler');
   const entries = await readTar(fs.readFileSync(file));
-  const projectEntry = entries.find((entry) => entry.name === 'temp/project.json') ??
-    entries.find((entry) => path.posix.basename(entry.name) === 'project.json');
+  const projectEntry = findProjectEntry(entries);
   if (!projectEntry) throw new Error('project.json 을 찾지 못했습니다 — .ent 파일을 확인하세요.');
   const project = JSON.parse(Buffer.from(projectEntry.data).toString('utf8')) as EntryProject;
   if (!project || !Array.isArray(project.objects)) throw new Error('project.json 에 objects 배열이 없습니다.');
@@ -105,35 +107,46 @@ async function loadEnt(file: string, options: LoadOptions): Promise<LoadedProjec
     }
   }
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-assets-'));
-  // Archive names stay as URLs and never become paths on disk.
-  for (const [index, { name, data }] of files.entries()) {
-    const ext = path.extname(name);
-    const source = path.join(folder, `${index}${/^\.[a-z0-9]+$/i.test(ext) ? ext : '.bin'}`);
-    fs.writeFileSync(source, data);
-    assets.push({ source, target: name });
-  }
-  const loaded: LoadedProject = {
-    project, assets, assetDirs: [...assetDirs, folder],
-    name: options.name ?? project.name ?? path.basename(file, path.extname(file)),
-    sourcePath: file, errors: [], warnings: [], notices: [],
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    fs.rmSync(folder, { recursive: true, force: true });
   };
-  if (options.decompileTo) {
-    const decompiled = decompileProject(project, entries, { tableRows: false });
-    const root = path.resolve(options.decompileTo);
-    fs.mkdirSync(root, { recursive: true });
-    fs.writeFileSync(path.join(root, 'main.etp'), decompiled.source);
-    for (const asset of decompiled.assets) {
-      const target = path.resolve(root, asset.path);
-      if (target !== root && !target.startsWith(root + path.sep)) {
-        throw new Error(`작품이 폴더 밖의 파일을 가리킵니다: ${asset.path}`);
-      }
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, asset.data);
+  try {
+    // Archive names stay as URLs and never become paths on disk.
+    for (const [index, { name, data }] of files.entries()) {
+      const ext = path.extname(name);
+      const source = path.join(folder, `${index}${/^\.[a-z0-9]+$/i.test(ext) ? ext : '.bin'}`);
+      fs.writeFileSync(source, data);
+      assets.push({ source, target: name });
     }
-    loaded.decompiledTo = options.decompileTo;
-    loaded.decompileWarnings = decompiled.warnings;
+    const loaded: LoadedProject = {
+      project, assets, assetDirs: [...assetDirs, folder],
+      name: options.name ?? project.name ?? path.basename(file, path.extname(file)),
+      sourcePath: file, errors: [], warnings: [], notices: [], cleanup,
+    };
+    if (options.decompileTo) {
+      const decompiled = decompileProject(project, entries, { tableRows: false });
+      const root = path.resolve(options.decompileTo);
+      fs.mkdirSync(root, { recursive: true });
+      fs.writeFileSync(path.join(root, 'main.etp'), decompiled.source);
+      for (const asset of decompiled.assets) {
+        const target = path.resolve(root, asset.path);
+        if (target !== root && !target.startsWith(root + path.sep)) {
+          throw new Error(`작품이 폴더 밖의 파일을 가리킵니다: ${asset.path}`);
+        }
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, asset.data);
+      }
+      loaded.decompiledTo = options.decompileTo;
+      loaded.decompileWarnings = decompiled.warnings;
+    }
+    return loaded;
+  } catch (error) {
+    cleanup();
+    throw error;
   }
-  return loaded;
 }
 
 // Search beside the input and in its assets folder after explicit paths.

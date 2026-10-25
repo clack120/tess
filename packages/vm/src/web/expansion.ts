@@ -1,56 +1,10 @@
 import type { ExpansionReader } from '../runtime/engine.ts';
+import { entryWeatherAreaCode } from '@entropy/core';
 
 const API = '/api/expansionBlock/';
 const TIMEOUT_MS = 5000;
+const CACHE_MS = 5 * 60 * 1000;
 const NO_DATA = '데이터 없음';
-
-const CITY_CODES: Record<string, string> = {
-  Seoul: '1100000000', 서울: '1100000000',
-  Busan: '2600000000', 부산: '2600000000',
-  Daegu: '2700000000', 대구: '2700000000',
-  Incheon: '2800000000', 인천: '2800000000',
-  Gwangju: '2900000000', 광주: '2900000000',
-  Daejeon: '3000000000', 대전: '3000000000',
-  Ulsan: '3100000000', 울산: '3100000000',
-  Sejong: '3600000000', 세종: '3600000000',
-  'Gyeonggi-do': '4100000000', 경기: '4100000000', 경기도: '4100000000',
-  Gangwon: '5100000000', 강원: '5100000000', 강원도: '5100000000',
-  'Chungcheongbuk-do': '4300000000', 충북: '4300000000', 충청북도: '4300000000',
-  'Chungcheongnam-do': '4400000000', 충남: '4400000000', 충청남도: '4400000000',
-  'Jeollabuk-do': '4500000000', 전북: '4500000000', 전라북도: '4500000000',
-  'Jeollanam-do': '4600000000', 전남: '4600000000', 전라남도: '4600000000',
-  'Gyeongsangbuk-do': '4700000000', 경북: '4700000000', 경상북도: '4700000000',
-  'Gyeongsangnam-do': '4800000000', 경남: '4800000000', 경상남도: '4800000000',
-  Jeju: '5000000000', 제주: '5000000000', 제주도: '5000000000',
-};
-
-const SEOUL_CODES: Record<string, string> = {
-  jongno_gu: '1111000000', 'Jongno-gu': '1111000000', 종로구: '1111000000',
-  jung_gu: '1114000000', 'Jung-gu': '1114000000', 중구: '1114000000',
-  yongsan_gu: '1117000000', 'Yongsan-gu': '1117000000', 용산구: '1117000000',
-  seongdong_gu: '1120000000', 'Seongdong-gu': '1120000000', 성동구: '1120000000',
-  gwangjin_gu: '1121500000', 'Gwangjin-gu': '1121500000', 광진구: '1121500000',
-  dongdaemun_gu: '1123000000', 'Dongdaemun-gu': '1123000000', 동대문구: '1123000000',
-  jungnang_gu: '1126000000', 'Jungnang-gu': '1126000000', 중랑구: '1126000000',
-  seongbuk_gu: '1129000000', 'Seongbuk-gu': '1129000000', 성북구: '1129000000',
-  gangbuk_gu: '1130500000', 'Gangbuk-gu': '1130500000', 강북구: '1130500000',
-  dobong_gu: '1132000000', 'Dobong-gu': '1132000000', 도봉구: '1132000000',
-  nowon_gu: '1135000000', 'Nowon-gu': '1135000000', 노원구: '1135000000',
-  eunpyeong_gu: '1138000000', 'Eunpyeong-gu': '1138000000', 은평구: '1138000000',
-  seodaemun_gu: '1141000000', 'Seodaemun-gu': '1141000000', 서대문구: '1141000000',
-  mapo_gu: '1144000000', 'Mapo-gu': '1144000000', 마포구: '1144000000',
-  yangcheon_gu: '1147000000', 'Yangcheon-gu': '1147000000', 양천구: '1147000000',
-  gangseo_gu: '1150000000', 'Gangseo-gu': '1150000000', 강서구: '1150000000',
-  guro_gu: '1153000000', 'Guro-gu': '1153000000', 구로구: '1153000000',
-  geumcheon_gu: '1154500000', 'Geumcheon-gu': '1154500000', 금천구: '1154500000',
-  yeongdeungpo_gu: '1156000000', 'Yeongdeungpo-gu': '1156000000', 영등포구: '1156000000',
-  dongjak_gu: '1159000000', 'Dongjak-gu': '1159000000', 동작구: '1159000000',
-  gwanak_gu: '1162000000', 'Gwanak-gu': '1162000000', 관악구: '1162000000',
-  seocho_gu: '1165000000', 'Seocho-gu': '1165000000', 서초구: '1165000000',
-  gangnam_gu: '1168000000', 'Gangnam-gu': '1168000000', 강남구: '1168000000',
-  songpa_gu: '1171000000', 'Songpa-gu': '1171000000', 송파구: '1171000000',
-  gangdong_gu: '1174000000', 'Gangdong-gu': '1174000000', 강동구: '1174000000',
-};
 
 const DATE_ALIASES: Record<string, string> = {
   어제: 'yesterday', 오늘: 'today', 내일: 'tomorrow',
@@ -123,7 +77,7 @@ const ALERT_FIELDS: Record<string, string> = {
 };
 
 export class EntryExpansionReader implements ExpansionReader {
-  private readonly requests = new Map<string, Promise<unknown>>();
+  private readonly requests = new Map<string, { expires: number; promise: Promise<unknown> }>();
 
   async read(type: string, params: unknown[]): Promise<unknown> {
     switch (type) {
@@ -197,17 +151,19 @@ export class EntryExpansionReader implements ExpansionReader {
   }
 
   private async json(path: string): Promise<any> {
-    let request = this.requests.get(path);
-    if (!request) {
-      request = fetch(`${API}${path}`, {
+    const now = Date.now();
+    const cached = this.requests.get(path);
+    if (cached && cached.expires > now) return cached.promise;
+
+    const promise = fetch(`${API}${path}`, {
         headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS),
       }).then(async (response) => response.ok ? response.json() : {}).catch((error) => {
+        this.requests.delete(path);
         console.warn('[entropy] 엔트리 확장 데이터를 받지 못해 기본값을 씁니다', error);
         return {};
       });
-      this.requests.set(path, request);
-    }
-    return request;
+    this.requests.set(path, { expires: now + CACHE_MS, promise });
+    return promise;
   }
 
   private async weather(mode: 'now' | 'week' | 'hour', code: string, key?: string): Promise<any> {
@@ -320,15 +276,13 @@ export class EntryExpansionReader implements ExpansionReader {
 
 function codeOf(value: unknown): string {
   const text = String(value ?? '');
-  return /^\d{10}$/.test(text) ? text : (CITY_CODES[text] ?? CITY_CODES.Seoul!);
+  return /^\d{10}$/.test(text) ? text : entryWeatherAreaCode(text);
 }
 
 function areaCode(parent: unknown, sub: unknown): string {
-  const first = String(parent ?? '');
   const second = String(sub ?? '');
   if (/^\d{10}$/.test(second)) return second;
-  if (codeOf(first) === CITY_CODES.Seoul && SEOUL_CODES[second]) return SEOUL_CODES[second]!;
-  return codeOf(first);
+  return entryWeatherAreaCode(String(parent ?? ''), second);
 }
 
 function dateKey(value: unknown): string {

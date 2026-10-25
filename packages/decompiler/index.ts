@@ -13,5 +13,5 @@ export function decompileProject(
 
 export { decompileEnt, builtinAssets } from "./src/node.ts";
 export { restoreTableRows } from "./src/index.ts";
-export { readTar } from "./src/tar.ts";
+export { findProjectEntry, readTar } from "./src/tar.ts";
 export type * from "./src/types.ts";

@@ -7,8 +7,8 @@ import {
   tableRowCells, tableRows,
 } from '@entropy/core';
 import type {
-  CollectedAsset, DecompileContext, DecompileOptions, DecompileResult,
-  FunctionField, FunctionInfo, FunctionLocal, ObjectInfo, RawBlock, RawEntity,
+  DecompileContext, DecompileOptions, DecompileResult,
+  FunctionField, FunctionLocal, RawBlock, RawEntity,
   ResourceInfo, TableInfo, TarEntry, VarInfo,
 } from './types.ts';
 
@@ -352,6 +352,7 @@ function buildContext(
     picturesById: new Map(),
     soundsById: new Map(),
     collectedAssets: [],
+    assetDataByPath: new Map(),
     // Use scene subfolders only when the project has several scenes.
     multiScene: (project.scenes ?? []).length > 1,
     // Mark hardcoded resource IDs with force id so recompilation preserves them.
@@ -533,6 +534,7 @@ function buildContext(
   // Include object and scene names in asset paths to avoid collisions between resources.
   const assetTargets = new Map<string, string | null>();
   const usedAssetPaths = new Set<string>();
+  const nextAssetSuffix = new Map<string, number>();
 
   // Asset extensions come from project data; allow only letters and digits to prevent path escapes.
   const safeExt = (value: unknown, fallback: string): string => {
@@ -541,8 +543,11 @@ function buildContext(
   };
 
   const uniqueAssetPath = (dir: string, name: string, ext: string) => {
-    let candidate = `${dir}/${name}${ext}`;
-    for (let n = 2; usedAssetPaths.has(candidate); n += 1) candidate = `${dir}/${name}_${n}${ext}`;
+    const base = `${dir}/${name}`;
+    let candidate = `${base}${ext}`;
+    let suffix = nextAssetSuffix.get(candidate) ?? 2;
+    while (usedAssetPaths.has(candidate)) candidate = `${base}_${suffix++}${ext}`;
+    nextAssetSuffix.set(`${base}${ext}`, suffix);
     usedAssetPaths.add(candidate);
     return candidate;
   };
@@ -566,6 +571,7 @@ function buildContext(
     const relative = uniqueAssetPath(dir, name, ext);
     assetTargets.set(fileurl, relative);
     ctx.collectedAssets.push({ path: relative, data });
+    ctx.assetDataByPath.set(relative, data);
     return relative;
   };
 
@@ -589,6 +595,7 @@ function buildContext(
       if (data && !usedAssetPaths.has(twin)) {
         usedAssetPaths.add(twin);
         ctx.collectedAssets.push({ path: twin, data });
+        ctx.assetDataByPath.set(twin, data);
       }
     }
     info.blankImage = BLANK_IMAGE.test(pic.fileurl ?? '');
@@ -689,15 +696,14 @@ function useObjectLine(object: RawEntity, ctx: DecompileContext, sceneIdentifier
   }
   const dir = ctx.multiScene ? `objects/${sceneIdentifier}` : 'objects';
   const relativePath = `${dir}/${info.identifier}.etp`;
-  ctx.collectedAssets.push({
-    path: relativePath,
-    data: encodeText(`${fragment.join('\n').trimEnd()}\n`),
-  });
+  const data = encodeText(`${fragment.join('\n').trimEnd()}\n`);
+  ctx.collectedAssets.push({ path: relativePath, data });
+  ctx.assetDataByPath.set(relativePath, data);
   return [`  ${isText ? 'usetext' : 'useobject'} ${entropyString(relativePath)}`];
 }
 
 function sameSize(ctx: DecompileContext, path: string, dimension: { width?: number; height?: number } | undefined): boolean {
-  const data = ctx.collectedAssets.find((asset) => asset.path === path)?.data;
+  const data = ctx.assetDataByPath.get(path);
   const size = data ? imageSize(data) : null;
   return !!size && !!dimension && size.width === dimension.width && size.height === dimension.height;
 }

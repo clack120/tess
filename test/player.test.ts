@@ -92,9 +92,11 @@ test('리소스를 디스크에 있는 그대로의 주소로 내보낸다', asy
 
     const served = await fetch(server.url + cat.fileurl.slice(1));
     assert.equal(served.status, 200);
+    const source = path.join(root, 'examples/cat_idle.png');
+    assert.equal(Number(served.headers.get('content-length')), fs.statSync(source).size);
     assert.deepEqual(
       Buffer.from(await served.arrayBuffer()),
-      fs.readFileSync(path.join(root, 'examples/cat_idle.png')),
+      fs.readFileSync(source),
     );
 
     const hashed = result.assets.find((asset: any) => asset.source.endsWith('cat_idle.png')).target;
@@ -145,7 +147,11 @@ test('설치된 entryjs 가 없으면 CDN 을 가리킨다', async () => {
     assert.match(server.runtime, /^CDN/);
     const page = await (await fetch(server.url)).text();
     // Load Entry from unpkg because its package exceeds jsDelivr's size limit.
-    assert.match(page, /unpkg\.com\/@entrylabs\/entry/);
+    const entryPackage = JSON.parse(fs.readFileSync(
+      path.join(root, 'node_modules/@entrylabs/entry/package.json'), 'utf-8',
+    ));
+    const version = entryPackage.version;
+    assert.match(page, new RegExp(`unpkg\\.com/@entrylabs/entry@${version.replaceAll('.', '\\.')}\\b`));
     assert.match(page, /cdn\.jsdelivr\.net/);
     assert.match(page, /엔트리 실행기를 불러오지 못했습니다/);
     assert.match(page, /playentry\.org/);

@@ -194,10 +194,19 @@ test('Entry runtime limits and first-scene behavior have targeted diagnostics', 
       say 1
     end
   end
+  object "p":
+    when scene start do
+      say 2
+    end
+  end
 end`);
-  const sceneWarning = firstScene.warnings.find(item => item.code === 'W0005')!;
+  const sceneWarnings = firstScene.warnings.filter(item => item.code === 'W0005');
+  assert.equal(sceneWarnings.length, 1);
+  const sceneWarning = sceneWarnings[0]!;
   assert.match(sceneWarning.message, /처음 시작할 때 실행되지/);
+  assert.match(sceneWarning.message, /2개/);
   assert.match(sceneWarning.help!, /when start do/);
+  assert.equal(sceneWarning.related?.length, 1);
 
   const values = Array.from({ length: 5001 }, (_, index) => index).join(', ');
   const list = compileProject(`list too_many = [${values}]`);

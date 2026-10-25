@@ -51,7 +51,21 @@ const MIME: Record<string, string> = {
 };
 
 // Use unpkg because Entry's package exceeds jsDelivr's package size limit.
-const CDN = 'https://unpkg.com/@entrylabs/entry@4.0.23';
+// Match the installed runtime first; packaged installs without the dev dependency
+// fall back to the declared range and finally unpkg's current release.
+const PLAYER_PACKAGE = JSON.parse(fs.readFileSync(
+  fileURLToPath(new URL('../package.json', import.meta.url)), 'utf-8',
+));
+let installedEntryVersion = '';
+try {
+  installedEntryVersion = JSON.parse(fs.readFileSync(
+    fileURLToPath(new URL('../../../node_modules/@entrylabs/entry/package.json', import.meta.url)), 'utf-8',
+  )).version;
+} catch {}
+const ENTRY_VERSION = installedEntryVersion || /\d+\.\d+\.\d+(?:[-+][\w.-]+)?/.exec(
+  PLAYER_PACKAGE.devDependencies?.['@entrylabs/entry'] ?? '',
+)?.[0] || 'latest';
+const CDN = `https://unpkg.com/@entrylabs/entry@${ENTRY_VERSION}`;
 
 const DEBUG_UI_FILE = fileURLToPath(new URL('./debug-ui.ts', import.meta.url));
 
@@ -282,11 +296,22 @@ function send(response: http.ServerResponse, status: number, ext: string, body: 
 }
 
 function sendFile(response: http.ServerResponse, file: string) {
+  let stat: fs.Stats;
   try {
-    send(response, 200, path.extname(file).toLowerCase(), fs.readFileSync(file));
+    stat = fs.statSync(file);
+    if (!stat.isFile()) throw new Error('not a file');
   } catch {
-    send(response, 404, '.html', '<h1>404</h1>');
+    return send(response, 404, '.html', '<h1>404</h1>');
   }
+
+  response.writeHead(200, {
+    'content-type': MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream',
+    'content-length': stat.size,
+    'cache-control': 'no-store',
+  });
+  const stream = fs.createReadStream(file);
+  stream.on('error', () => response.destroy());
+  stream.pipe(response);
 }
 
 function inside(root: string, target: string): boolean {

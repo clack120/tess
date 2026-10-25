@@ -6,7 +6,6 @@ import {
   stage,
   type BrushState,
   type Entity,
-  type Stroke,
   type Target,
   type Variable,
 } from './model.ts';

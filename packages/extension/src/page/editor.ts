@@ -20,13 +20,19 @@ interface Prepared {
   controller: AbortController;
   handle?: EntropyHandle;
   cloud?: CloudClient;
+  cloudSource?: string;
   source: string;
   requested: string;
+  requestedWork: EntryWork | null;
   promise: Promise<void>;
   busy: boolean;
   svg: boolean;
   escape: boolean;
   cleanup(): void;
+}
+interface EditorSnapshot {
+  source: string;
+  work: EntryWork;
 }
 
 let settings = { enabled: false, svg: true, cache: false, escape: true };
@@ -37,6 +43,8 @@ let prepared: Prepared | null = null;
 let active: { cleanup(): void } | null = null;
 let preparingTimer: ReturnType<typeof setTimeout> | undefined;
 let dirty = true;
+let editRevision = 0;
+let cachedExport: { entry: Editor; revision: number; work: EntryWork } | null = null;
 
 function finish(): void {
   const old = active;
@@ -67,15 +75,22 @@ function withoutBoardPositions(script: unknown): unknown {
   return typeof script === 'string' ? script.replace(BOARD_POSITION, '"x":0,"y":0') : script;
 }
 
-function snapshot(entry: Editor): string | null {
-  entry.getMainWS()?.syncCode();
-  const work = entry.exportProject();
+function snapshot(entry: Editor): EditorSnapshot | null {
+  // Entry's own autosave exports the complete project shortly after the same
+  // change event. Reuse that result instead of exporting a large work twice.
+  let work = cachedExport?.entry === entry && cachedExport.revision === editRevision
+    ? cachedExport.work
+    : null;
+  if (!work) {
+    entry.getMainWS()?.syncCode();
+    work = entry.exportProject() || null;
+  }
   if (!work) return null;
   // Layout-only changes do not invalidate a compiled work or decoded assets.
   const objects = work.objects?.map(object => ({ ...object, script: withoutBoardPositions(object.script) }));
   const functions = work.functions?.map(fn => ({ ...fn, content: withoutBoardPositions(fn.content) }));
-  return JSON.stringify({ objects, scenes: work.scenes, variables: work.variables,
-    messages: work.messages, functions, tables: work.tables, speed: work.speed });
+  return { source: JSON.stringify({ objects, scenes: work.scenes, variables: work.variables,
+    messages: work.messages, functions, tables: work.tables, speed: work.speed }), work };
 }
 
 function schedule(): void {
@@ -84,8 +99,8 @@ function schedule(): void {
   if (!settings.enabled) return;
   preparingTimer = setTimeout(() => {
     if (!attached || attached.engine.state !== 'stop' || prepared?.busy || !settings.enabled) return;
-    const source = snapshot(attached);
-    if (source) void prepare(attached, source).catch(error => console.warn('[entropy] 미리 준비하지 못했습니다', error));
+    const current = snapshot(attached);
+    if (current) void prepare(attached, current).catch(error => console.warn('[entropy] 미리 준비하지 못했습니다', error));
   }, 600);
 }
 
@@ -128,7 +143,8 @@ function createPrepared(canvas: HTMLCanvasElement): Prepared {
     if (active && prepared?.handle?.vm.state === 'stop' && !prepared.busy) void attached?.engine.toggleStop();
     if (active) layout();
   }, 100);
-  return { root, status, controller: new AbortController(), source: '', requested: '', promise: Promise.resolve(),
+  return { root, status, controller: new AbortController(), source: '', requested: '', requestedWork: null,
+    promise: Promise.resolve(),
     busy: false, svg: settings.svg, escape: settings.escape,
     cleanup() {
       observer.disconnect(); clearInterval(timer);
@@ -136,14 +152,15 @@ function createPrepared(canvas: HTMLCanvasElement): Prepared {
     } };
 }
 
-function prepare(entry: Editor, source: string): Promise<void> {
+function prepare(entry: Editor, snapshot: EditorSnapshot): Promise<void> {
   if (prepared && (prepared.svg !== settings.svg || prepared.escape !== settings.escape)) discard();
   const canvas = document.getElementById('entryCanvas');
   if (!(canvas instanceof HTMLCanvasElement)) return Promise.reject(new Error('엔트리 실행 화면을 찾지 못했습니다'));
   const current = prepared ?? (prepared = createPrepared(canvas));
   dirty = false;
-  if (current.requested === source) return current.promise;
-  current.requested = source;
+  current.requestedWork = snapshot.work;
+  if (current.requested === snapshot.source) return current.promise;
+  current.requested = snapshot.source;
   if (current.busy) return current.promise;
   current.busy = true;
   current.status.hidden = false;
@@ -152,25 +169,34 @@ function prepare(entry: Editor, source: string): Promise<void> {
   current.promise = current.promise.catch(() => {}).then(async () => {
     do {
       const source = current.requested;
+      const exported = current.requestedWork;
       if (prepared !== current) return;
+      if (!exported) return;
       if (current.source === source && current.handle) break;
       const [{ boot }, { ensureStageStyle }, { bridgeSaveStore }, { CloudClient }] = await Promise.all([
         import('../../../vm/src/web/boot.ts'), import('./player.ts'), import('./save-bridge.ts'), import('./cloud.ts'),
       ]);
       if (prepared !== current) return;
       ensureStageStyle();
-      const work = withAssetUrls(JSON.parse(source) as EntryWork);
+      const work = withAssetUrls(exported);
       const id = /^\/ws\/([^/?#]+)/.exec(location.pathname)?.[1] ?? 'new';
       const ids = new Map<string, string>(), mongo = new Map<string, string>();
+      const cloudVariables: unknown[] = [];
       for (const variable of work.variables ?? []) {
         if (variable.isCloud || variable.isRealTime) {
           ids.set(String(variable.id), String(variable.id)); mongo.set(String(variable.id), String(variable._id));
+          cloudVariables.push([variable.id, variable._id, variable.variableType,
+            variable.isCloud === true, variable.isRealTime === true]);
         }
       }
-      current.cloud?.dispose();
-      current.cloud = new CloudClient(id, document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '',
-        work.variables ?? [], ids, ids, mongo);
-      await current.cloud.connect();
+      const cloudSource = JSON.stringify([id, cloudVariables]);
+      if (!current.cloud || current.cloudSource !== cloudSource) {
+        current.cloud?.dispose();
+        current.cloud = new CloudClient(id, document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '',
+          work.variables ?? [], ids, ids, mongo);
+        current.cloudSource = cloudSource;
+        await current.cloud.connect();
+      }
       if (prepared !== current) return;
       if (current.handle) await current.handle.reload(work);
       else {
@@ -196,6 +222,7 @@ function prepare(entry: Editor, source: string): Promise<void> {
     } while (prepared === current && current.source !== current.requested);
   }).catch(error => {
     current.requested = '';
+    current.requestedWork = null;
     throw error;
   }).finally(() => {
     current.busy = false;
@@ -229,6 +256,15 @@ function attach(entry: Editor): void {
     originals.set(name, engine[name]); engine[name] = replacement;
   };
   const originalRun = engine.toggleRun, originalStop = engine.toggleStop, originalPause = engine.togglePause;
+  const originalExport = entry.exportProject;
+  const observedExport = function(this: Editor, ...args: unknown[]) {
+    const work = Reflect.apply(originalExport, this, args) as EntryWork | false;
+    if (work) cachedExport = { entry, revision: editRevision, work };
+    return work;
+  };
+  // Keep the original path as a fallback if a future Entry release makes this
+  // method non-writable. The optimization is optional; editor execution is not.
+  try { entry.exportProject = observedExport; } catch {}
   for (const name of ['update', 'computeFunction', 'raiseEvent', 'raiseKeyEvent', 'raiseEventOnEntity']) {
     if (typeof engine[name] !== 'function') continue;
     const original = engine[name];
@@ -242,8 +278,8 @@ function attach(entry: Editor): void {
   patch('toggleRun', function(...args: any[]) {
     if (active) { if (engine.state === 'pause') engine.togglePause(); return; }
     if (!settings.enabled || engine.state !== 'stop') return originalRun.apply(engine, args);
-    const source = snapshot(entry);
-    if (!source) return;
+    const currentSnapshot = snapshot(entry);
+    if (!currentSnapshot) return;
     const canvas = document.getElementById('entryCanvas') as HTMLCanvasElement;
     const visibility = canvas.style.visibility;
     const current = { cleanup() { canvas.style.visibility = visibility; unbrowse(); } };
@@ -252,7 +288,7 @@ function attach(entry: Editor): void {
     try { originalRun.apply(engine, args); } catch (error) { finish(); throw error; }
     unbrowse = browse(entry);
     const scene = entry.scene.selectedScene?.id;
-    const ready = prepare(entry, source);
+    const ready = prepare(entry, currentSnapshot);
     if (prepared) {
       prepared.root.hidden = false; prepared.root.tabIndex = 0; prepared.root.removeAttribute('aria-hidden');
       canvas.style.visibility = 'hidden';
@@ -287,10 +323,15 @@ function attach(entry: Editor): void {
     }
     return result;
   });
-  const changed = entry.creationChangedEvent?.attach(null, schedule);
+  const changed = entry.creationChangedEvent?.attach(null, () => {
+    editRevision += 1;
+    schedule();
+  });
   restore = () => {
     clearTimeout(preparingTimer); changed?.destroy();
     for (const [name, original] of originals) engine[name] = original;
+    try { if (entry.exportProject === observedExport) entry.exportProject = originalExport; } catch {}
+    if (cachedExport?.entry === entry) cachedExport = null;
     restartTicker();
   };
   attached = entry; attachedEngine = engine;

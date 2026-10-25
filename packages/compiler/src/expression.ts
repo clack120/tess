@@ -28,8 +28,6 @@ const BOOLEAN_TYPES = new Set([
   'is_included_in_list',
 ]);
 
-const LITERAL_TYPES = new Set(['Number', 'String', 'Color', 'Transparent']);
-
 const COMPARE_OPERATORS: Record<string, string> = {
   '==': 'EQUAL', '!=': 'NOT_EQUAL',
   '>': 'GREATER', '<': 'LESS',
@@ -499,11 +497,14 @@ function compileExpansion(node: CallNode, ctx: Context): EntryBlock | null {
     return ctx.error(node, `${callee}() 는 인자가 ${slots.length}개여야 합니다. (${args.length}개를 받았습니다)`);
   }
 
+  const fields = args.map((argument) => argument.type === 'String'
+    ? argument.value
+    : argument.type === 'Number' ? String(argument.value) : '');
   const params = slots.map((slot, index): EntryParam => {
     const argument = args[index]!;
     if (slot === 'value') return compileValue(argument, ctx);
-    if (argument.type === 'String') return expansionField(callee, index, argument.value);
-    if (argument.type === 'Number') return expansionField(callee, index, String(argument.value));
+    if (argument.type === 'String') return expansionField(callee, index, argument.value, fields);
+    if (argument.type === 'Number') return expansionField(callee, index, String(argument.value), fields);
     return ctx.error(argument, `${callee}() 의 ${index + 1}번째 칸은 목록에서 고르는 자리라 "..." 로 직접 적어야 합니다.`);
   });
   if (params.some((param) => param === null)) return null;

@@ -19,8 +19,14 @@ export interface VerifyEntryProjectOptions {
 const BLOCK_FIELDS = ['id', 'x', 'y', 'type', 'params', 'statements'];
 
 const PROJECT_KEYS = [
-  'objects', 'scenes', 'variables', 'messages', 'functions', 'speed', 'interface',
+  'objects', 'scenes', 'variables', 'messages', 'functions', 'tables',
+  'expansionBlocks', 'aiUtilizeBlocks', 'speed', 'interface',
 ];
+
+const PROJECT_ARRAY_KEYS = [
+  'objects', 'scenes', 'variables', 'messages', 'functions', 'tables',
+  'expansionBlocks', 'aiUtilizeBlocks',
+] as const;
 
 const REFERENCES: Record<string, Array<[number, ReferenceKind]>> = {
   get_variable: [[0, 'variable']],
@@ -57,16 +63,41 @@ export function verifyEntryProject(
   const add = (message: string) => problems.push(message);
   const checkReferences = options.references !== false;
 
+  if (!project || typeof project !== 'object' || Array.isArray(project)) {
+    return ['프로젝트가 객체가 아닙니다.'];
+  }
+
   for (const key of PROJECT_KEYS) {
     if (!(key in project)) add(`프로젝트에 '${key}' 항목이 없습니다.`);
   }
-  if (!Array.isArray(project.objects)) return problems;
+  for (const key of PROJECT_ARRAY_KEYS) {
+    if (key in project && !Array.isArray(project[key])) add(`프로젝트의 '${key}' 항목이 배열이 아닙니다.`);
+  }
+  if (PROJECT_ARRAY_KEYS.some((key) => !Array.isArray(project[key]))) return problems;
 
-  const sceneIds = new Set(project.scenes.map((scene) => scene.id));
-  const messageIds = new Set(project.messages.map((message) => message.id));
-  const functionIds = new Set(project.functions.map((fn) => fn.id));
-  const functionParamCounts = new Map<string, { fields: number; statementIcon: boolean }>();
-  for (const fn of project.functions) {
+  const records = (key: 'objects' | 'scenes' | 'variables' | 'messages' | 'functions' | 'tables') => {
+    const valid: AnyBlock[] = [];
+    (project[key] as unknown[]).forEach((value, index) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        add(`프로젝트의 '${key}[${index}]' 항목이 객체가 아닙니다.`);
+      } else {
+        valid.push(value as AnyBlock);
+      }
+    });
+    return valid;
+  };
+  const objects = records('objects');
+  const scenes = records('scenes');
+  const variables = records('variables');
+  const messages = records('messages');
+  const functions = records('functions');
+  records('tables');
+
+  const sceneIds = new Set(scenes.map((scene) => scene.id));
+  const messageIds = new Set(messages.map((message) => message.id));
+  const functionIds = new Set(functions.map((fn) => fn.id));
+  const functionParamCounts = new Map<string, number>();
+  for (const fn of functions) {
     try {
       const create = JSON.parse(fn.content)?.[0]?.[0];
       let count = 0;
@@ -75,96 +106,124 @@ export function verifyEntryProject(
         if (field.type === 'function_field_string' || field.type === 'function_field_boolean') count += 1;
         field = field.params?.[1];
       }
-      functionParamCounts.set(fn.id, { fields: count, statementIcon: fn.type !== 'value' });
+      functionParamCounts.set(fn.id, count);
     } catch {
       // The detailed function-content error is reported below.
     }
   }
   const variableIds = new Set<string>();
   const listIds = new Set<string>();
-  for (const variable of project.variables) {
+  for (const variable of variables) {
     (variable.variableType === 'list' ? listIds : variableIds).add(variable.id);
   }
-  const objectIds = new Set(project.objects.map((object) => object.id));
+  const objectIds = new Set(objects.map((object) => object.id));
 
   // Block IDs only need to be unique within each object or function.
   let blockIds = new Set<string>();
 
-  const checkBlock = (block: AnyBlock | null | undefined, owner: BlockOwner | null, path: string) => {
-    if (!block || typeof block !== 'object') {
-      add(`${path}: 블록이 객체가 아닙니다.`);
-      return;
-    }
-    for (const field of BLOCK_FIELDS) {
-      if (!(field in block)) add(`${path}: 블록에 '${field}' 가 없습니다. (type=${block.type})`);
-    }
-    if (typeof block.type !== 'string' || block.type.length === 0) {
-      add(`${path}: 블록 타입이 비었습니다.`);
-      return;
-    }
-    if (blockIds.has(block.id)) add(`${path}: 블록 id '${block.id}' 가 중복됩니다.`);
-    blockIds.add(block.id);
+  const checkBlock = (initial: AnyBlock | null | undefined, owner: BlockOwner | null, rootPath: string) => {
+    const pending: Array<{ block: AnyBlock | null | undefined; path: string; depth: number }> = [
+      { block: initial, path: rootPath, depth: 0 },
+    ];
+    const seen = new WeakSet<object>();
+    const nestedPath = (parent: string, suffix: string, depth: number) => depth < 80
+      ? `${parent}${suffix}`
+      : `${rootPath}>…(깊이 ${depth + 1})`;
+    while (pending.length) {
+      const { block, path, depth } = pending.pop()!;
+      if (!block || typeof block !== 'object' || Array.isArray(block)) {
+        add(`${path}: 블록이 객체가 아닙니다.`);
+        continue;
+      }
+      if (seen.has(block)) {
+        add(`${path}: 블록 구조가 순환하거나 같은 객체를 두 번 가리킵니다.`);
+        continue;
+      }
+      seen.add(block);
+      for (const field of BLOCK_FIELDS) {
+        if (!(field in block)) add(`${path}: 블록에 '${field}' 가 없습니다. (type=${block.type})`);
+      }
+      if (typeof block.type !== 'string' || block.type.length === 0) {
+        add(`${path}: 블록 타입이 비었습니다.`);
+        continue;
+      }
+      if (blockIds.has(block.id)) add(`${path}: 블록 id '${block.id}' 가 중복됩니다.`);
+      blockIds.add(block.id);
 
-    if (!Array.isArray(block.params)) add(`${path}: params 가 배열이 아닙니다.`);
-    if (!Array.isArray(block.statements)) add(`${path}: statements 가 배열이 아닙니다.`);
+      const params = Array.isArray(block.params) ? block.params : [];
+      const statements = Array.isArray(block.statements) ? block.statements : [];
+      if (!Array.isArray(block.params)) add(`${path}: params 가 배열이 아닙니다.`);
+      if (!Array.isArray(block.statements)) add(`${path}: statements 가 배열이 아닙니다.`);
 
-    const expansion = expansionBlock(block.type);
-    const expected = BLOCK_PARAM_COUNTS[block.type] ?? expansion?.slots.length;
-    if (expected !== undefined && block.params?.length !== expected) {
-      add(`${path}: ${block.type} 의 params 가 ${block.params?.length}개입니다. (엔트리는 ${expected}개)`);
-    }
+      const expansion = expansionBlock(block.type);
+      const expected = BLOCK_PARAM_COUNTS[block.type] ?? expansion?.slots.length;
+      if (expected !== undefined && params.length !== expected) {
+        add(`${path}: ${block.type} 의 params 가 ${params.length}개입니다. (엔트리는 ${expected}개)`);
+      }
 
-    if (block.type.startsWith('func_')) {
-      const id = block.type.slice(5);
-      if (checkReferences && !functionIds.has(id)) add(`${path}: 함수 '${id}' 가 functions 에 없습니다.`);
-      const call = functionParamCounts.get(id);
-      // Void functions have a trailing icon slot as statements, but Entry also accepts
-      // them without that slot when they are embedded in a value position.
-      const validCounts = call && (call.statementIcon ? [call.fields, call.fields + 1] : [call.fields]);
-      if (validCounts && !validCounts.includes(block.params?.length)) {
-        add(`${path}: ${block.type} 호출의 params 가 ${block.params?.length}개입니다. (함수 스키마는 ${validCounts.join('개 또는 ')}개)`);
+      if (block.type.startsWith('func_')) {
+        const id = block.type.slice(5);
+        if (checkReferences && !functionIds.has(id)) add(`${path}: 함수 '${id}' 가 functions 에 없습니다.`);
+        const fields = functionParamCounts.get(id);
+        // Native Entry saves some calls with a trailing null icon slot, including value
+        // functions from older works. The icon is not an argument and may be omitted.
+        const count = params.length;
+        const trailingIcon = fields !== undefined
+          && count === fields + 1 && params[fields] === null;
+        if (fields !== undefined && count !== fields && !trailingIcon) {
+          add(`${path}: ${block.type} 호출의 params 가 ${count}개입니다. (함수 인자는 ${fields}개이고 끝의 null 아이콘 칸만 추가할 수 있습니다)`);
+        }
+      }
+
+      if (expansion) {
+        const modules = expansion.ai ? project.aiUtilizeBlocks : project.expansionBlocks;
+        if (!modules.includes(expansion.module)) {
+          add(`${path}: ${block.type} 에 필요한 '${expansion.module}' 모듈이 프로젝트에 없습니다.`);
+        }
+      }
+
+      for (const [index, kind] of checkReferences ? (REFERENCES[block.type] ?? []) : []) {
+        const value = params[index];
+        if (value === null || value === undefined) continue;
+        if (typeof value !== 'string') continue;
+        // Function resources belong to the calling object and cannot be checked here.
+        if (!owner && (kind === 'picture' || kind === 'sound')) continue;
+        const checks: Record<ReferenceKind, () => boolean> = {
+          variable: () => variableIds.has(value),
+          list: () => listIds.has(value),
+          message: () => messageIds.has(value),
+          scene: () => sceneIds.has(value),
+          picture: () => Boolean(owner?.pictures.has(value)),
+          sound: () => Boolean(owner?.sounds.has(value)),
+          objectOrSelf: () => value === 'self' || value === 'mouse' || objectIds.has(value),
+        };
+        const ok = checks[kind]();
+        if (!ok) add(`${path}: ${block.type} 이(가) 없는 ${kind} '${value}' 를 가리킵니다.`);
+      }
+
+      const children: Array<{ block: AnyBlock; path: string }> = [];
+      params.forEach((param: unknown, index: number) => {
+        if (param && typeof param === 'object') {
+          children.push({ block: param as AnyBlock, path: nestedPath(path, `>params[${index}]`, depth) });
+        }
+      });
+      statements.forEach((statement: unknown, index: number) => {
+        if (!Array.isArray(statement)) {
+          add(`${path}: statements[${index}] 가 배열이 아닙니다.`);
+          return;
+        }
+        statement.forEach((child: AnyBlock, i: number) => children.push({
+          block: child,
+          path: nestedPath(path, `>do[${index}][${i}]`, depth),
+        }));
+      });
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        pending.push({ ...children[index]!, depth: depth + 1 });
       }
     }
-
-    if (expansion) {
-      const modules = expansion.ai ? project.aiUtilizeBlocks : project.expansionBlocks;
-      if (!modules.includes(expansion.module)) {
-        add(`${path}: ${block.type} 에 필요한 '${expansion.module}' 모듈이 프로젝트에 없습니다.`);
-      }
-    }
-
-    for (const [index, kind] of checkReferences ? (REFERENCES[block.type] ?? []) : []) {
-      const value = block.params?.[index];
-      if (value === null || value === undefined) continue;
-      if (typeof value !== 'string') continue;
-      // Function resources belong to the calling object and cannot be checked here.
-      if (!owner && (kind === 'picture' || kind === 'sound')) continue;
-      const checks: Record<ReferenceKind, () => boolean> = {
-        variable: () => variableIds.has(value),
-        list: () => listIds.has(value),
-        message: () => messageIds.has(value),
-        scene: () => sceneIds.has(value),
-        picture: () => Boolean(owner?.pictures.has(value)),
-        sound: () => Boolean(owner?.sounds.has(value)),
-        objectOrSelf: () => value === 'self' || value === 'mouse' || objectIds.has(value),
-      };
-      const ok = checks[kind]();
-      if (!ok) add(`${path}: ${block.type} 이(가) 없는 ${kind} '${value}' 를 가리킵니다.`);
-    }
-
-    (block.params ?? []).forEach((param: unknown, index: number) => {
-      if (param && typeof param === 'object') checkBlock(param as AnyBlock, owner, `${path}>params[${index}]`);
-    });
-    (block.statements ?? []).forEach((statement: unknown, index: number) => {
-      if (!Array.isArray(statement)) {
-        add(`${path}: statements[${index}] 가 배열이 아닙니다.`);
-        return;
-      }
-      statement.forEach((child: AnyBlock, i: number) => checkBlock(child, owner, `${path}>do[${index}][${i}]`));
-    });
   };
 
-  for (const object of project.objects) {
+  for (const object of objects) {
     const label = `오브젝트 '${object.name}'`;
     if (checkReferences && !sceneIds.has(object.scene)) add(`${label}: 없는 장면 '${object.scene}' 에 속해 있습니다.`);
     if (!['sprite', 'textBox'].includes(object.objectType)) {
@@ -172,10 +231,26 @@ export function verifyEntryProject(
     }
     if (!object.entity) add(`${label}: entity 가 없습니다.`);
 
-    const owner = {
-      pictures: new Set((object.sprite?.pictures ?? []).map((picture) => picture.id)),
-      sounds: new Set((object.sprite?.sounds ?? []).map((sound) => sound.id)),
+    const resourceIds = (kind: 'pictures' | 'sounds'): Set<string> => {
+      const value = object.sprite?.[kind];
+      if (value === undefined) return new Set();
+      if (!Array.isArray(value)) {
+        add(`${label}: sprite.${kind} 가 배열이 아닙니다.`);
+        return new Set();
+      }
+      const ids = new Set<string>();
+      value.forEach((resource: unknown, index: number) => {
+        if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
+          add(`${label}: sprite.${kind}[${index}] 항목이 객체가 아닙니다.`);
+        } else {
+          const id = (resource as AnyBlock).id;
+          if (typeof id === 'string') ids.add(id);
+          else add(`${label}: sprite.${kind}[${index}] 의 id 가 문자열이 아닙니다.`);
+        }
+      });
+      return ids;
     };
+    const owner = { pictures: resourceIds('pictures'), sounds: resourceIds('sounds') };
 
     if (object.objectType === 'sprite') {
       if (checkReferences && object.selectedPictureId && !owner.pictures.has(object.selectedPictureId)) {
@@ -206,7 +281,7 @@ export function verifyEntryProject(
     });
   }
 
-  for (const fn of project.functions) {
+  for (const fn of functions) {
     blockIds = new Set();
     let content;
     try {
@@ -239,15 +314,22 @@ export function verifyEntryProject(
   return problems;
 }
 
-function collectParamTypes(node: unknown, found = new Set<string>()): Set<string> {
-  if (Array.isArray(node)) {
-    node.forEach((child) => collectParamTypes(child, found));
-    return found;
+function collectParamTypes(node: unknown): Set<string> {
+  const found = new Set<string>();
+  const pending = [node];
+  const seen = new WeakSet<object>();
+  while (pending.length) {
+    const value = pending.pop();
+    if (!value || typeof value !== 'object') continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (let index = value.length - 1; index >= 0; index -= 1) pending.push(value[index]);
+      continue;
+    }
+    const block = value as AnyBlock;
+    if (typeof block.type === 'string' && /^(string|boolean)Param_/.test(block.type)) found.add(block.type);
+    pending.push(block.statements, block.params);
   }
-  if (!node || typeof node !== 'object') return found;
-  const block = node as AnyBlock;
-  if (typeof block.type === 'string' && /^(string|boolean)Param_/.test(block.type)) found.add(block.type);
-  collectParamTypes(block.params ?? [], found);
-  collectParamTypes(block.statements ?? [], found);
   return found;
 }

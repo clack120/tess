@@ -35,7 +35,7 @@ async function mountDebugPanel(t: any) {
   const blocks = {
     is_boost_mode: { func: () => '실제부스트' },
     is_touch_supported: { func: () => '실제터치' },
-    is_current_device_type: { func: (sprite: any, script: any) => '실제' + script.getField('DEVICE', script) },
+    is_current_device_type: { func: (_sprite: any, script: any) => '실제' + script.getField('DEVICE', script) },
   };
   const live: {
     variables: Record<string, number>;

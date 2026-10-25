@@ -126,37 +126,41 @@ async function main(): Promise<number> {
     assetDirs: options.assets,
     decompileTo: options.keep,
   });
-  if (loaded.decompiledTo) {
-    console.log(`${path.basename(file)} → ${path.join(loaded.decompiledTo, 'main.etp')} (되돌린 Entropy 소스)`);
-  }
-  const grades = [
-    ['에러', loaded.errors, console.error],
-    ['경고', loaded.warnings, console.warn],
-    ['주의', loaded.notices, console.log],
-  ] as const;
-  for (const [grade, items, write] of grades) {
-    for (const item of items.slice(0, MAX_DIAGNOSTICS)) {
-      write(`  ${grade} ${item.line}:${item.column} ${item.message}`);
+  try {
+    if (loaded.decompiledTo) {
+      console.log(`${path.basename(file)} → ${path.join(loaded.decompiledTo, 'main.etp')} (되돌린 Entropy 소스)`);
     }
-    if (items.length > MAX_DIAGNOSTICS) {
-      write(`  … ${grade} 외 ${items.length - MAX_DIAGNOSTICS}개`);
+    const grades = [
+      ['에러', loaded.errors, console.error],
+      ['경고', loaded.warnings, console.warn],
+      ['주의', loaded.notices, console.log],
+    ] as const;
+    for (const [grade, items, write] of grades) {
+      for (const item of items.slice(0, MAX_DIAGNOSTICS)) {
+        write(`  ${grade} ${item.line}:${item.column} ${item.message}`);
+      }
+      if (items.length > MAX_DIAGNOSTICS) {
+        write(`  … ${grade} 외 ${items.length - MAX_DIAGNOSTICS}개`);
+      }
     }
-  }
 
-  switch (command) {
-    case 'run':
-      return run(loaded, options);
-    case 'bench':
-      return bench(loaded, options);
-    case 'emit':
-      return emit(loaded);
-    case 'check':
-      return check(loaded, options);
-    case 'export':
-      return exportWork(loaded, options);
-    default:
-      console.log(USAGE);
-      return 1;
+    switch (command) {
+      case 'run':
+        return await run(loaded, options);
+      case 'bench':
+        return bench(loaded, options);
+      case 'emit':
+        return emit(loaded);
+      case 'check':
+        return check(loaded, options);
+      case 'export':
+        return exportWork(loaded, options);
+      default:
+        console.log(USAGE);
+        return 1;
+    }
+  } finally {
+    loaded.cleanup();
   }
 }
 

@@ -167,7 +167,6 @@ export class Codegen {
   private keys: Set<number> | null = new Set();
 
   private paramSlots: Map<string, number> | null = null;
-  private funcLocals: Set<string> | null = null;
   private loopDepth = 0;
   // Loops that can skip yielding need a spin guard.
   private readonly spinning: boolean[] = [];
@@ -296,7 +295,6 @@ export class Codegen {
     }
     const params = collectParams(define.params[0]);
     this.paramSlots = new Map(params.map((name, index) => [name, index]));
-    this.funcLocals = new Set((fn.localVariables ?? []).map((local) => local.id));
     const previousLoopDepth = this.loopDepth;
     this.loopDepth = 0;
 
@@ -324,7 +322,6 @@ export class Codegen {
     source += '  } finally { th.depth -= 1; }\n}';
 
     this.paramSlots = null;
-    this.funcLocals = null;
     this.loopDepth = previousLoopDepth;
     // Mark the prototype once to avoid extra work on each call.
     return this.marker(define) + (returnsValue

@@ -49,9 +49,19 @@ async function load(t: any, file: string, options: Parameters<typeof loadProject
   const loaded = await loadProject(file, options);
   const folder = loaded.assetDirs.at(-1)!;
   assert.ok(path.basename(folder).startsWith('entropy-assets-'));
-  t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
+  t.after(() => loaded.cleanup());
   return loaded;
 }
+
+test('.ent temporary media is removed by its idempotent cleanup', async (t) => {
+  const { file } = fixture(t);
+  const loaded = await loadProject(file);
+  const folder = loaded.assetDirs.at(-1)!;
+  assert.ok(fs.existsSync(folder));
+  loaded.cleanup();
+  loaded.cleanup();
+  assert.equal(fs.existsSync(folder), false);
+});
 
 test('.ent loading preserves original blocks, IDs, types, tables, and media', async (t) => {
   const { file, work } = fixture(t);

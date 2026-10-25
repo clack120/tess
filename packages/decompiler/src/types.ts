@@ -109,6 +109,7 @@ export interface DecompileContext {
   picturesById: Map<string, ResourceInfo>;
   soundsById: Map<string, ResourceInfo>;
   collectedAssets: CollectedAsset[];
+  assetDataByPath: Map<string, Uint8Array>;
   multiScene: boolean;
   forcedIds: Set<string>;
   functionOwnerById: Map<string, string>;

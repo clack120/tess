@@ -5,7 +5,7 @@ import {
 } from '@entropy/core';
 import type { Context } from './context.ts';
 import type {
-  CompiledFunction, EntryBlock, EntryParam, EntryVariable, FuncLocalVariable,
+  CompiledFunction, EntryParam, EntryVariable, FuncLocalVariable,
 } from './types.ts';
 
 const MEASURE = 100000;

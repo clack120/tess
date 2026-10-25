@@ -11,7 +11,9 @@ async function setup(t: any, delay = false) {
     { url: 'https://playentry.org/ws/work', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window as any;
   t.after(() => w.close());
-  let nativeTicks = 0, starts = 0, stops = 0;
+  let nativeTicks = 0, starts = 0, stops = 0, exports = 0;
+  let cloudClients = 0, cloudConnects = 0, cloudDisposals = 0;
+  const changeListeners = new Set<() => void>();
   const work = { objects: [{ sprite: { pictures: [{ fileurl: 'original' }] } }], variables: [{ id: 'score', value: 9 }], scenes: [] };
   const boots: any[] = [], handles: any[] = [], reloads: any[] = [];
   let release!: () => void;
@@ -26,10 +28,16 @@ async function setup(t: any, delay = false) {
     raiseKeyEvent() { nativeTicks++; }, raiseEventOnEntity() { nativeTicks++; },
   };
   const originalRun = engine.toggleRun, originalTick = engine.computeFunction;
-  w.Entry = { type: 'workspace', engine, exportProject: () => work, scene: { selectedScene: { id: 'second' } },
+  w.Entry = { type: 'workspace', engine, exportProject: () => { exports++; return work; },
+    creationChangedEvent: { attach(_owner: unknown, listener: () => void) {
+      changeListeners.add(listener); return { destroy() { changeListeners.delete(listener); } };
+    } }, scene: { selectedScene: { id: 'second' } },
     getMainWS: () => ({ syncCode() {} }) };
   w.ResizeObserver = class { observe() {} disconnect() {} };
-  w.withAssetUrls = (project: any) => { project.objects[0].sprite.pictures[0].fileurl = 'normalized'; return project; };
+  w.withAssetUrls = (project: any) => ({ ...project, objects: project.objects.map((object: any) => ({
+    ...object, sprite: { ...object.sprite, pictures: object.sprite.pictures.map((picture: any) => (
+      { ...picture, fileurl: 'normalized' })) },
+  })) });
   w.signedInUser = () => null;
   w.loadModule = async (specifier: string) => {
     if (specifier.endsWith('boot.ts')) return { boot: async (options: any) => {
@@ -44,7 +52,12 @@ async function setup(t: any, delay = false) {
     } };
     if (specifier.endsWith('player.ts')) return { ensureStageStyle() {} };
     if (specifier.endsWith('save-bridge.ts')) return { bridgeSaveStore() { return {}; } };
-    return { CloudClient: class { async connect() {} dispose() {} setChangeListener() {} } };
+    return { CloudClient: class {
+      constructor() { cloudClients++; }
+      async connect() { cloudConnects++; }
+      dispose() { cloudDisposals++; }
+      setChangeListener() {}
+    } };
   };
   const source = stripTypes(fs.readFileSync(new URL('../packages/extension/src/page/editor.ts', import.meta.url), 'utf8'))
     .replace(/^import .*;\n/gm, '').replace(/\bimport\(/g, 'loadModule(');
@@ -54,7 +67,8 @@ async function setup(t: any, delay = false) {
     { source: w, data: { __entropy: 'editor-settings', enabled, cache, svg: true, escape: true } }));
   configure(true); await settle();
   return { w, engine, work, boots, handles, reloads, settle, configure, release, originalRun, originalTick,
-    counts: () => ({ nativeTicks, starts, stops }) };
+    change: () => { for (const listener of changeListeners) listener(); },
+    counts: () => ({ nativeTicks, starts, stops, exports, cloudClients, cloudConnects, cloudDisposals }) };
 }
 
 test('editor runs current unsaved data and selected scene once, then restores native editing and execution', async t => {
@@ -127,6 +141,35 @@ test('enabling preloads once and disabling releases the prepared player without 
   s.configure(false); await s.settle();
   assert.equal(s.handles[0].disposed, true);
   assert.equal(s.w.document.querySelector('.entropy-editor-player'), null);
+});
+
+test('editor reuses Entry autosave export instead of exporting a large changed work twice', async t => {
+  const s = await setup(t);
+  await new Promise(resolve => setTimeout(resolve, 650)); await s.settle();
+  assert.equal(s.counts().exports, 1);
+
+  s.work.variables[0].value = 10;
+  s.change();
+  s.w.Entry.exportProject(); // Entry site's debounced autosave export.
+  assert.equal(s.counts().exports, 2);
+  await new Promise(resolve => setTimeout(resolve, 650)); await s.settle();
+  assert.equal(s.counts().exports, 2, 'Entropy preparation reuses the autosave result');
+  assert.equal(s.reloads.length, 1);
+});
+
+test('ordinary editor changes keep the same cloud connection', async t => {
+  const s = await setup(t);
+  Object.assign(s.work.variables[0], { _id: 'mongo-score', isCloud: true, variableType: 'variable' });
+  s.engine.toggleRun(); await s.settle(); await s.engine.toggleStop();
+  assert.deepEqual(s.counts(), { nativeTicks: 0, starts: 1, stops: 1, exports: 1,
+    cloudClients: 1, cloudConnects: 1, cloudDisposals: 0 });
+
+  (s.work.objects[0] as any).entity = { x: 1 };
+  s.change();
+  s.engine.toggleRun(); await s.settle();
+  assert.equal(s.reloads.length, 1);
+  assert.equal(s.counts().cloudClients, 1);
+  assert.equal(s.counts().cloudConnects, 1);
 });
 
 test('moving blocks on the board keeps the prepared runner, while code edits reload it', async t => {

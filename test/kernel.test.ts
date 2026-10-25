@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileProject } from '@entropy/compiler';
-import { Vm, planKernel } from '@entropy/vm';
+import { Vm } from '@entropy/vm';
 import type { KernelPlan } from '@entropy/vm';
 
 test('the JS kernel preserves untouched scalar text and falls back without partial writes', () => {

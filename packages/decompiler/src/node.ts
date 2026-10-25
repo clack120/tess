@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findLocalRuntime } from '@entropy/player';
-import { readTar } from './tar.ts';
+import { findProjectEntry, readTar } from './tar.ts';
 import { decompileProject } from './index.ts';
 import type { DecompileOptions, DecompileResult } from './types.ts';
 
@@ -32,7 +32,7 @@ export async function decompileEnt(
   options: DecompileOptions = {},
 ): Promise<DecompileResult> {
   const entries = await readTar(bytes);
-  const projectEntry = entries.find((e) => e.name.endsWith('project.json'));
+  const projectEntry = findProjectEntry(entries);
   if (!projectEntry) {
     throw new Error('project.json 을 찾지 못했습니다 — .ent(엔트리 작품) 파일이 맞는지 확인하세요.');
   }

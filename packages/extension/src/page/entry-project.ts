@@ -92,21 +92,16 @@ function soundUrl(sound: RawAsset): string {
 
 // Entry keeps SVG and raster copies; pass both so the renderer can choose.
 export function withAssetUrls(work: EntryWork): EntryWork {
-  for (const object of work.objects ?? []) {
+  const objects = (work.objects ?? []).map(object => {
     const sprite = (object as { sprite?: { pictures?: RawAsset[]; sounds?: RawAsset[] } }).sprite;
-    for (const picture of sprite?.pictures ?? []) {
-      if (picture.imageType === 'svg') {
-        picture.fileurl = assetUrl(picture.fileurl, imageUrl(picture, 'svg'));
-        picture.pngurl = imageUrl(picture, 'png');
-      } else {
-        picture.fileurl = assetUrl(picture.fileurl, imageUrl(picture, 'png'));
-      }
-    }
-    for (const sound of sprite?.sounds ?? []) {
-      sound.fileurl = soundUrl(sound);
-    }
-  }
-  return work;
+    if (!sprite) return object;
+    const pictures = sprite.pictures?.map(picture => picture.imageType === 'svg'
+      ? { ...picture, fileurl: assetUrl(picture.fileurl, imageUrl(picture, 'svg')), pngurl: imageUrl(picture, 'png') }
+      : { ...picture, fileurl: assetUrl(picture.fileurl, imageUrl(picture, 'png')) });
+    const sounds = sprite.sounds?.map(sound => ({ ...sound, fileurl: soundUrl(sound) }));
+    return { ...object, sprite: { ...sprite, ...(pictures ? { pictures } : {}), ...(sounds ? { sounds } : {}) } };
+  });
+  return { ...work, objects } as EntryWork;
 }
 
 export async function fetchWork(id: string, groupId: string | null = null, signal?: AbortSignal): Promise<EntryWork> {

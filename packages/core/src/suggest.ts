@@ -3,7 +3,7 @@ export function editDistance(a: string, b: string): number {
   if (a === b) return 0;
   const rows = a.length + 1;
   const cols = b.length + 1;
-  const grid = Array.from({ length: rows }, (unused: unknown, i: number) => {
+  const grid = Array.from({ length: rows }, (_unused: unknown, i: number) => {
     const row = new Array(cols).fill(0);
     row[0] = i;
     return row;

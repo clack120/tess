@@ -1,4 +1,11 @@
-import { Codegen, parseScript, type CompileInput, type FunctionEntry, type RawBlock, type ScriptPlan } from '../compile/codegen.ts';
+import {
+  Codegen,
+  parseScript,
+  type CompiledProgram,
+  type CompileInput,
+  type FunctionEntry,
+  type RawBlock,
+} from '../compile/codegen.ts';
 import { attachJsKernel, CALL_DEPTH_LIMIT, type KernelHandle } from '../kernel/bridge.ts';
 import { planKernel, type KernelPlan } from '../kernel/plan.ts';
 import { CollisionSystem } from '../collision/detect.ts';
@@ -83,6 +90,33 @@ export interface Renderer extends RendererLike, Partial<TextMeasurer> {
   setScene?(sceneId: string): void;
   // Redraw when boost changes the drawing rules.
   setBoost?(on: boolean): void;
+}
+
+type ProgramFactory = (runtime: Vm) => {
+  scripts: CompiledScript['body'][];
+  functions: CompiledFunction[];
+};
+
+interface ParsedSource {
+  raw: string;
+  parsed: RawBlock[][];
+}
+
+function sameItems<T>(left: T[], right: T[], equal: (a: T, b: T) => boolean): boolean {
+  return left.length === right.length && left.every((item, index) => equal(item, right[index]!));
+}
+
+function sameCompileInput(left: CompileInput, right: CompileInput): boolean {
+  return sameItems(left.objects, right.objects,
+    (a, b) => a.id === b.id && a.scene === b.scene && a.script === b.script)
+    && sameItems(left.variables, right.variables,
+      (a, b) => a.id === b.id && a.variableType === b.variableType && a.sharedList === b.sharedList)
+    && sameItems(left.functions, right.functions, (a, b) => a.id === b.id && a.type === b.type
+      && a.content === b.content && sameItems(a.localVariables, b.localVariables,
+        (x, y) => x.id === y.id && x.name === y.name && x.value === y.value))
+    && sameItems(left.scenes, right.scenes, (a, b) => a.id === b.id)
+    && sameItems(left.messages, right.messages, (a, b) => a.id === b.id)
+    && sameItems(left.tables, right.tables, (a, b) => a.id === b.id);
 }
 
 export interface AudioEngine {
@@ -210,7 +244,6 @@ export class Vm implements Project {
   pointerSeen = false;
   mouseDown = false;
   clickedEntityId: string | null = null;
-  private shownTable: Table | null = null;
   private tableCloseAt: number | null = null;
   errors: VmError[] = [];
   // Keep failure state through stop and reset so it can still be inspected.
@@ -233,9 +266,7 @@ export class Vm implements Project {
   private kernelOn: boolean;
   kernelPlan: KernelPlan | null = null;
   kernel: KernelHandle | null = null;
-  private plans: ScriptPlan[] = [];
   private targetById = new Map<string, Target>();
-  private variableById = new Map<string, number>();
   private sceneById = new Map<string, Scene>();
   private lastTime: number | null = null;
   private accumulator = 0;
@@ -250,6 +281,10 @@ export class Vm implements Project {
   // A null key set means the work may read any key.
   usedKeys: Set<number> | null = new Set();
   private compileInput: CompileInput | null = null;
+  private compiledProgram: CompiledProgram | null = null;
+  private compiledFactory: ProgramFactory | null = null;
+  private objectScripts = new Map<number, ParsedSource>();
+  private functionScripts = new Map<number, ParsedSource>();
 
   constructor(options: VmOptions = {}) {
     this.renderer = options.renderer ?? null;
@@ -326,7 +361,6 @@ export class Vm implements Project {
       variable.maxValue = Number(raw.maxValue ?? 100);
       return variable;
     });
-    this.variableById = new Map(this.variables.map((variable, index) => [variable.id, index]));
     this.storedVars = this.variables.filter((variable) => variable.isStored);
     this.readStore();
 
@@ -425,33 +459,51 @@ export class Vm implements Project {
   }
 
   private compile(project: EntryProjectLike): void {
+    let cacheable = true;
+    const nextObjectScripts = new Map<number, ParsedSource>();
+    const nextFunctionScripts = new Map<number, ParsedSource>();
+    const parsed = (raw: unknown, index: number, previous: Map<number, ParsedSource>,
+      next: Map<number, ParsedSource>): RawBlock[][] => {
+      if (typeof raw !== 'string') {
+        if (raw !== undefined) cacheable = false;
+        return parseScript(raw as RawBlock[][] | undefined);
+      }
+      const old = previous.get(index);
+      const value = old?.raw === raw ? old.parsed : parseScript(raw);
+      next.set(index, { raw, parsed: value });
+      return value;
+    };
     const input: CompileInput = {
-      objects: project.objects.map((raw) => ({
+      objects: project.objects.map((raw, index) => ({
         id: String(raw.id),
         scene: String(raw.scene ?? this.targetOf(String(raw.id))?.sceneId ?? this.currentSceneId),
-        script: parseScript(raw.script as string | RawBlock[][]),
+        script: parsed(raw.script, index, this.objectScripts, nextObjectScripts),
       })),
       variables: this.variables.map((variable) => ({ id: variable.id, sharedList: variable.isList && !variable.objectId })),
-      functions: project.functions.map((fn) => ({
+      functions: project.functions.map((fn, index) => ({
         id: String(fn.id),
         type: String(fn.type ?? 'normal'),
         localVariables:
           (fn.localVariables as Array<{ id: string; name: string; value: string | number }>) ?? [],
         // Parse once here; codegen, the kernel planner and name lookups all read the same body.
-        content: parseScript(fn.content as string | RawBlock[][]),
+        content: parsed(fn.content, index, this.functionScripts, nextFunctionScripts),
       })),
       scenes: this.scenes,
       messages: this.messages,
       tables: this.tables,
     };
+    this.objectScripts = nextObjectScripts;
+    this.functionScripts = nextFunctionScripts;
+    const reuse = cacheable && this.compileInput !== null && this.compiledProgram !== null
+      && this.compiledFactory !== null && sameCompileInput(this.compileInput, input);
     this.compileInput = input;
-    const codegen = new Codegen(input);
-    const program = codegen.compile();
-    this.unknownBlocks = program.unknown;
-    this.usedKeys = program.keys;
-    const factory = new Function('R', program.source) as (
-      runtime: Vm,
-    ) => { scripts: CompiledScript['body'][]; functions: CompiledFunction[] };
+    const program = reuse ? this.compiledProgram! : new Codegen(input).compile();
+    const factory = reuse ? this.compiledFactory!
+      : new Function('R', program.source) as ProgramFactory;
+    this.compiledProgram = cacheable ? program : null;
+    this.compiledFactory = cacheable ? factory : null;
+    this.unknownBlocks = new Map(program.unknown);
+    this.usedKeys = program.keys ? new Set(program.keys) : null;
     const built = factory(this);
     built.scripts.forEach(body => this.traces.set(body, program.trace));
     // Identify function frames by their generator prototypes.
@@ -460,7 +512,6 @@ export class Vm implements Project {
     note();
     this.installKernel(input, built.functions);
     note();
-    this.plans = program.plans;
     this.scripts = program.plans.map((plan) => ({
       event: plan.event,
       filter: plan.filter,
@@ -1120,7 +1171,6 @@ export class Vm implements Project {
 
   // Table windows do not hold scripts; timed windows close using engine time.
   openTable(table: Table | null, seconds?: number, chart: number | null = null): void {
-    this.shownTable = table;
     this.tableCloseAt = table && seconds ? this.clock + seconds * 1000 : null;
     this.renderer?.showTable?.(table, table ? chart : null);
   }

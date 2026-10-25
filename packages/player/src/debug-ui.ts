@@ -982,7 +982,7 @@ function listItemsRow(entry: any) {
         : h(
             "ol",
             { class: "debug-list-ol" },
-            array.map((item: any, index: number) =>
+            array.map((_item: any, index: number) =>
               h("li", { key: index }, [
                 h("span", { class: "debug-list-index" }, index + 1),
                 editable(key + ":" + index, (array[index] || {}).data, (text: string) =>

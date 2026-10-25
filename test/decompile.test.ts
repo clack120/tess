@@ -6,8 +6,18 @@ import path from 'node:path';
 import { decompileProject, restoreTableRows } from '@entropy/decompiler';
 import { compileProject } from '@entropy/compiler';
 import type { RawEntity } from '@entropy/decompiler';
+import { safeIdentifier } from '../packages/decompiler/src/ident.ts';
 
 const utf8 = (data: Uint8Array) => new TextDecoder('utf-8').decode(data);
+
+test('many colliding names advance their suffix instead of rescanning from two', () => {
+  const used = new Set(['same_2', 'same_4']);
+  assert.equal(safeIdentifier('same', used), 'same');
+  assert.equal(safeIdentifier('same', used), 'same_3');
+  assert.equal(safeIdentifier('same', used), 'same_5');
+  for (let index = 0; index < 10_000; index += 1) safeIdentifier('same', used);
+  assert.equal(used.size, 10_005);
+});
 
 test('initial values preserve leading zeroes, precision and boolean spelling', () => {
   const values = ['000190', '030', '01', '1.0', '-0', '9007199254740993',

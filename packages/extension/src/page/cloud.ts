@@ -100,7 +100,6 @@ export class CloudClient implements VariableStore {
           if (type === '2') {
             const bracketIdx = msg.indexOf('[');
             if (bracketIdx !== -1) {
-              const idStr = msg.slice(2, bracketIdx);
               try {
                 const arr = JSON.parse(msg.slice(bracketIdx));
                 if (arr[0] === 'welcome' && arr[1]) {

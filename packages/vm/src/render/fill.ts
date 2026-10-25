@@ -41,9 +41,9 @@ function spans(edge: Edge, top: number, bottom: number): boolean {
 
 // Skip pairwise intersection tests when edge order stays unchanged across a band.
 function keepsOrder(edges: Edge[], top: number, bottom: number): boolean {
-  const byTop = edges.map((edge, at) => at).sort((a, b) => xAt(edges[a]!, top) - xAt(edges[b]!, top));
+  const byTop = edges.map((_edge, at) => at).sort((a, b) => xAt(edges[a]!, top) - xAt(edges[b]!, top));
   const byBottom = edges
-    .map((edge, at) => at)
+    .map((_edge, at) => at)
     .sort((a, b) => xAt(edges[a]!, bottom) - xAt(edges[b]!, bottom));
   return byTop.every((at, index) => at === byBottom[index]);
 }

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { makeTar } from '@entropy/compiler';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -69,6 +70,46 @@ test('멀쩡한 작품은 check 가 OK 로 통과시킨다', () => {
   const result = cli('check', path.join(root, 'examples/all_blocks.etp'));
   assert.equal(result.code, 0);
   assert.match(result.output, /OK/);
+});
+
+test('check 는 .ent 를 세 번 왕복해 누적 변형과 Entry 스키마를 검사한다', (t) => {
+  const dir = project(t, { 'main.etp': `function twice(n) do
+  var result = n * 2
+  return result
+end
+scene "s":
+  object "o":
+    when start do
+      say twice(3)
+    end
+  end
+end` });
+  const bundle = path.join(dir, 'work.ent');
+  assert.equal(cli('build', path.join(dir, 'main.etp'), '-o', bundle).code, 0);
+
+  const result = cli('check', bundle);
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /왕복 검사\s+3회/);
+  assert.match(result.output, /Entry 스키마\s+문제 없음/);
+  assert.match(result.output, /OK/);
+});
+
+test('.ent check 는 손상된 묶음과 잘못된 왕복 횟수를 친절하게 거절한다', (t) => {
+  const dir = project(t, { 'broken.ent': 'not an entry archive' });
+  const broken = cli('check', path.join(dir, 'broken.ent'));
+  assert.equal(broken.code, 1);
+  assert.match(broken.output, /\.ent 압축을 읽지 못했습니다|project\.json 이 없는/);
+  assert.match(broken.output, /올바른 Entry 작품|project\.json/);
+
+  const misleading = path.join(dir, 'misleading.ent');
+  fs.writeFileSync(misleading, makeTar([{ name: 'not-project.json', data: Buffer.from('{}') }]));
+  const unrelated = cli('check', misleading);
+  assert.equal(unrelated.code, 1);
+  assert.match(unrelated.output, /project\.json 이 없는/);
+
+  const rounds = cli('check', path.join(dir, 'broken.ent'), '--rounds', '0');
+  assert.equal(rounds.code, 2);
+  assert.match(rounds.output, /1부터 10 사이의 정수/);
 });
 
 test('문법 에러는 그대로 위치와 함께 알려 준다', (t) => {

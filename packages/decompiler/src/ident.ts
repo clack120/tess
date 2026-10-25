@@ -5,6 +5,7 @@ import type { DecompileContext, ResourceInfo } from './types.ts';
 const IDENT_START = /[\p{L}_]/u;
 // Match the lexer: only ASCII digits belong in identifiers.
 const IDENT_PART = /[\p{L}0-9_]/u;
+const NEXT_SUFFIX = new WeakMap<Set<string>, Map<string, number>>();
 
 export function safeIdentifier(raw: unknown, usedNames: Set<string>, fallback = 'item'): string {
   let cleaned = '';
@@ -16,11 +17,14 @@ export function safeIdentifier(raw: unknown, usedNames: Set<string>, fallback = 
   if (UNUSABLE_AS_NAME.has(cleaned) || BUILTIN_NAMES.has(cleaned)) cleaned = `${cleaned}_`;
 
   let candidate = cleaned;
-  let n = 2;
+  let suffixes = NEXT_SUFFIX.get(usedNames);
+  if (!suffixes) NEXT_SUFFIX.set(usedNames, suffixes = new Map());
+  let n = suffixes.get(cleaned) ?? 2;
   while (usedNames.has(candidate)) {
     candidate = `${cleaned}_${n}`;
     n += 1;
   }
+  suffixes.set(cleaned, n);
   usedNames.add(candidate);
   return candidate;
 }
