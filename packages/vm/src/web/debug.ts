@@ -113,6 +113,16 @@ export function makeVmRuntime(handle: EntropyHandle) {
       const target = vm.targetOf(objectId);
       return target ? { object: objectView(target), entity: target.entity } : null;
     },
+    instances(objectId: string) {
+      const target = vm.targetOf(objectId);
+      if (!target) return [];
+      const object = objectView(target);
+      return [target.entity, ...target.clones].map((entity, instance) => ({
+        object,
+        entity,
+        instance,
+      }));
+    },
     // Report current-scene objects in front-to-back draw order.
     currentObjects() {
       return vm.currentTargets().map((target) => ({

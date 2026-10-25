@@ -65,6 +65,7 @@ const state = observable({
   scenes: [],
   currentId: "",
   currentName: "",
+  currentInstance: 0,
   variables: [],
   messages: [],
   functions: [],
@@ -161,6 +162,25 @@ const entryRuntime = {
         : null;
     return object && object.entity ? { object, entity: object.entity } : null;
   },
+  instances(objectId: string) {
+    const live = entryRuntime.object(objectId);
+    if (!live) return [];
+    let clones: any[] = [];
+    try {
+      const found = live.object.getClonedEntities?.();
+      clones = Array.isArray(found)
+        ? found
+        : Array.isArray(live.object.clonedEntities)
+          ? live.object.clonedEntities
+          : [];
+    } catch (error) {
+    }
+    return [live.entity, ...clones].map((entity, instance) => ({
+      object: live.object,
+      entity,
+      instance,
+    }));
+  },
   // Entry cannot test arbitrary pixels; null lets picking fall back to bounds.
   hitTest(_entity: any, _x: number, _y: number): boolean | null {
     return null;
@@ -243,7 +263,9 @@ const entryRuntime = {
   refreshRect: () => refreshBoundRect(),
 };
 
-export type DebugRuntime = typeof entryRuntime;
+export type DebugRuntime = Omit<typeof entryRuntime, "instances"> & {
+  instances?: typeof entryRuntime.instances;
+};
 
 const rt = (): DebugRuntime => window.entropyRuntime ?? entryRuntime;
 
@@ -447,12 +469,32 @@ const describeFunction = (fn: any) => {
   return { id: fn.id, name, params, kind };
 };
 
-const liveEntity = (objectId: string) => {
+const baseLiveEntity = (objectId: string) => {
   try {
     return rt().object(objectId);
   } catch (error) {
     return null;
   }
+};
+
+const liveInstances = (objectId: string) => {
+  try {
+    const runtime = rt() as any;
+    const found = typeof runtime.instances === "function"
+      ? runtime.instances(objectId)
+      : null;
+    if (Array.isArray(found) && found.length > 0) return found;
+  } catch (error) {
+  }
+  const live = baseLiveEntity(objectId);
+  return live ? [{ ...live, instance: 0 }] : [];
+};
+
+const liveEntity = (objectId: string, requested?: number) => {
+  const instances = liveInstances(objectId);
+  const selected = requested ??
+    (state.currentId === objectId ? Number(state.currentInstance) : 0);
+  return instances[selected] ?? instances[0] ?? null;
 };
 
 const round = (value: any) =>
@@ -584,9 +626,10 @@ const ROTATE_METHODS = [
   { value: "none", label: "회전 안 함" },
 ];
 
-const showObject = (object: any) => {
+const showObject = (object: any, instance = 0) => {
   state.currentId = object.id;
   state.currentName = object.name;
+  state.currentInstance = Math.max(0, Number(instance) || 0);
   try {
     currentThreads = JSON.parse(object.script);
   } catch (error) {
@@ -653,10 +696,11 @@ function editable(key: string, value: any, commit: any) {
   });
 }
 
-function chooser(options: any, value: any, commit: any) {
+function chooser(options: any, value: any, commit: any, id?: string) {
   return h(
     "select",
     {
+      id,
       class: "val debug-select",
       value: String(value),
       onChange: (event: any) => commit(event.target.value),
@@ -1142,6 +1186,27 @@ function objectInfoRows() {
     ? live.object.objectType === "textBox"
     : live.entity.text !== undefined;
   const rows = [];
+  const instances = liveInstances(state.currentId);
+  if (instances.length > 1) {
+    const selected = instances[state.currentInstance] ? state.currentInstance : 0;
+    rows.push(
+      infoRow(
+        "인스턴스",
+        chooser(
+          instances.map((_item: any, index: number) => ({
+            value: String(index),
+            label: index === 0 ? "원본" : "클론 " + index,
+          })),
+          selected,
+          (index: string) => {
+            state.currentInstance = Number(index) || 0;
+            state.editing = "";
+          },
+          "debug-object-instance",
+        ),
+      ),
+    );
+  }
   for (const field of ENTITY_FIELDS) {
     const value = field.get(live.entity);
     rows.push(
@@ -1215,7 +1280,10 @@ function objectInfoRows() {
 }
 
 function ObjectsTab() {
-  const suffix = state.currentName ? "— " + state.currentName : "";
+  const suffix = state.currentName
+    ? "— " + state.currentName +
+      (state.currentInstance > 0 ? " · 클론 " + state.currentInstance : "")
+    : "";
   return sections([
     {
       id: "objects-tree",
@@ -1246,8 +1314,9 @@ function ObjectsTab() {
                   { class: "debug-object-list" },
                   scene.objects.length === 0
                     ? h("li", { class: "debug-empty" }, "(오브젝트 없음)")
-                    : scene.objects.map((object: any) =>
-                        h(
+                    : scene.objects.map((object: any) => {
+                        const clones = Math.max(0, liveInstances(object.id).length - 1);
+                        return h(
                           "li",
                           { key: object.id },
                           h(
@@ -1262,10 +1331,22 @@ function ObjectsTab() {
                               "data-object-id": object.id,
                               onClick: () => showObject(object),
                             },
-                            object.name,
+                            [
+                              h("span", { class: "debug-object-name" }, object.name),
+                              clones > 0
+                                ? h(
+                                    "span",
+                                    {
+                                      class: "debug-clone-count",
+                                      title: "실행 중인 클론 " + clones + "개",
+                                    },
+                                    "클론 " + clones,
+                                  )
+                                : null,
+                            ],
                           ),
-                        ),
-                      ),
+                        );
+                      }),
                 ),
               ]),
             ),
@@ -1361,12 +1442,42 @@ const startHorizontalResize = (event: any) => {
   window.addEventListener("mouseup", up);
 };
 
+const resetPanelHeight = () => {
+  panel.style.top = "";
+  panel.style.height = "";
+};
+
+const startPanelHeightResize = (event: any) => {
+  event.preventDefault();
+  document.body.style.userSelect = "none";
+  const move = (e: any) => {
+    const height = Math.max(260, Math.min(window.innerHeight, window.innerHeight - e.clientY));
+    panel.style.top = "auto";
+    panel.style.height = height + "px";
+  };
+  const up = () => {
+    window.removeEventListener("mousemove", move);
+    window.removeEventListener("mouseup", up);
+    document.body.style.userSelect = "";
+  };
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", up);
+};
+
 function Panel() {
   return [
     h("div", {
       id: "debug-resize-handle",
       title: "드래그해서 크기 조절 (끝까지 줄이면 접힙니다)",
       onMouseDown: startHorizontalResize,
+    }),
+    h("div", {
+      id: "debug-height-handle",
+      role: "separator",
+      "aria-orientation": "horizontal",
+      title: "드래그해서 패널 높이 조절 · 두 번 눌러 전체 높이로 복원",
+      onMouseDown: startPanelHeightResize,
+      onDblClick: resetPanelHeight,
     }),
     h("div", { class: "debug-header" }, [
       h("h2", null, "디버그"),
@@ -1571,14 +1682,14 @@ window.entropyHighlightBlock = function highlightBlock(blockId) {
   });
 };
 
-const selectObjectById = (objectId: string) => {
+const selectObjectById = (objectId: string, instance = 0) => {
   const found =
     (project &&
       project.objects &&
       project.objects.find((o: any) => o.id === objectId)) ||
     blockOwner.get(objectId);
   if (!found || !found.script) return;
-  showObject(found);
+  showObject(found, instance);
   openPanel("objects");
   // Scroll the selected row into view for long object lists.
   requestAnimationFrame(() => {
@@ -1686,7 +1797,23 @@ function insideStage(event: any) {
 // Pick directly from bounds because the stopped cover and renderers can intercept clicks.
 function stageObjects() {
   try {
-    return rt().currentObjects();
+    const current = rt().currentObjects();
+    return current.flatMap((object: any) => {
+      const id = object && object.id ? String(object.id) : "";
+      if (!id) return [object];
+      const instances = liveInstances(id);
+      // Preserve the runtime's current-scene base entity and add its live clones.
+      // This also keeps test/fallback adapters that expose only currentObjects working.
+      const base = { ...object, instance: 0 };
+      return [
+        base,
+        ...instances.slice(1).map((live: any, index: number) => ({
+          ...object,
+          entity: live.entity,
+          instance: index + 1,
+        })),
+      ];
+    });
   } catch (error) {
     return [];
   }
@@ -1751,9 +1878,11 @@ window.entropyWatchStagePicks = function watchStagePicks() {
   const track = (clientX: number, clientY: number) => {
     const object = objectAtPoint(clientX, clientY);
     const id = object && object.id ? String(object.id) : null;
-    if (id === shownId) return;
-    shownId = id;
-    if (id) selectObjectById(id);
+    const instance = object ? Number(object.instance) || 0 : 0;
+    const key = id ? id + ":" + instance : null;
+    if (key === shownId) return;
+    shownId = key;
+    if (id) selectObjectById(id, instance);
   };
 
   const onMove = (event: any) => {

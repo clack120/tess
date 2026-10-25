@@ -263,6 +263,26 @@ test('오브젝트 탭이 VM 의 오브젝트를 보여 주고 좌표를 옮긴�
   assert.equal(entity.getX(), -100);
 });
 
+test('오브젝트 탭에서 VM 클론을 따로 골라 고친다', async (t) => {
+  const ui = await mountPanelOnVm(t);
+  const target = ui.vm.targets[0]!;
+  const clone = target.addClone(target.entity);
+  clone.setX(88);
+  ui.tab('objects');
+  await ui.settle();
+
+  assert.equal(ui.window.document.querySelector('.debug-clone-count')!.textContent, '클론 1');
+  ui.choose('debug-object-instance', '1');
+  await ui.settle();
+  const xCell = [...ui.byId('object-info')!.querySelectorAll('li')]
+    .find((row: any) => row.querySelector('.key')?.textContent === 'x 좌표')!
+    .querySelector('.debug-edit');
+  assert.equal(xCell!.textContent, '88');
+  await ui.edit(xCell, '101');
+  assert.equal(clone.getX(), 101);
+  assert.notEqual(target.entity.getX(), 101);
+});
+
 test('장면 바로가기는 그 장면으로 넘어가서 그 장면을 실행한다', async (t) => {
   const ui = await mountPanelOnVm(t);
   await ui.settle();

@@ -46,7 +46,7 @@ declare global {
     entropyWatchStagePicks(): void;
     entropyLayoutCanvas(): void;
     entropyHighlightBlock(blockId: string): void;
-    entropySelectObjectById(id: string): void;
+    entropySelectObjectById(id: string, instance?: number): void;
     entropyBlockDataById: Map<string, any>;
     entropyCollectParamIds(node: any, out?: string[]): string[];
     // Return null for unrelated errors; otherwise add the list name and length.

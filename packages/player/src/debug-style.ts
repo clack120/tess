@@ -13,34 +13,54 @@ export const DEBUG_PANEL_STYLE = `
     background: #e5484d; color: #fff; font-size: 11px; line-height: 16px; text-align: center;
   }
   #debug-panel {
-    position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 90vw);
-    background: #fff; color: #16181d; box-shadow: -2px 0 12px #0003;
+    --debug-accent: #376df6; --debug-line: #18233a1a; --debug-soft: #376df612;
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 92vw);
+    min-height: 260px; box-sizing: border-box;
+    background: linear-gradient(180deg, #fbfcff 0, #fff 110px); color: #16181d;
+    border: 1px solid var(--debug-line); border-right: 0;
+    border-radius: 12px 0 0 12px; box-shadow: -8px 0 28px #17213a24;
     transform: translateX(100%); transition: transform .15s ease-out;
     display: flex; flex-direction: column; z-index: 1000;
   }
   #debug-panel.open { transform: translateX(0); }
-  @media (prefers-color-scheme: dark) { #debug-panel { background: #1c1f26; color: #e8eaee; } }
+  @media (prefers-color-scheme: dark) {
+    #debug-panel {
+      --debug-line: #ffffff1c; --debug-soft: #7093ff18;
+      background: linear-gradient(180deg, #20242d 0, #191c23 110px); color: #eef1f7;
+      box-shadow: -8px 0 30px #0007;
+    }
+  }
   #debug-resize-handle {
     position: absolute; top: 0; left: -5px; width: 9px; height: 100%; cursor: col-resize; z-index: 1001;
   }
   #debug-resize-handle:hover, #debug-resize-handle.dragging { background: #4f80ff33; }
+  #debug-height-handle {
+    position: absolute; top: -5px; left: 0; right: 0; height: 10px;
+    cursor: row-resize; z-index: 1002;
+  }
+  #debug-height-handle:hover { background: #4f80ff33; }
   /* Keep the width handle reachable when the panel snaps closed. */
   #debug-panel.collapsed { box-shadow: none; overflow: visible; }
   #debug-panel.collapsed > :not(#debug-resize-handle) { display: none; }
   #debug-panel.collapsed > #debug-resize-handle { width: 11px; left: -11px; background: #4f80ff33; }
-  .debug-header { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid #0002; flex: none; }
-  .debug-header h2 { font-size: 15px; margin: 0; }
+  .debug-header {
+    display: flex; align-items: center; gap: 4px; padding: 11px 12px 9px 15px;
+    border-bottom: 1px solid var(--debug-line); flex: none;
+  }
+  .debug-header h2 { font-size: 15px; letter-spacing: -.01em; margin: 0; }
   .debug-header button { border: none; background: none; font-size: 18px; cursor: pointer; color: inherit; line-height: 1; }
   .debug-header .debug-inspect { margin-left: auto; }
   .debug-header #debug-close { padding-left: 10px; }
   .debug-inspect {
     display: flex; align-items: center; padding: 3px 5px; border-radius: 5px; opacity: .65;
   }
-  .debug-inspect:hover { opacity: 1; background: #4f80ff22; }
-  .debug-inspect.active { opacity: 1; color: #4f80ff; background: #4f80ff22; }
+  .debug-inspect:hover { opacity: 1; background: var(--debug-soft); }
+  .debug-inspect.active { opacity: 1; color: var(--debug-accent); background: var(--debug-soft); }
+  #debug-close { width: 28px; height: 28px; padding: 0 !important; border-radius: 7px; opacity: .55; }
+  #debug-close:hover { opacity: 1; background: var(--debug-soft); }
   .debug-inspecting, .debug-inspecting canvas { cursor: crosshair !important; }
   .debug-section {
-    position: relative; border-bottom: 1px solid #0001; padding: 10px 16px 14px;
+    position: relative; border-bottom: 1px solid var(--debug-line); padding: 12px 15px 15px;
     flex: 0 0 auto; box-sizing: border-box;
     display: flex; flex-direction: column; overflow: hidden;
   }
@@ -59,7 +79,7 @@ export const DEBUG_PANEL_STYLE = `
     position: absolute; left: 0; right: 0; bottom: 0; height: 7px; cursor: row-resize; z-index: 2;
   }
   .debug-vresize:hover { background: #4f80ff33; }
-  .debug-section h3 { font-size: 12px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .03em; opacity: .6; }
+  .debug-section h3 { font-size: 11px; margin: 0 0 9px; text-transform: uppercase; letter-spacing: .07em; opacity: .58; }
   .debug-empty { opacity: .5; font-size: 13px; margin: 4px 0; }
   .error-item { font-size: 12px; margin-bottom: 6px; border: 1px solid #e5484d55; border-radius: 6px; padding: 4px 8px; }
   .error-item summary { cursor: pointer; color: #e5484d; word-break: break-word; }
@@ -71,10 +91,18 @@ export const DEBUG_PANEL_STYLE = `
   .debug-scene-go { margin-left: auto; font-weight: 400; }
   .debug-object-list { list-style: none; margin: 0; padding: 0; }
   .debug-object-btn {
-    display: block; width: 100%; text-align: left; padding: 3px 6px; margin: 1px 0; border-radius: 4px;
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 6px 8px; margin: 2px 0; border-radius: 7px;
     border: none; background: none; color: inherit; font-size: 13px; cursor: pointer;
   }
-  .debug-object-btn:hover, .debug-object-btn.active { background: #4f80ff22; }
+  .debug-object-btn:hover { background: var(--debug-soft); }
+  .debug-object-btn.active { background: #376df619; color: var(--debug-accent); font-weight: 600; }
+  .debug-object-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .debug-clone-count {
+    margin-left: auto; flex: none; padding: 2px 7px; border-radius: 999px;
+    background: #805ad51a; color: #7048c7; font-size: 10px; font-weight: 650;
+  }
+  @media (prefers-color-scheme: dark) { .debug-clone-count { color: #bca5ff; background: #a68aff20; } }
   #block-tree ul { list-style: none; margin: 0; padding-left: 14px; border-left: 1px dashed #0002; }
   #block-tree > .debug-thread > ul { padding-left: 0; border-left: none; }
   .debug-thread-label { font-size: 11px; opacity: .55; margin: 10px 0 2px; }
@@ -83,13 +111,16 @@ export const DEBUG_PANEL_STYLE = `
   .block-highlight > .block-type { background: #e5484d; color: #fff; padding: 1px 5px; border-radius: 4px; }
   .block-highlight-child > .block-type { background: #e5484d33; padding: 1px 5px; border-radius: 4px; }
 
-  .debug-tabs { display: flex; flex: none; border-bottom: 1px solid #0002; padding: 0 8px; gap: 2px; }
+  .debug-tabs {
+    display: flex; flex: none; border-bottom: 1px solid var(--debug-line);
+    padding: 5px 8px; gap: 3px;
+  }
   .debug-tab {
     border: none; background: none; color: inherit; cursor: pointer;
-    font-size: 13px; padding: 8px 10px; border-bottom: 2px solid transparent; opacity: .6;
+    font-size: 12px; padding: 6px 9px; border-radius: 7px; opacity: .58;
   }
-  .debug-tab:hover { opacity: .9; }
-  .debug-tab[aria-selected="true"] { opacity: 1; font-weight: 600; border-bottom-color: #4f80ff; }
+  .debug-tab:hover { opacity: .9; background: var(--debug-soft); }
+  .debug-tab[aria-selected="true"] { opacity: 1; font-weight: 650; color: var(--debug-accent); background: var(--debug-soft); }
   .debug-tab .badge { margin-left: 4px; }
   .debug-panelbody { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .debug-panelbody[hidden] { display: none; }
@@ -128,7 +159,7 @@ export const DEBUG_PANEL_STYLE = `
 
   .debug-rows { list-style: none; margin: 0; padding: 0; font-size: 13px; }
   /* Apply flex only to direct rows so expanded lists and block trees stay vertical. */
-  .debug-rows > li { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; border-bottom: 1px solid #0001; }
+  .debug-rows > li { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--debug-line); }
   /* Explicit display rules override the browser's default hidden rule. */
   .debug-rows > li[hidden] { display: none; }
   .debug-rows > li.debug-items-row { display: block; border-bottom: none; padding: 0; }

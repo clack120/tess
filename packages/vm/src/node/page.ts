@@ -84,7 +84,11 @@ ${EXTRAS_DIALOG_STYLE}
 }
 ${DEBUG_PANEL_STYLE}
 
-#debug-panel { background: #1c1f26; color: #e8eaee; }
+#debug-panel {
+  --debug-line: #ffffff1c; --debug-soft: #7093ff18;
+  background: linear-gradient(180deg, #20242d 0, #191c23 110px); color: #eef1f7;
+  box-shadow: -8px 0 30px #0007;
+}
 .debug-toggle-btn { border-color: #3a3f47; background: #23272e; }
 .debug-toggle-btn:hover { background: #2c313a; }
 `;

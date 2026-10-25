@@ -130,7 +130,8 @@ test('Entry inspector follows fullscreen and falls back when the dock is replace
   assert.ok(!panel.classList.contains('ti-floating'));
   panel.parentElement!.remove();
   window.document.dispatchEvent(new window.Event('fullscreenchange'));
-  assert.equal(panel.parentElement, player);
+  assert.equal(panel.parentElement, window.document.body);
+  assert.ok(panel.classList.contains('ti-detached'));
   assert.equal(timers.size, 1);
   inspector.dispose(); inspector.dispose();
   assert.equal(timers.size, 0);
@@ -202,4 +203,19 @@ test('the inspector can undock by dragging, stay onscreen, return to its host, a
   assert.equal(panel.style.left, '');
   panel.querySelector<HTMLButtonElement>('[aria-label="디버그 끄기"]')!.click();
   assert.equal(inspector.enabled, false); assert.equal(panel.hidden, true); assert.equal(timers.size, 0);
+});
+
+test('the inspector height can be dragged and double-clicked back to automatic', t => {
+  const { window, inspector, panel } = setup(t);
+  inspector.open();
+  panel.getBoundingClientRect = () => ({ left: 0, top: 0, width: 320, height: 300 }) as DOMRect;
+  const handle = panel.querySelector<HTMLElement>('.ti-resize')!;
+
+  pointer(window, handle, 'pointerdown', 0, 300);
+  pointer(window, window.document, 'pointermove', 0, 420);
+  pointer(window, window.document, 'pointerup', 0, 420);
+  assert.equal(panel.style.height, '420px');
+
+  handle.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+  assert.equal(panel.style.height, '');
 });

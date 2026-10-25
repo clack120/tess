@@ -83,6 +83,7 @@ async function mountDebugPanel(t: any) {
     rotateMethod: 'free',
     pictures: [{ id: 'p1', name: '기본' }, { id: 'p2', name: '점프' }],
     entity,
+    clonedEntities: [] as any[],
     getPicture(id: string) { return this.pictures.find((p) => p.id === id) || null; },
     setRotateMethod(method: any) { this.rotateMethod = method; },
   };
@@ -1126,6 +1127,66 @@ test('패널 폭은 좌우로 조절할 수 있다', async (t) => {
   ui.window.dispatchEvent(new ui.window.MouseEvent('mouseup'));
 
   assert.equal(ui.byId('debug-panel')!.style.width, '500px');
+});
+
+test('패널 높이는 위쪽 손잡이로 조절하고 두 번 눌러 복원한다', async (t) => {
+  const ui = await mountDebugPanel(t);
+  await ui.settle();
+  ui.window.innerHeight = 900;
+
+  const handle = ui.byId('debug-height-handle');
+  handle!.dispatchEvent(new ui.window.MouseEvent('mousedown', { clientY: 0, bubbles: true }));
+  ui.window.dispatchEvent(new ui.window.MouseEvent('mousemove', { clientY: 300 }));
+  ui.window.dispatchEvent(new ui.window.MouseEvent('mouseup'));
+
+  const panel = ui.byId('debug-panel')!;
+  assert.equal(panel.style.height, '600px');
+  assert.equal(panel.style.top, 'auto');
+
+  handle!.dispatchEvent(new ui.window.MouseEvent('dblclick', { bubbles: true }));
+  assert.equal(panel.style.height, '');
+  assert.equal(panel.style.top, '');
+});
+
+test('오브젝트의 원본과 클론을 따로 골라 상태를 확인하고 고친다', async (t) => {
+  const ui = await mountDebugPanel(t);
+  const clone = { ...ui.entity, x: 77, y: 33 };
+  ui.stageObject.clonedEntities.push(clone);
+  ui.window.entropyRenderProjectDebug(dataProject);
+  ui.tab('objects');
+  await ui.settle();
+
+  assert.equal(ui.window.document.querySelector('.debug-clone-count')!.textContent, '클론 1');
+  assert.equal(ui.byId('debug-object-instance')!.value, '0');
+  ui.choose('debug-object-instance', '1');
+  await ui.settle();
+
+  assert.equal(ui.byId('object-info-name')!.textContent, '— 치로 · 클론 1');
+  const xRow = [...ui.byId('object-info')!.querySelectorAll('li')]
+    .find((row: any) => row.querySelector('.key')?.textContent === 'x 좌표')!;
+  assert.equal(xRow.querySelector('.debug-edit')!.textContent, '77');
+  await ui.edit(xRow.querySelector('.debug-edit'), '91');
+  assert.equal(clone.x, 91);
+  assert.equal(ui.entity.x, 12.345, '원본 좌표는 그대로여야 한다');
+});
+
+test('무대 고르기로 클론을 직접 선택한다', async (t) => {
+  const ui = await mountDebugPanel(t);
+  const clone = { ...ui.entity, x: 120, y: 0 };
+  ui.stageObject.clonedEntities.push(clone);
+  ui.window.entropyRenderProjectDebug(dataProject);
+  ui.tab('objects');
+  await ui.settle();
+
+  const base = stageActor('o1', '치로');
+  const { canvas } = withStage(ui, [base]);
+  armInspector(ui);
+  // x=120 in a 480-wide stage whose canvas starts at clientX 100.
+  overStage(ui, canvas, 'pointermove', 460, 185);
+  await ui.settle();
+
+  assert.equal(ui.byId('object-info-name')!.textContent, '— 치로 · 클론 1');
+  assert.equal(ui.byId('debug-object-instance')!.value, '1');
 });
 
 test('패널이 실제로 그려진다', async (t) => {

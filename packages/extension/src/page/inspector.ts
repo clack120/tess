@@ -4,32 +4,35 @@ import type { Entity, Target } from '../../../vm/src/runtime/model.ts';
 const HOST = '.css-hxgsd9.e1edvhig3';
 const ROW = 28;
 const STYLE = `
-.entropy-inspector { box-sizing:border-box; width:100%; min-width:0; margin:0 0 8px; border:1px solid #aaa; background:#fff; color:#222; color-scheme:light; font:12px/1.4 system-ui,sans-serif; text-align:left; }
+.entropy-inspector { --ti-accent:#b82168; --ti-line:#20283818; --ti-soft:#b8216810; box-sizing:border-box; display:flex; flex-direction:column; width:100%; min-width:0; min-height:220px; margin:0 0 10px; border:1px solid var(--ti-line); border-radius:12px; background:linear-gradient(180deg,#fff 0,#fbfcff 100%); box-shadow:0 8px 28px #17213a18; color:#20242c; color-scheme:light; font:12px/1.45 system-ui,sans-serif; text-align:left; overflow:hidden; }
 .entropy-inspector[hidden] { display:none!important; }
-.entropy-inspector .ti-head { position:sticky; top:0; z-index:1; display:flex; align-items:center; gap:6px; padding:4px 6px; border-bottom:1px solid #ccc; background:#eee; cursor:grab; user-select:none; touch-action:none; }
-.entropy-inspector .ti-head strong { flex:1; font-weight:600; }
-.entropy-inspector summary { cursor:pointer; padding:4px 6px; overflow-wrap:anywhere; }
-.entropy-inspector .ti-body { padding:0 6px 6px; }
-.entropy-inspector .ti-tools { display:flex; flex-wrap:wrap; gap:4px; align-items:center; padding:5px 0; border-bottom:1px solid #ddd; }
-.entropy-inspector button { padding:2px 5px; border:1px solid #bbb; border-radius:0; background:transparent; color:inherit; font:inherit; cursor:pointer; }
-.entropy-inspector button:hover, .entropy-inspector button[aria-pressed=true] { background:#e6e6e6; }
-.entropy-inspector :focus-visible { outline:2px solid #b82168; outline-offset:1px; }
+.entropy-inspector .ti-head { position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:5px; flex:none; min-height:38px; padding:5px 7px 5px 11px; border-bottom:1px solid var(--ti-line); background:#ffffffea; backdrop-filter:blur(12px); cursor:grab; user-select:none; touch-action:none; }
+.entropy-inspector .ti-head strong { flex:1; font-size:13px; font-weight:700; letter-spacing:-.01em; }
+.entropy-inspector .ti-head button { width:27px; height:27px; padding:0; border:0; font-size:15px; }
+.entropy-inspector summary { cursor:pointer; padding:5px 7px; overflow-wrap:anywhere; }
+.entropy-inspector .ti-body { display:flex; flex:1 1 auto; flex-direction:column; min-height:0; padding:0 9px 7px; overflow:hidden; }
+.entropy-inspector .ti-tools { display:flex; flex:none; flex-wrap:wrap; gap:5px; align-items:center; padding:8px 0; border-bottom:1px solid var(--ti-line); }
+.entropy-inspector button { padding:4px 8px; border:1px solid #9aa4b52e; border-radius:7px; background:#fff; color:inherit; font:inherit; cursor:pointer; }
+.entropy-inspector button:hover, .entropy-inspector button[aria-pressed=true] { border-color:#b8216845; background:var(--ti-soft); color:var(--ti-accent); }
+.entropy-inspector :focus-visible { outline:2px solid var(--ti-accent); outline-offset:1px; }
 .entropy-inspector label { display:flex; align-items:center; gap:5px; cursor:pointer; }
 .entropy-inspector input { margin:0; }
-.entropy-inspector .ti-status { margin:4px 0; color:#666; font-variant-numeric:tabular-nums; }
-.entropy-inspector .ti-tree { max-height:360px; overflow:auto; overscroll-behavior:contain; }
+.entropy-inspector .ti-status { flex:none; margin:7px 1px 5px; color:#6a7280; font-size:11px; font-variant-numeric:tabular-nums; }
+.entropy-inspector .ti-tree { flex:1 1 auto; min-height:80px; overflow:auto; overscroll-behavior:contain; }
 .entropy-inspector .ti-target { margin-left:12px; }
 .entropy-inspector .ti-target > summary { display:flex; align-items:center; gap:4px; padding:0; }
 .entropy-inspector .ti-target > summary::before { content:'▸'; width:12px; flex:none; }
 .entropy-inspector .ti-target[open] > summary::before { content:'▾'; }
-.entropy-inspector .ti-entity { flex:1; min-width:0; width:100%; height:28px; border:0; padding:2px 6px; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:transparent; }
-.entropy-inspector .ti-entity[aria-pressed=true] { background:#ddd; }
+.entropy-inspector .ti-entity { flex:1; min-width:0; width:100%; height:28px; border:0; padding:3px 7px; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:transparent; }
+.entropy-inspector .ti-entity[aria-pressed=true] { background:#b8216815; box-shadow:inset 3px 0 var(--ti-accent); color:var(--ti-accent); font-weight:650; }
 .entropy-inspector .ti-clones { position:relative; max-height:224px; overflow:auto; margin-left:18px; overscroll-behavior:contain; }
 .entropy-inspector .ti-clone-space { position:relative; }
 .entropy-inspector .ti-clone-space > button { position:absolute; left:0; }
-.entropy-inspector .ti-info { margin:6px 0 0; padding:6px 0 0; border-top:1px solid #ddd; max-height:180px; overflow:auto; font:11px/1.5 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
-.entropy-inspector.ti-floating { position:absolute; right:8px; top:8px; z-index:20; width:min(320px,calc(100% - 16px)); margin:0; max-height:calc(100% - 16px); overflow:auto; }
-.entropy-inspector.ti-detached { position:fixed; z-index:2147483646; width:min(320px,calc(100vw - 16px)); max-height:calc(100vh - 16px); }
+.entropy-inspector .ti-info { flex:none; margin:7px 0 0; padding:7px 3px 2px; border-top:1px solid var(--ti-line); max-height:180px; overflow:auto; color:#4d5562; font:11px/1.55 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+.entropy-inspector .ti-resize { flex:none; height:9px; margin:0 -9px -7px; cursor:ns-resize; touch-action:none; }
+.entropy-inspector .ti-resize:hover { background:#b8216824; }
+.entropy-inspector.ti-floating { position:absolute; right:8px; top:8px; z-index:20; width:min(340px,calc(100% - 16px)); margin:0; max-height:calc(100% - 16px); }
+.entropy-inspector.ti-detached { position:fixed; z-index:2147483646; width:min(340px,calc(100vw - 16px)); max-height:calc(100vh - 16px); }
 .entropy-player.ti-picking canvas { cursor:crosshair!important; }
 `;
 
@@ -73,6 +76,9 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
   tree.setAttribute('aria-label', '장면·오브젝트·클론'); body.appendChild(tree);
   const info = document.createElement('pre'); info.className = 'ti-info';
   info.setAttribute('aria-live', 'off'); body.appendChild(info);
+  const heightHandle = document.createElement('div'); heightHandle.className = 'ti-resize';
+  heightHandle.setAttribute('role', 'separator'); heightHandle.setAttribute('aria-orientation', 'horizontal');
+  heightHandle.title = '드래그해서 높이 조절 · 두 번 눌러 자동 높이로 복원'; body.appendChild(heightHandle);
   const branches: Branch[] = [];
   const entities = new WeakMap<HTMLButtonElement, Entity>();
   let selected: Entity | null = null;
@@ -86,6 +92,7 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
   let pickPress: number | null = null;
   let position: { left: number; top: number } | null = null;
   let drag: { id: number; x: number; y: number; left: number; top: number; moved: boolean } | null = null;
+  let heightDrag: { id: number; y: number; height: number } | null = null;
 
   const dock = document.createElement('button'); dock.type = 'button'; dock.textContent = '↩';
   dock.title = '원래 위치로'; dock.setAttribute('aria-label', dock.title);
@@ -244,7 +251,7 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
     document.removeEventListener('pointerup', endDrag, true);
     document.removeEventListener('pointercancel', endDrag, true);
   };
-  const blur = () => { endDrag(); pickPress = null; setPicking(false); };
+  const blur = () => { endDrag(); endHeight(); pickPress = null; setPicking(false); };
   window.addEventListener('blur', blur);
   title.addEventListener('pointerdown', event => {
     if (event.button !== 0 || (event.target as Element).closest('button')) return;
@@ -258,6 +265,32 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
     document.addEventListener('pointercancel', endDrag, true);
     event.preventDefault();
   });
+
+  const heightMove = (event: PointerEvent) => {
+    if (!heightDrag || event.pointerId !== heightDrag.id) return;
+    const local = panel.parentElement === player;
+    const available = local ? player.getBoundingClientRect().height : window.innerHeight;
+    const height = Math.max(220, Math.min(available - 16, heightDrag.height + event.clientY - heightDrag.y));
+    panel.style.height = `${height}px`;
+    if (position) place(position.left, position.top);
+    event.preventDefault();
+  };
+  const endHeight = () => {
+    heightDrag = null;
+    document.removeEventListener('pointermove', heightMove, true);
+    document.removeEventListener('pointerup', endHeight, true);
+    document.removeEventListener('pointercancel', endHeight, true);
+  };
+  heightHandle.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    endDrag();
+    heightDrag = { id: event.pointerId, y: event.clientY, height: panel.getBoundingClientRect().height };
+    document.addEventListener('pointermove', heightMove, true);
+    document.addEventListener('pointerup', endHeight, true);
+    document.addEventListener('pointercancel', endHeight, true);
+    event.preventDefault();
+  });
+  heightHandle.addEventListener('dblclick', () => { panel.style.height = ''; });
 
   function update() {
     if (!active) return;
@@ -294,7 +327,7 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
     active = next;
     window.clearInterval(timer); timer = 0;
     if (active) { update(); timer = window.setInterval(update, 500); }
-    else { endDrag(); setPicking(false); }
+    else { endDrag(); endHeight(); setPicking(false); }
   }
   document.addEventListener('visibilitychange', activity);
   const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(entries => {
@@ -308,7 +341,7 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
     if (now - hostAt < 1000) return;
     hostAt = now;
     const fullscreen = document.fullscreenElement;
-    const host = fullscreen?.contains(player) ? player : position ? document.body : document.querySelector<HTMLElement>(HOST) ?? player;
+    const host = fullscreen?.contains(player) ? player : position ? document.body : document.querySelector<HTMLElement>(HOST) ?? document.body;
     if (panel.parentElement !== host) host.prepend(panel);
     panel.classList.toggle('ti-floating', host === player || host === document.body);
     panel.classList.toggle('ti-detached', host === document.body);
@@ -333,7 +366,7 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
     dispose() {
       if (disposed) return;
       disposed = true; active = false; window.clearInterval(timer);
-      endDrag(); setPicking(false);
+      endDrag(); endHeight(); setPicking(false);
       observer?.disconnect();
       document.removeEventListener('visibilitychange', activity);
       document.removeEventListener('fullscreenchange', fullscreen);
