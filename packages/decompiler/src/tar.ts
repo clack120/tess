@@ -10,7 +10,11 @@ function text(block: Buffer, start: number, length: number): string {
 }
 
 function octal(block: Buffer, start: number, length: number): number {
-  return parseInt(text(block, start, length).trim() || '0', 8);
+  const value = text(block, start, length).trim() || '0';
+  if (!/^[0-7]+$/.test(value)) throw new Error(`TAR 헤더의 크기 값 '${value}' 이(가) 올바른 8진수가 아닙니다`);
+  const parsed = Number.parseInt(value, 8);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`TAR 헤더의 크기 값 '${value}' 이(가) 너무 큽니다`);
+  return parsed;
 }
 
 // Read .ent archives, which Entry saves as gzip-compressed or plain ustar.
@@ -38,7 +42,10 @@ export async function readTar(bytes: Buffer): Promise<TarEntry[]> {
     const prefix = text(block, 345, 155);
     const name = longName ?? (prefix ? `${prefix}/${text(block, 0, 100)}` : text(block, 0, 100));
     longName = null;
-    if (type === '0' || type === '7') entries.push({ name, data: Buffer.from(data) });
+    // Keep views into the decompressed archive instead of copying every asset.
+    // Large Entry works commonly contain hundreds of megabytes of media; callers
+    // already retain all entries while decompiling or extracting them.
+    if (type === '0' || type === '7') entries.push({ name, data });
   }
   return entries;
 }

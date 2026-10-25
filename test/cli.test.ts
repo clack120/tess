@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { makeTar } from '@entropy/compiler';
+import { compileProject, makeTar } from '@entropy/compiler';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -112,6 +112,24 @@ test('.ent check 는 손상된 묶음과 잘못된 왕복 횟수를 친절하게
   assert.match(rounds.output, /1부터 10 사이의 정수/);
 });
 
+test('.ent check 는 지원하지 못한 블록을 버린 왕복을 OK로 보고하지 않는다', (t) => {
+  const dir = project(t, {});
+  const compiled = compileProject('object "o":\n  when start do\n    say 1\n  end\nend');
+  const work = structuredClone(compiled.project!);
+  const script = JSON.parse(work.objects[0]!.script);
+  script[0].push({ id: 'future-block', type: 'entry_future_block', x: 0, y: 0, params: [], statements: [] });
+  work.objects[0]!.script = JSON.stringify(script);
+  const bundle = makeTar([{ name: 'temp/project.json', data: Buffer.from(JSON.stringify(work)) }]);
+  const file = path.join(dir, 'future.ent');
+  fs.writeFileSync(file, bundle);
+
+  const result = cli('check', file, '--rounds', '1');
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /되돌리기 경고\s+1개/);
+  assert.match(result.output, /되돌리기 경고.*왕복 호환성을 보장할 수 없음/);
+  assert.doesNotMatch(result.output, /\bOK\b/);
+});
+
 test('문법 에러는 그대로 위치와 함께 알려 준다', (t) => {
   const dir = project(t, { 'main.etp': 'object "o":\n  when start do\n    x +=\n' });
   const result = cli('check', path.join(dir, 'main.etp'));
@@ -154,13 +172,13 @@ const LOOSE_PROJECT = `scene "s":
   end
 end`;
 
-test('build 는 에러가 있어도 그 문장만 빼고 내보낸다', (t) => {
+test('--no-strict build 는 에러가 있어도 그 문장만 빼고 내보낸다', (t) => {
   const dir = project(t, { 'main.etp': LOOSE_PROJECT });
   const outPath = path.join(dir, 'out.json');
 
-  const result = cli('build', path.join(dir, 'main.etp'), '-o', outPath);
+  const result = cli('build', path.join(dir, 'main.etp'), '-o', outPath, '--no-strict');
   assert.equal(result.code, 0);
-  assert.match(result.output, /--strict 를 붙이면 여기서 멈춥니다/);
+  assert.match(result.output, /--no-strict 를 썼기 때문에 계속 진행합니다/);
 
   // Loose mode drops only the failed jump and keeps the later movement.
   const built = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
@@ -168,11 +186,11 @@ test('build 는 에러가 있어도 그 문장만 빼고 내보낸다', (t) => {
   assert.deepEqual(types, ['when_run_button_click', 'move_x']);
 });
 
-test('--strict 는 에러가 있으면 아무것도 내보내지 않는다', (t) => {
+test('기본 strict 는 에러가 있으면 아무것도 내보내지 않는다', (t) => {
   const dir = project(t, { 'main.etp': LOOSE_PROJECT });
   const outPath = path.join(dir, 'out.json');
 
-  const result = cli('build', path.join(dir, 'main.etp'), '-o', outPath, '--strict');
+  const result = cli('build', path.join(dir, 'main.etp'), '-o', outPath);
   assert.equal(result.code, 1);
   assert.match(result.output, /내보낼 수 없습니다/);
   assert.equal(fs.existsSync(outPath), false);
@@ -187,16 +205,16 @@ const MISSING_COSTUME = `scene "s":
   end
 end`;
 
-test('없는 모양은 주의로 알리고 check 를 통과시킨다', (t) => {
+test('기본 strict 는 주의를 경고로 올리고 --no-strict 는 주의로 남긴다', (t) => {
   const dir = project(t, { 'main.etp': MISSING_COSTUME });
 
-  const loose = cli('check', path.join(dir, 'main.etp'));
+  const loose = cli('check', path.join(dir, 'main.etp'), '--no-strict');
   assert.equal(loose.code, 0);
   assert.match(loose.output, /주의 1개/);
   assert.doesNotMatch(loose.output, /경고 1개/);
 
   // Strict mode promotes notices to warnings without turning them into errors.
-  const strict = cli('check', path.join(dir, 'main.etp'), '--strict');
+  const strict = cli('check', path.join(dir, 'main.etp'));
   assert.equal(strict.code, 0);
   assert.match(strict.output, /경고 1개/);
   assert.doesNotMatch(strict.output, /주의 1개/);

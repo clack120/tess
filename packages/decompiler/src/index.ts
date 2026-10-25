@@ -125,6 +125,24 @@ export function decompileProject(
   entries: TarEntry[],
   options: DecompileOptions = {},
 ): DecompileResult {
+  try {
+    return decompileProjectUnchecked(project, entries, options);
+  } catch (error) {
+    if (error instanceof RangeError && /call stack/i.test(error.message)) {
+      throw new Error(
+        'Entry 블록 구조가 너무 깊게 중첩되어 안전하게 .etp로 되돌릴 수 없습니다. '
+        + '중첩된 값·조건·제어 블록을 함수나 여러 스크립트로 나눈 뒤 다시 시도하세요.',
+      );
+    }
+    throw error;
+  }
+}
+
+function decompileProjectUnchecked(
+  project: RawEntity,
+  entries: TarEntry[],
+  options: DecompileOptions,
+): DecompileResult {
   const ctx = buildContext(project, entries, options);
 
   const lines: string[] = [];
@@ -192,18 +210,21 @@ function collectHardcodedIds(node: unknown, ctx: DecompileContext) {
 }
 
 function resourceIdsIn(node: unknown, ctx: DecompileContext, found = new Set<string>()): Set<string> {
-  if (Array.isArray(node)) {
-    node.forEach((child) => resourceIdsIn(child, ctx, found));
-    return found;
+  const pending = [node];
+  while (pending.length) {
+    const value = pending.pop();
+    if (Array.isArray(value)) {
+      pending.push(...value);
+      continue;
+    }
+    if (!value || typeof value !== 'object') continue;
+    const block = value as RawBlock;
+    if (block.type !== undefined && ID_HOLDING_BLOCKS.has(block.type) && typeof block.params?.[0] === 'string') {
+      const raw = block.params[0];
+      if (ctx.picturesById.has(raw) || ctx.soundsById.has(raw)) found.add(raw);
+    }
+    pending.push(...(block.params ?? []), ...(block.statements ?? []));
   }
-  if (!node || typeof node !== 'object') return found;
-  const block = node as RawBlock;
-  if (block.type !== undefined && ID_HOLDING_BLOCKS.has(block.type) && typeof block.params?.[0] === 'string') {
-    const raw = block.params[0];
-    if (ctx.picturesById.has(raw) || ctx.soundsById.has(raw)) found.add(raw);
-  }
-  for (const param of block.params ?? []) resourceIdsIn(param, ctx, found);
-  for (const branch of block.statements ?? []) resourceIdsIn(branch, ctx, found);
   return found;
 }
 
@@ -227,23 +248,26 @@ function variableIdsIn(
   node: unknown,
   found: VariableIds = { variables: new Set(), lists: new Set() },
 ): VariableIds {
-  if (Array.isArray(node)) {
-    node.forEach((child) => variableIdsIn(child, found));
-    return found;
+  const pending = [node];
+  while (pending.length) {
+    const value = pending.pop();
+    if (Array.isArray(value)) {
+      pending.push(...value);
+      continue;
+    }
+    if (!value || typeof value !== 'object') continue;
+    const block = value as RawBlock;
+    const buckets: Array<[Map<string, number>, Set<string>]> = [
+      [VARIABLE_SLOTS, found.variables], [LIST_SLOTS, found.lists],
+    ];
+    for (const [slots, bucket] of buckets) {
+      const index = slots.get(block.type ?? '');
+      if (index === undefined) continue;
+      const id = block.params?.[index];
+      if (typeof id === 'string' && id) bucket.add(id);
+    }
+    pending.push(...(block.params ?? []), ...(block.statements ?? []));
   }
-  if (!node || typeof node !== 'object') return found;
-  const block = node as RawBlock;
-  const buckets: Array<[Map<string, number>, Set<string>]> = [
-    [VARIABLE_SLOTS, found.variables], [LIST_SLOTS, found.lists],
-  ];
-  for (const [slots, bucket] of buckets) {
-    const index = slots.get(block.type ?? '');
-    if (index === undefined) continue;
-    const id = block.params?.[index];
-    if (typeof id === 'string' && id) bucket.add(id);
-  }
-  for (const param of block.params ?? []) variableIdsIn(param, found);
-  for (const branch of block.statements ?? []) variableIdsIn(branch, found);
   return found;
 }
 

@@ -145,14 +145,63 @@ function placeholder(ctx: DecompileContext, block: RawBlock | undefined): string
   return `"[decompile: ${type}]"`;
 }
 
+class PendingExpression {
+  readonly block: RawBlock;
+  constructor(block: RawBlock) {
+    this.block = block;
+  }
+}
+
+// Evaluate nested reporters with an explicit stack. Real Entry projects can
+// contain expression trees deeper than the JavaScript call stack even though
+// Entropy's VM itself has no such limit.
 export function exprOf(block: any, ctx: DecompileContext): string {
+  const immediate = immediateExpression(block);
+  if (immediate !== null) return immediate;
+
+  const values = new WeakMap<object, string>();
+  const active = new WeakSet<object>();
+  const pending: RawBlock[] = [block];
+  active.add(block);
+  while (pending.length) {
+    const current = pending[pending.length - 1]!;
+    const read = (child: any): string => {
+      const ready = immediateExpression(child);
+      if (ready !== null) return ready;
+      if (values.has(child)) return values.get(child)!;
+      if (active.has(child)) throw new Error('Entry 값 블록 구조가 자기 자신을 가리킵니다.');
+      throw new PendingExpression(child);
+    };
+    try {
+      values.set(current, renderExpression(current, ctx, read));
+      active.delete(current);
+      pending.pop();
+    } catch (error) {
+      if (!(error instanceof PendingExpression)) throw error;
+      active.add(error.block);
+      pending.push(error.block);
+    }
+  }
+  return values.get(block)!;
+}
+
+function immediateExpression(block: any): string | null {
   if (block === null || block === undefined) return EMPTY;
   if (typeof block === 'string') return entropyString(block);
   if (typeof block === 'number') return entropyNumber(block);
   if (typeof block !== 'object' || !block.type) return EMPTY;
+  return null;
+}
+
+function renderExpression(
+  block: any,
+  ctx: DecompileContext,
+  read: (block: any) => string,
+): string {
 
   const p = block.params ?? [];
   const at = (i: number) => p[i];
+  const condition = (value: any) => value === null || value === undefined ? 'false' : read(value);
 
   switch (block.type) {
     // Preserve literal text such as leading zeros instead of converting it to a number.
@@ -176,16 +225,16 @@ export function exprOf(block: any, ctx: DecompileContext): string {
     }
     case 'get_x_coordinate': return 'x';
     case 'get_y_coordinate': return 'y';
-    case 'calc_mod': return `(${exprOf(at(0), ctx)} % ${exprOf(at(2), ctx)})`;
-    case 'calc_share': return `(${exprOf(at(0), ctx)} // ${exprOf(at(2), ctx)})`;
+    case 'calc_mod': return `(${read(at(0))} % ${read(at(2))})`;
+    case 'calc_share': return `(${read(at(0))} // ${read(at(2))})`;
     // Legacy arithmetic reads both operands as numbers, so + never concatenates.
-    case 'calc_plus': return `(${exprOf(at(0), ctx)} + ${exprOf(at(2), ctx)})`;
-    case 'calc_minus': return `(${exprOf(at(0), ctx)} - ${exprOf(at(2), ctx)})`;
-    case 'calc_times': return `(${exprOf(at(0), ctx)} * ${exprOf(at(2), ctx)})`;
-    case 'calc_divide': return `(${exprOf(at(0), ctx)} / ${exprOf(at(2), ctx)})`;
-    case 'boolean_equal': return `(${exprOf(at(0), ctx)} == ${exprOf(at(2), ctx)})`;
-    case 'boolean_bigger': return `(${exprOf(at(0), ctx)} > ${exprOf(at(2), ctx)})`;
-    case 'boolean_smaller': return `(${exprOf(at(0), ctx)} < ${exprOf(at(2), ctx)})`;
+    case 'calc_plus': return `(${read(at(0))} + ${read(at(2))})`;
+    case 'calc_minus': return `(${read(at(0))} - ${read(at(2))})`;
+    case 'calc_times': return `(${read(at(0))} * ${read(at(2))})`;
+    case 'calc_divide': return `(${read(at(0))} / ${read(at(2))})`;
+    case 'boolean_equal': return `(${read(at(0))} == ${read(at(2))})`;
+    case 'boolean_bigger': return `(${read(at(0))} > ${read(at(2))})`;
+    case 'boolean_smaller': return `(${read(at(0))} < ${read(at(2))})`;
     // Entry resolves FIRST, LAST, and RANDOM in list index slots.
     case 'options_for_list': return entropyString(String(at(0) ?? 'FIRST'));
 
@@ -197,45 +246,57 @@ export function exprOf(block: any, ctx: DecompileContext): string {
     case 'calc_basic': {
       const op = REVERSE_ARITHMETIC[at(1)];
       if (!op) return placeholder(ctx, block);
-      return `(${exprOf(at(0), ctx)} ${op} ${exprOf(at(2), ctx)})`;
+      return `(${read(at(0))} ${op} ${read(at(2))})`;
     }
     case 'quotient_and_mod': {
       const op = at(5) === 'MOD' ? '%' : '//';
-      return `(${exprOf(at(1), ctx)} ${op} ${exprOf(at(3), ctx)})`;
+      return `(${read(at(1))} ${op} ${read(at(3))})`;
     }
-    case 'calc_rand': return `random(${exprOf(at(1), ctx)}, ${exprOf(at(3), ctx)})`;
+    case 'calc_rand': return `random(${read(at(1))}, ${read(at(3))})`;
     case 'calc_operation': {
       const op = at(3);
-      if (op === 'square') return `(${exprOf(at(1), ctx)} ** 2)`;
-      if (op === 'root') return `(${exprOf(at(1), ctx)} ** 0.5)`;
+      if (op === 'square') return `(${read(at(1))} ** 2)`;
+      if (op === 'root') return `(${read(at(1))} ** 0.5)`;
       // Use decimal subtraction for fractional parts; modulo introduces binary rounding errors.
       if (op === 'unnatural') {
-        const value = `abs(${exprOf(at(1), ctx)})`;
+        const value = `abs(${read(at(1))})`;
         return `(${value} - floor(${value}))`;
       }
       // Entry treats unknown rounding operators as round.
       const fn = REVERSE_MATH[op as string] ?? 'round';
-      return `${fn}(${exprOf(at(1), ctx)})`;
+      return `${fn}(${read(at(1))})`;
     }
 
     case 'boolean_basic_operator': {
       const op = REVERSE_COMPARE[at(1)];
       if (!op) return placeholder(ctx, block);
       if (isStoreFlagTest(block, ctx)) return 'can_save';
-      return `(${exprOf(at(0), ctx)} ${op} ${exprOf(at(2), ctx)})`;
+      return `(${read(at(0))} ${op} ${read(at(2))})`;
     }
     case 'boolean_and_or': {
       // Entry applies Boolean here, so an empty side is false.
-      const side = (i: number) => at(i) == null ? 'false' : exprOf(at(i), ctx);
+      const side = (i: number) => at(i) == null ? 'false' : read(at(i));
       return `(${side(0)} ${at(1) === 'AND' ? 'and' : 'or'} ${side(2)})`;
     }
-    case 'boolean_and': return `(${conditionOf(at(0), ctx)} and ${conditionOf(at(2), ctx)})`;
-    case 'boolean_or': return `(${conditionOf(at(0), ctx)} or ${conditionOf(at(2), ctx)})`;
-    case 'boolean_not': return `not (${conditionOf(at(1), ctx)})`;
+    case 'boolean_and': return `(${condition(at(0))} and ${condition(at(2))})`;
+    case 'boolean_or': return `(${condition(at(0))} or ${condition(at(2))})`;
+    case 'boolean_not': {
+      // Native projects can accumulate thousands of nested not blocks. Emitting
+      // the same number of parentheses only moves the stack overflow into the
+      // Entropy parser, while pairs of not blocks are semantically redundant.
+      let value = at(1);
+      let negate = true;
+      while (value?.type === 'boolean_not') {
+        value = value.params?.[1];
+        negate = !negate;
+      }
+      const inner = condition(value);
+      return negate ? `not (${inner})` : inner;
+    }
     case 'True': return 'true';
     case 'False': return 'false';
     // Keep judgement expressions directly because Entropy value slots accept them.
-    case 'get_boolean_value': return `boolean_value(${conditionOf(at(0), ctx)})`;
+    case 'get_boolean_value': return `boolean_value(${condition(at(0))})`;
     case 'is_clicked': case 'is_object_clicked': case 'is_boost_mode':
     case 'is_touch_supported': case 'get_user_name': case 'get_nickname':
     case 'get_project_timer_value': case 'get_canvas_input_value':
@@ -258,16 +319,16 @@ export function exprOf(block: any, ctx: DecompileContext): string {
     case 'is_current_device_type': return `(device == ${entropyString(at(0))})`;
     case 'is_type': {
       const kind = at(2) === 'number' ? 'number' : 'string';
-      return `(type(${exprOf(at(0), ctx)}) == ${entropyString(kind)})`;
+      return `(type(${read(at(0))}) == ${entropyString(kind)})`;
     }
 
     case 'value_of_index_from_list': {
       const list = ctx.varName(at(1));
-      return `${list}[${exprOf(at(3), ctx)}]`;
+      return `${list}[${read(at(3))}]`;
     }
     case 'char_at': {
-      const index = exprOf(at(3), ctx);
-      const target = exprOf(at(1), ctx);
+      const index = read(at(3));
+      const target = read(at(1));
       if (indexableName(target, ctx)) return `${target}[${index}]`;
       const literalIndex = at(3) === null || at(3) === undefined
         || ['number', 'text'].includes((at(3) as RawBlock | undefined)?.type ?? '');
@@ -280,47 +341,47 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       return `slice(${target}, ${index}, ${index})`;
     }
     case 'length_of_list': return `length(${ctx.varName(at(1))})`;
-    case 'length_of_string': return `length(${exprOf(at(1), ctx)})`;
-    case 'is_included_in_list': return `contains(${ctx.varName(at(1))}, ${exprOf(at(3), ctx)})`;
-    case 'combine_something': return `join(${exprOf(at(1), ctx)}, ${exprOf(at(3), ctx)})`;
-    case 'substring': return `slice(${exprOf(at(1), ctx)}, ${exprOf(at(3), ctx)}, ${exprOf(at(5), ctx)})`;
-    case 'count_match_string': return `count(${exprOf(at(0), ctx)}, ${exprOf(at(2), ctx)})`;
-    case 'index_of_string': return `index_of(${exprOf(at(1), ctx)}, ${exprOf(at(3), ctx)})`;
-    case 'replace_string': return `replace(${exprOf(at(1), ctx)}, ${exprOf(at(3), ctx)}, ${exprOf(at(5), ctx)})`;
-    case 'reverse_of_string': return `reverse(${exprOf(at(1), ctx)})`;
-    case 'change_string_case': return `${at(3) === 'toUpperCase' ? 'uppercase' : 'lowercase'}(${exprOf(at(1), ctx)})`;
+    case 'length_of_string': return `length(${read(at(1))})`;
+    case 'is_included_in_list': return `contains(${ctx.varName(at(1))}, ${read(at(3))})`;
+    case 'combine_something': return `join(${read(at(1))}, ${read(at(3))})`;
+    case 'substring': return `slice(${read(at(1))}, ${read(at(3))}, ${read(at(5))})`;
+    case 'count_match_string': return `count(${read(at(0))}, ${read(at(2))})`;
+    case 'index_of_string': return `index_of(${read(at(1))}, ${read(at(3))})`;
+    case 'replace_string': return `replace(${read(at(1))}, ${read(at(3))}, ${read(at(5))})`;
+    case 'reverse_of_string': return `reverse(${read(at(1))})`;
+    case 'change_string_case': return `${at(3) === 'toUpperCase' ? 'uppercase' : 'lowercase'}(${read(at(1))})`;
     case 'get_date': {
       const unit = REVERSE_DATE_UNITS[at(1)];
       return unit ? `now(${entropyString(unit)})` : placeholder(ctx, block);
     }
-    case 'change_rgb_to_hex': return `to_hex(${exprOf(at(0), ctx)}, ${exprOf(at(1), ctx)}, ${exprOf(at(2), ctx)})`;
+    case 'change_rgb_to_hex': return `to_hex(${read(at(0))}, ${read(at(1))}, ${read(at(2))})`;
     case 'change_hex_to_rgb': {
       const channel = REVERSE_HEX_CHANNEL[at(1)];
-      return channel ? `from_hex(${exprOf(at(0), ctx)}, ${channel})` : placeholder(ctx, block);
+      return channel ? `from_hex(${read(at(0))}, ${channel})` : placeholder(ctx, block);
     }
     case 'text_read': return `text_content(${entropyString(targetName(ctx, at(0)))})`;
 
     case 'get_table_count':
       return `${String(at(1)) === 'COL' ? 'column_count' : 'row_count'}(${ctx.tableName(at(0))})`;
     case 'get_value_from_table':
-      return `${ctx.tableName(at(0))}[${exprOf(at(1), ctx)}, ${exprOf(at(2), ctx)}]`;
+      return `${ctx.tableName(at(0))}[${read(at(1))}, ${read(at(2))}]`;
     case 'get_value_from_cell':
-      return `${ctx.tableName(at(0))}[${exprOf(at(1), ctx)}]`;
+      return `${ctx.tableName(at(0))}[${read(at(1))}]`;
     // Entry stores one-based column numbers even when the dropdown displays names.
     case 'get_table_fields':
       return entropyLiteral(at(0));
     case 'get_value_from_last_row':
-      return `last_row(${ctx.tableName(at(0))}, ${exprOf(at(1), ctx)})`;
+      return `last_row(${ctx.tableName(at(0))}, ${read(at(1))})`;
     case 'calc_values_from_table': {
       const calc = TABLE_CALCULATION_NAMES[String(at(2))];
       if (!calc) return placeholder(ctx, block);
-      return `${calc}(${ctx.tableName(at(0))}, ${exprOf(at(1), ctx)})`;
+      return `${calc}(${ctx.tableName(at(0))}, ${read(at(1))})`;
     }
     case 'get_coefficient':
-      return `correlation(${ctx.tableName(at(0))}, ${exprOf(at(1), ctx)}, ${exprOf(at(2), ctx)})`;
+      return `correlation(${ctx.tableName(at(0))}, ${read(at(1))}, ${read(at(2))})`;
     case 'get_value_v_lookup':
-      return `lookup(${ctx.tableName(at(0))}, ${exprOf(at(1), ctx)}, `
-        + `${exprOf(at(2), ctx)}, ${exprOf(at(3), ctx)})`;
+      return `lookup(${ctx.tableName(at(0))}, ${read(at(1))}, `
+        + `${read(at(2))}, ${read(at(3))})`;
 
     case 'get_pictures': return resourceRef(ctx, at(0), ctx.picturesById, ctx.pictureName);
     case 'get_sounds': return resourceRef(ctx, at(0), ctx.soundsById, ctx.soundName);
@@ -333,7 +394,7 @@ export function exprOf(block: any, ctx: DecompileContext): string {
       const expansion = expansionBlock(block.type);
       if (expansion) {
         const args = expansion.slots.map((slot, i) => (slot === 'value'
-          ? exprOf(at(i), ctx)
+          ? read(at(i))
           : entropyString(String(at(i) ?? ''))));
         return `${block.type}(${args.join(', ')})`;
       }
@@ -352,7 +413,7 @@ export function exprOf(block: any, ctx: DecompileContext): string {
         const fn = ctx.functionsById.get(block.type.slice('func_'.length));
         if (fn) {
           const args = p.filter((_: unknown, i: number) => i < fn.params.length)
-            .map((param: unknown) => exprOf(param, ctx));
+            .map((param: unknown) => read(param));
           return `${fn.name}(${args.join(', ')})`;
         }
       }

@@ -172,6 +172,8 @@ test('TAR 은 긴 경로·gzip·pax 이름을 읽고 쓴다', async () => {
   for (const bytes of [tar, zlib.gzipSync(tar)]) {
     const entries = await readTar(bytes);
     assert.deepEqual(entries.map((e) => [e.name, e.data.length]), [[long, 1], ['temp/한글.json', 513]]);
+    assert.strictEqual(entries[0]!.data.buffer, entries[1]!.data.buffer,
+      '큰 .ent 자산을 항목마다 다시 복사하지 않는다');
   }
   // A pax header names the following entry.
   const record = (text: string) => { let n = text.length + 3; n = `${n} ${text}\n`.length; return `${n} ${text}\n`; };
@@ -182,4 +184,10 @@ test('TAR 은 긴 경로·gzip·pax 이름을 읽고 쓴다', async () => {
   parts.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 'ascii');
   assert.deepEqual((await readTar(parts)).map((e) => e.name), [`${long}/c.png`]);
   assert.throws(() => makeTar([{ name: `${'c'.repeat(200)}/x`, data: Buffer.alloc(0) }]), /너무 깁니다/);
+});
+
+test('TAR 크기 필드가 손상되면 엉뚱한 빈 묶음으로 읽지 않는다', async () => {
+  const tar = makeTar([{ name: 'temp/project.json', data: Buffer.from('{}') }]);
+  tar.write('not-octal\0', 124, 'ascii');
+  await assert.rejects(readTar(tar), /크기 값.*올바른 8진수/);
 });

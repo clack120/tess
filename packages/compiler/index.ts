@@ -13,6 +13,7 @@ export function loadProgram(input: Parameters<typeof load>[0]) {
 }
 
 export { createCompileCache } from "./src/index.ts";
+export { ENTRY_PROJECT_JSON_LIMIT } from "./src/index.ts";
 export { NODE_HOST } from "./src/node-host.ts";
 export type { CompilerHost } from "./src/host.ts";
 export { makeEntryBundle, makeTar } from "./src/bundle.ts";

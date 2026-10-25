@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { stripTypes } from '@entropy/core/strip-types';
+import { compactLargeProject, PROJECT_JSON_LIMIT } from '../packages/extension/src/page/project-compact.ts';
 
 const test = 'Bun' in globalThis ? nodeTest.skip : nodeTest;
 
@@ -39,6 +40,8 @@ async function setup(t: any, delay = false) {
       { ...picture, fileurl: 'normalized' })) },
   })) });
   w.signedInUser = () => null;
+  w.compactLargeProject = compactLargeProject;
+  w.PROJECT_JSON_LIMIT = PROJECT_JSON_LIMIT;
   w.loadModule = async (specifier: string) => {
     if (specifier.endsWith('boot.ts')) return { boot: async (options: any) => {
       boots.push(options); await gate;
@@ -155,6 +158,38 @@ test('editor reuses Entry autosave export instead of exporting a large changed w
   await new Promise(resolve => setTimeout(resolve, 650)); await s.settle();
   assert.equal(s.counts().exports, 2, 'Entropy preparation reuses the autosave result');
   assert.equal(s.reloads.length, 1);
+});
+
+test('large editor exports compact with the VM disabled and leave the editable data untouched', async t => {
+  const s = await setup(t);
+  s.configure(false); await s.settle();
+  const blocks = [[{ id: 'hat', type: 'when_run_button_click', x: 17, y: 29, params: [], statements: [],
+    movable: null, deletable: 1, emphasized: false, readOnly: null, copyable: true, assemble: true, extensions: [] }]];
+  (s.work.objects[0] as any).script = JSON.stringify(blocks);
+  const before = JSON.stringify(s.work);
+  s.w.compactLargeProject = (work: unknown) => compactLargeProject(work, 1);
+  const exported = s.w.Entry.exportProject();
+  assert.notStrictEqual(exported, s.work);
+  assert.deepEqual(JSON.parse(exported.objects[0].script), [[{ id: 'hat', type: 'when_run_button_click', x: 17, y: 29 }]]);
+  assert.equal(JSON.stringify(s.work), before);
+  assert.deepEqual(exported.variables, s.work.variables);
+  s.w.Entry.type = 'minimize'; s.configure(false);
+  assert.strictEqual(s.w.Entry.exportProject(), s.work, 'leaving the editor restores its original export');
+});
+
+test('editor reattaches export handling when Entry replaces the method in place', async t => {
+  const s = await setup(t);
+  s.configure(false); await s.settle();
+  let calls = 0;
+  const replacement = () => { calls++; return s.work; };
+  s.w.Entry.exportProject = replacement;
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.notStrictEqual(s.w.Entry.exportProject, replacement);
+  assert.strictEqual(s.w.Entry.exportProject(), s.work);
+  assert.equal(calls, 1);
+  s.w.Entry.type = 'minimize';
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.strictEqual(s.w.Entry.exportProject, replacement, 'the newest native method is restored');
 });
 
 test('ordinary editor changes keep the same cloud connection', async t => {

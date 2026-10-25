@@ -10,6 +10,23 @@ import { safeIdentifier } from '../packages/decompiler/src/ident.ts';
 
 const utf8 = (data: Uint8Array) => new TextDecoder('utf-8').decode(data);
 
+test('very deep Entry reporter blocks still unfold into editable Entropy source', () => {
+  const depth = 4_000;
+  const open = Array.from({ length: depth }, (_, index) =>
+    `{"id":"deep-${index}","type":"boolean_not","params":[null,`).join('');
+  const leaf = '{"id":"leaf","type":"True","params":[null],"statements":[]}';
+  const project = minimalProject();
+  const value = `${open}${leaf}${'],"statements":[]}'.repeat(depth)}`;
+  const hat = '{"type":"when_run_button_click","params":[null],"statements":[]}';
+  const say = `{"type":"dialog","params":[${value},"speak",null],"statements":[]}`;
+  project.objects[0].script = `[[${hat},${say}]]`;
+  const source = decompileProject(project, [], { inline: true }).source;
+  assert.match(source, /say true/);
+  const compiled = compileProject(source);
+  assert.deepEqual(compiled.errors, []);
+  assert.ok(compiled.project);
+});
+
 test('many colliding names advance their suffix instead of rescanning from two', () => {
   const used = new Set(['same_2', 'same_4']);
   assert.equal(safeIdentifier('same', used), 'same');

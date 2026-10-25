@@ -2,6 +2,7 @@ import type { EntropyHandle } from '../../../vm/src/web/boot.ts';
 import type { CloudClient } from './cloud.ts';
 import { withAssetUrls, type EntryWork } from './entry-project.ts';
 import { signedInUser } from './signed-in.ts';
+import { compactLargeProject, PROJECT_JSON_LIMIT } from './project-compact.ts';
 
 interface Editor {
   type: string;
@@ -45,6 +46,44 @@ let preparingTimer: ReturnType<typeof setTimeout> | undefined;
 let dirty = true;
 let editRevision = 0;
 let cachedExport: { entry: Editor; revision: number; work: EntryWork } | null = null;
+let exportingEntry: Editor | null = null;
+let wrappedExport: Editor['exportProject'] | null = null;
+let restoreExport: (() => void) | null = null;
+
+function observeExport(entry: Editor | undefined): void {
+  if (exportingEntry === entry && entry?.type === 'workspace' && entry.exportProject === wrappedExport) return;
+  restoreExport?.(); restoreExport = null; exportingEntry = null; wrappedExport = null;
+  if (entry?.type !== 'workspace' || typeof entry.exportProject !== 'function') return;
+  const original = entry.exportProject;
+  const observed = function(this: Editor, ...args: unknown[]) {
+    let work = Reflect.apply(original, this, args) as EntryWork | false;
+    if (work) {
+      try {
+        const result = compactLargeProject(work);
+        work = result.project;
+        if (result.beforeBytes > PROJECT_JSON_LIMIT) {
+          const message = `[Entropy] 저장 JSON 축약: ${result.beforeBytes.toLocaleString()} → ${result.afterBytes.toLocaleString()} bytes`;
+          if (result.afterBytes > PROJECT_JSON_LIMIT) console.warn(`${message} (16,700,000 bytes 한도 초과)`);
+          else console.info(message);
+        }
+      } catch (error) {
+        // Preserve native saving if a future Entry format cannot be compacted,
+        // but leave enough evidence to diagnose an over-limit save failure.
+        console.warn('[Entropy] 저장 JSON을 축약하지 못해 원본을 사용합니다', error);
+      }
+      cachedExport = { entry, revision: editRevision, work };
+    }
+    return work;
+  };
+  try { entry.exportProject = observed; } catch { return; }
+  if (entry.exportProject !== observed) return;
+  exportingEntry = entry;
+  wrappedExport = observed;
+  restoreExport = () => {
+    try { if (entry.exportProject === observed) entry.exportProject = original; } catch {}
+    if (cachedExport?.entry === entry) cachedExport = null;
+  };
+}
 
 function finish(): void {
   const old = active;
@@ -250,21 +289,13 @@ function browse(entry: Editor): () => void {
 }
 
 function attach(entry: Editor): void {
+  cachedExport = null; // Edits made while the VM was disabled did not advance editRevision.
   const engine = entry.engine;
   const originals = new Map<string, (...args: any[]) => any>();
   const patch = (name: string, replacement: (...args: any[]) => any) => {
     originals.set(name, engine[name]); engine[name] = replacement;
   };
   const originalRun = engine.toggleRun, originalStop = engine.toggleStop, originalPause = engine.togglePause;
-  const originalExport = entry.exportProject;
-  const observedExport = function(this: Editor, ...args: unknown[]) {
-    const work = Reflect.apply(originalExport, this, args) as EntryWork | false;
-    if (work) cachedExport = { entry, revision: editRevision, work };
-    return work;
-  };
-  // Keep the original path as a fallback if a future Entry release makes this
-  // method non-writable. The optimization is optional; editor execution is not.
-  try { entry.exportProject = observedExport; } catch {}
   for (const name of ['update', 'computeFunction', 'raiseEvent', 'raiseKeyEvent', 'raiseEventOnEntity']) {
     if (typeof engine[name] !== 'function') continue;
     const original = engine[name];
@@ -330,7 +361,6 @@ function attach(entry: Editor): void {
   restore = () => {
     clearTimeout(preparingTimer); changed?.destroy();
     for (const [name, original] of originals) engine[name] = original;
-    try { if (entry.exportProject === observedExport) entry.exportProject = originalExport; } catch {}
     if (cachedExport?.entry === entry) cachedExport = null;
     restartTicker();
   };
@@ -341,6 +371,7 @@ function attach(entry: Editor): void {
 
 function reconcile(): void {
   const entry = (window as Window & { Entry?: Editor }).Entry;
+  observeExport(entry); // Save compaction also works with the VM toggle disabled.
   if (attached && (!settings.enabled || attached !== entry || attachedEngine !== entry?.engine || entry?.type !== 'workspace')) {
     if (active) void attachedEngine?.toggleStop();
     restore?.(); discard(); restore = null; attached = null; attachedEngine = null;

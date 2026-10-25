@@ -2,6 +2,7 @@ export { parse, parseOrThrow, check, validate } from "@entropy/parser";
 export {
   compileProject,
   createCompileCache,
+  ENTRY_PROJECT_JSON_LIMIT,
   makeEntryBundle,
   makeTar,
   verifyEntryProject,
@@ -74,7 +75,7 @@ const USAGE = `사용법
   -o, --out <경로>   출력 파일 또는 폴더를 지정합니다.
                      - build 명령 시: 확장자가 .json이면 project.json으로,
                        .ent이면 tar 묶음으로 저장합니다.
-                     - decompile 명령 시: 폴더를 생성하여 main.entropy와 에셋을 저장합니다.
+                     - decompile 명령 시: 폴더를 생성하여 main.etp와 에셋을 저장합니다.
                        (기본값: <파일 이름>_entropy/)
   --assets <폴더>    모양 및 소리 파일을 검색할 폴더를 지정합니다. (여러 번 지정 가능)
   --name <이름>      작품 이름을 지정합니다. (기본값: project 블록의 title)
@@ -91,9 +92,8 @@ const USAGE = `사용법
   --boost            엔트리 실행기(--entry)를 WebGL 렌더러로 돌립니다.
                      Entropy는 늘 WebGL 이라 '부스트 모드인가?' 가 언제나 참이고,
                      이 옵션과 상관이 없습니다. (build 명령에는 적용되지 않습니다.)
-  --strict           느슨한 실행을 끕니다. 컴파일 에러가 하나라도 있으면 build/run을
-                     중단하고, '주의'로 알리던 것을 '경고'로 올려서 보여줍니다.
-                     (기본값은 느슨한 실행입니다 — 에러가 난 문장만 빼고 진행합니다.)
+  --no-strict        느슨한 실행을 켭니다. 에러가 난 문장만 빼고 build/run을 계속하고,
+                     '주의'를 경고로 올리지 않습니다. 기본값은 strict 입니다.
   --rounds <횟수>    .ent check 왕복 검사 횟수 (1~10, 기본 3)
   --warnings         decompile 명령 시 변환하지 못한 부분을 콘솔에 출력하여 알려줍니다.
                      (기본적으로는 소스 내에 '# [decompile]' 주석으로만 남깁니다.)
@@ -102,7 +102,9 @@ const USAGE = `사용법
   --keep-svg         decompile 명령 시 SVG 모양을 PNG로 대체하지 않고 원본 그대로 유지합니다.`;
 
 function parseArgs(argv: string[]) {
-  const options: CliOptions = { assets: [] };
+  // The CLI favors reproducible output. Library callers still opt into strict
+  // mode explicitly, while command-line users can request recovery as needed.
+  const options: CliOptions = { assets: [], strict: true };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -126,6 +128,7 @@ function parseArgs(argv: string[]) {
     else if (arg === "--sizes") options.sizes = true;
     else if (arg === "--keep-svg") options.keepSvg = true;
     else if (arg === "--strict") options.strict = true;
+    else if (arg === "--no-strict") options.strict = false;
     else if (arg === "--rounds") options.rounds = Number(argv[++i]);
     else rest.push(arg!);
   }
@@ -268,6 +271,10 @@ async function runEntCheck(file: string, options: CliOptions): Promise<number> {
     ['원본 스키마 주의', `${originalProblems.length}개${originalProblems.length ? ' (왕복 결과에서 정리됨)' : ''}`],
     ['Entry 스키마', '문제 없음'],
   ]), '요약');
+  if (decompileWarnings > 0) {
+    out.outro(out.red(`${path.basename(file)}: 되돌리기 경고가 있어 왕복 호환성을 보장할 수 없음`));
+    return 1;
+  }
   out.outro(`${out.green('OK')}  ${path.basename(file)}`);
   return 0;
 }
@@ -318,7 +325,7 @@ async function runBuild(file: string, options: CliOptions): Promise<number> {
     }
     out.log.warn(
       `에러 ${result.errors.length}개가 난 문장을 빼고 내보냅니다. `
-        + `--strict 를 붙이면 여기서 멈춥니다.`,
+        + `--no-strict 를 썼기 때문에 계속 진행합니다.`,
     );
   }
 
@@ -423,7 +430,7 @@ async function runProject(
     }
     out.log.warn(
       `에러 ${result.errors.length}개가 난 문장을 빼고 실행합니다. `
-        + `--strict 를 붙이면 여기서 멈춥니다.`,
+        + `--no-strict 를 썼기 때문에 계속 진행합니다.`,
     );
   }
 

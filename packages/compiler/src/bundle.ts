@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { Readable, Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import zlib from 'node:zlib';
 import type { AssetFile, EntryProject } from './types.ts';
 
@@ -60,18 +62,40 @@ export async function makeEntryBundle(
   project: EntryProject,
   assets: AssetFile[] = [],
 ): Promise<Buffer> {
-  const entries: TarEntry[] = [{
-    name: 'temp/project.json',
-    data: Buffer.from(JSON.stringify(project), 'utf-8'),
-  }];
+  const mtime = new Date();
+  const projectData = Buffer.from(JSON.stringify(project), 'utf-8');
+  const chunks: Buffer[] = [];
 
-  // Entry loads works without thumb/ copies, so only the original images are packed.
-  const packed = new Set<string>();
-  for (const asset of assets) {
-    if (packed.has(asset.target)) continue;
-    packed.add(asset.target);
-    entries.push({ name: asset.target, data: fs.readFileSync(asset.source) });
+  async function* tarChunks(): AsyncGenerator<Buffer> {
+    yield header('temp/project.json', projectData.length, mtime);
+    yield projectData;
+    yield padding(projectData.length);
+
+    // Entry loads works without thumb/ copies, so only the original images are packed.
+    const packed = new Set<string>();
+    for (const asset of assets) {
+      if (packed.has(asset.target)) continue;
+      packed.add(asset.target);
+      const size = fs.statSync(asset.source).size;
+      yield header(asset.target, size, mtime);
+      for await (const chunk of fs.createReadStream(asset.source)) yield chunk as Buffer;
+      yield padding(size);
+    }
+    yield Buffer.alloc(BLOCK_SIZE * 2);
   }
-  // Entry saves .ent as tar.gz; level 9 took at most ~4 s on a 216 MB work.
-  return zlib.gzipSync(makeTar(entries), { level: 9 });
+
+  // Stream the TAR through gzip so large assets are never duplicated into one
+  // uncompressed archive in memory. The returned compressed .ent is the only
+  // complete bundle retained by this API.
+  await pipeline(
+    Readable.from(tarChunks()),
+    zlib.createGzip({ level: 9 }),
+    new Writable({
+      write(chunk: Buffer, _encoding, done) {
+        chunks.push(Buffer.from(chunk));
+        done();
+      },
+    }),
+  );
+  return Buffer.concat(chunks);
 }

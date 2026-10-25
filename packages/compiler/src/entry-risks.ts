@@ -26,41 +26,53 @@ function diagnoseRecursion(ctx: Context): void {
     graph.set(fn.name, { node: fn.node, edges });
   }
 
-  let nextIndex = 0;
-  const indexes = new Map<string, number>();
-  const lowLinks = new Map<string, number>();
-  const stack: string[] = [];
-  const active = new Set<string>();
-
-  const connect = (name: string): void => {
-    indexes.set(name, nextIndex);
-    lowLinks.set(name, nextIndex);
-    nextIndex += 1;
-    stack.push(name);
-    active.add(name);
-
-    for (const target of graph.get(name)?.edges.keys() ?? []) {
-      if (!graph.has(target)) continue;
-      if (!indexes.has(target)) {
-        connect(target);
-        lowLinks.set(name, Math.min(lowLinks.get(name)!, lowLinks.get(target)!));
-      } else if (active.has(target)) {
-        lowLinks.set(name, Math.min(lowLinks.get(name)!, indexes.get(target)!));
+  // Find strongly connected components without recursive DFS. A generated work
+  // can contain thousands of functions in a straight call chain, which should
+  // not overflow the compiler's own JavaScript stack while checking recursion.
+  const finished: string[] = [];
+  const visited = new Set<string>();
+  for (const root of graph.keys()) {
+    if (visited.has(root)) continue;
+    const pending: Array<{ name: string; finish: boolean }> = [{ name: root, finish: false }];
+    while (pending.length) {
+      const step = pending.pop()!;
+      if (step.finish) {
+        finished.push(step.name);
+        continue;
+      }
+      if (visited.has(step.name)) continue;
+      visited.add(step.name);
+      pending.push({ name: step.name, finish: true });
+      const targets = [...(graph.get(step.name)?.edges.keys() ?? [])];
+      for (let index = targets.length - 1; index >= 0; index -= 1) {
+        const target = targets[index]!;
+        if (graph.has(target) && !visited.has(target)) pending.push({ name: target, finish: false });
       }
     }
+  }
 
-    if (lowLinks.get(name) !== indexes.get(name)) return;
+  const reverse = new Map([...graph.keys()].map((name) => [name, [] as string[]]));
+  for (const [from, calls] of graph) {
+    for (const to of calls.edges.keys()) if (graph.has(to)) reverse.get(to)!.push(from);
+  }
+  const assigned = new Set<string>();
+  for (let index = finished.length - 1; index >= 0; index -= 1) {
+    const root = finished[index]!;
+    if (assigned.has(root)) continue;
     const component: string[] = [];
-    while (stack.length) {
-      const member = stack.pop()!;
-      active.delete(member);
-      component.push(member);
-      if (member === name) break;
+    const pending = [root];
+    assigned.add(root);
+    while (pending.length) {
+      const name = pending.pop()!;
+      component.push(name);
+      for (const previous of reverse.get(name) ?? []) {
+        if (assigned.has(previous)) continue;
+        assigned.add(previous);
+        pending.push(previous);
+      }
     }
     reportRecursiveComponent(component, graph, ctx);
-  };
-
-  for (const name of graph.keys()) if (!indexes.has(name)) connect(name);
+  }
 }
 
 function reportRecursiveComponent(
@@ -74,9 +86,13 @@ function reportRecursiveComponent(
   if (!recursive) return;
 
   const first = calls[0]?.node ?? graph.get(component[0]!)!.node;
+  const ordered = component.slice().reverse();
+  const cycle = ordered.length <= 6
+    ? ordered.join(' → ')
+    : `${ordered.slice(0, 6).join(' → ')} → … 외 ${ordered.length - 6}개`;
   const names = component.length === 1
     ? `'${component[0]}' 함수`
-    : `함수 순환(${component.slice().reverse().join(' → ')})`;
+    : `함수 순환(${cycle})`;
   ctx.warn(
     first,
     `${names}이(가) 재귀 호출됩니다. 깊이가 입력에 따라 커지면 Entry 원 실행기에서 작품 전체가 멈출 수 있습니다.`,

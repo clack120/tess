@@ -158,17 +158,21 @@ function parkedStatement(param: unknown): RawBlock | null {
 
 // Keep carriers with other side effects because Entry evaluates every input slot.
 function inertValue(param: unknown): boolean {
-  if (param === null || param === undefined || typeof param !== "object")
-    return true;
-  const block = param as RawBlock;
-  if ((block.statements?.length ?? 0) > 0) return false;
-  if (block.type?.startsWith("func_") || block.type === "calc_rand") return false;
-  if (
-    block.type === "function_field_string" ||
-    block.type === "function_field_boolean"
-  )
-    return false;
-  return (block.params ?? []).every(inertValue);
+  const pending = [param];
+  while (pending.length) {
+    const value = pending.pop();
+    if (value === null || value === undefined || typeof value !== "object") continue;
+    const block = value as RawBlock;
+    if ((block.statements?.length ?? 0) > 0) return false;
+    if (block.type?.startsWith("func_") || block.type === "calc_rand") return false;
+    if (
+      block.type === "function_field_string" ||
+      block.type === "function_field_boolean"
+    )
+      return false;
+    pending.push(...(block.params ?? []));
+  }
+  return true;
 }
 
 export function carriedTrick(block: RawBlock | undefined): string | null {

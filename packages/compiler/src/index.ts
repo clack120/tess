@@ -29,6 +29,10 @@ export { createCompileCache };
 const DEFAULT_SCENE_NAME = '장면 1';
 // Entry's font-family is Nanum Gothic; the Korean label has no matching font face.
 const DEFAULT_FONT = 'Nanum Gothic';
+// A compact 16,737,823-byte project was saved successfully, while the next byte
+// failed on the tested Entry server path. Keep a little margin below that measured
+// boundary; importing a local .ent and saving it online are separate limits.
+export const ENTRY_PROJECT_JSON_LIMIT = 16_700_000;
 // Entry has no saved brush defaults, so apply them in an initial start script.
 const BRUSH_DEFAULT_PROPERTIES = ['draw_color', 'fill_color', 'draw_width', 'draw_alpha'];
 
@@ -91,11 +95,20 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   timer.mark('스크립트 컴파일');
 
   const project = assemble(program, ctx, options);
+  const scalarCount = project.variables.filter(variable => variable.variableType !== 'list').length;
+  const listCount = project.variables.length - scalarCount;
+  if (scalarCount >= 500 || listCount >= 500) {
+    ctx.notice(program,
+      `작품에 변수 ${scalarCount.toLocaleString('en-US')}개와 리스트 ${listCount.toLocaleString('en-US')}개가 있습니다. EntryJS는 각 종류를 ID로 선형 검색하므로 자주 쓰는 항목의 위치가 실행 비용에 영향을 줍니다.`, {
+        code: 'N0002',
+        help: '먼저 실제 작품을 프로파일한 뒤, 자주 조회되는 숨김 변수·리스트를 같은 종류의 선언 중 앞쪽에 두세요. 보이는 항목의 자리를 바꾸거나 정적 참조 횟수만 보고 무작정 정렬하면 다른 실행 경로가 느려질 수 있습니다.',
+      });
+  }
   const projectBytes = new TextEncoder().encode(JSON.stringify(project)).length;
-  if (projectBytes > 10 * 1024 * 1024) {
-    ctx.warn(program, `project.json 크기가 ${(projectBytes / 1024 / 1024).toFixed(1)}MB라 Entry 업로드 기준 10MB를 넘습니다.`, {
+  if (projectBytes > ENTRY_PROJECT_JSON_LIMIT) {
+    ctx.warn(program, `project.json 크기가 ${projectBytes.toLocaleString('en-US')}바이트라 Entry 저장의 실측 운영선 16,700,000바이트를 넘습니다.`, {
       code: 'W0008',
-      help: '큰 리스트와 반복 생성된 블록을 줄이거나 작품을 나누세요. .ent 압축 크기가 작아도 project.json 원문 크기는 별도 제한을 받습니다.',
+      help: '큰 정적 리스트와 반복 생성된 블록부터 줄이세요. .ent 압축 크기와 자산 크기는 이 값과 다르고, 실제 상한은 Entry 서버나 저장 경로에 따라 바뀔 수 있습니다.',
     });
   }
   const verificationProblems = verifyEntryProject(project, { references: false });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileProject } from '@entropy/compiler';
+import { compileProject, ENTRY_PROJECT_JSON_LIMIT } from '@entropy/compiler';
 import { codeFrame } from '../packages/parser/src/parser/frame.ts';
 
 const work = (body: string, declarations = '') => `${declarations}
@@ -187,7 +187,20 @@ ${work('leaf(1)')}`);
   assert.ok(plain.warnings.every(item => item.code !== 'W0004'));
 });
 
+test('recursion analysis handles and summarizes a long function cycle without overflowing itself', () => {
+  const count = 4_000;
+  const functions = Array.from({ length: count }, (_, index) => `function f${index}():\n  ${
+    index + 1 < count ? `f${index + 1}()` : 'f0()'
+  }\nend`).join('\n');
+  const result = compileProject(`${functions}\n${work('f0()')}`);
+  assert.equal(result.project?.functions.length, count);
+  const warning = result.warnings.find(item => item.code === 'W0004')!;
+  assert.match(warning.message, /외 3,?994개/);
+  assert.ok(warning.message.length < 500, '순환 전체를 메시지에 펼치지 않는다');
+});
+
 test('Entry runtime limits and first-scene behavior have targeted diagnostics', () => {
+  assert.equal(ENTRY_PROJECT_JSON_LIMIT, 16_700_000, 'use the measured compact JSON operating limit, not the disproved 10 MiB claim');
   const firstScene = compileProject(`scene "first":
   object "o":
     when scene start do
@@ -215,4 +228,10 @@ end`);
   assert.match(limit.help!, /여러 리스트/);
   assert.ok(list.project, 'loose mode still returns a project');
   assert.ok(list.project!.variables.every(variable => variable.name !== 'too_many'), 'the oversized list is not emitted');
+
+  const manyVariables = compileProject(Array.from({ length: 500 }, (_, index) => `var v${index} = ${index}`).join('\n'));
+  const lookup = manyVariables.notices.find(item => item.code === 'N0002')!;
+  const emittedVariables = manyVariables.project!.variables.filter(variable => variable.variableType !== 'list').length;
+  assert.match(lookup.message, new RegExp(`변수 ${emittedVariables}개.*선형 검색`));
+  assert.match(lookup.help!, /실제 작품을 프로파일.*무작정 정렬/);
 });
