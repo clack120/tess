@@ -22,6 +22,7 @@ export interface EntryWork extends EntryProjectLike {
   id: string;
   name: string;
   thumb: string | null;
+  parent?: string | null;
 }
 
 interface RawAsset {

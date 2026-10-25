@@ -5,6 +5,8 @@ import { JSDOM } from 'jsdom';
 import { stripTypes } from '@entropy/core/strip-types';
 import { compactLargeProject, PROJECT_JSON_LIMIT } from '../packages/extension/src/page/project-compact.ts';
 import { beginLiveEditing } from '../packages/extension/src/page/editor-live.ts';
+import { loadYield } from '../packages/vm/src/web/load-yield.ts';
+import { exportNativeProject } from '../packages/extension/src/page/native-project.ts';
 
 const test = 'Bun' in globalThis ? nodeTest.skip : nodeTest;
 
@@ -52,7 +54,11 @@ async function setup(t: any, delay = false) {
   w.signedInUser = () => null;
   w.compactLargeProject = compactLargeProject;
   w.PROJECT_JSON_LIMIT = PROJECT_JSON_LIMIT;
+  w.setAssetCache = (on: boolean) => { w.cacheAssets = on; };
+  w.exportNativeProject = exportNativeProject;
+  w.loadYield = loadYield;
   w.beginLiveEditing = beginLiveEditing;
+  w.installLocalDownload = (read: (signal: AbortSignal) => unknown) => { w.readLocalProject = () => read(new AbortController().signal); };
   w.beginActorEditing = () => undefined;
   w.loadModule = async (specifier: string) => {
     if (specifier.endsWith('boot.ts')) return { boot: async (options: any) => {
@@ -132,6 +138,17 @@ test('runtime scene changes follow the native editor focus and stop restores the
   vm.onSceneChange('first'); assert.equal(s.w.Entry.scene.selectedScene.id, 'second', 'late notifications cannot move a stopped editor');
 });
 
+test('restarting an unchanged work removes preparation status even when reusing the ready VM', async t => {
+  const s = await setup(t);
+  for (let i = 0; i < 3; i++) {
+    s.engine.toggleRun(); await s.settle();
+    assert.equal(s.handles[0].vm.state, 'run');
+    assert.equal(s.w.document.querySelector('.entropy-editor-player .entropy-status').hidden, true);
+    await s.engine.toggleStop();
+  }
+  assert.equal(s.boots.length, 1); assert.equal(s.reloads.length, 0);
+});
+
 test('temporary actor controls attach after VM start and detach before native stop or disabling the runner', async t => {
   const s = await setup(t);
   const events: string[] = [];
@@ -182,6 +199,23 @@ test('stopping or disabling during editor asset loading cannot start a late play
   assert.equal(s.handles[0].disposed, true);
   assert.equal(s.handles[0].vm.state, 'stop');
   assert.equal(s.w.document.querySelector('.entropy-editor-player'), null);
+});
+
+test('stopping while the initial snapshot is pending cannot run native code or boot a late player', async t => {
+  const s = await setup(t);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let signal!: AbortSignal;
+  s.w.exportNativeProject = async (_entry: any, _original: any, next: AbortSignal) => {
+    signal = next; await gate; next.throwIfAborted(); return s.work;
+  };
+  s.engine.toggleRun(); s.engine.toggleRun();
+  assert.equal(s.counts().starts, 0);
+  assert.equal(s.w.document.querySelector('.entropy-editor-player').hidden, false);
+  await s.engine.toggleStop(); assert.equal(signal.aborted, true);
+  release(); await s.settle();
+  assert.equal(s.counts().starts, 0); assert.equal(s.boots.length, 0);
+  assert.equal(s.w.document.getElementById('entryCanvas').style.visibility, '');
 });
 
 test('a cold run unlocks audio in the click handler and stopping aborts unfinished preparation', async t => {
@@ -489,3 +523,20 @@ for (const failure of ['actor restore', 'renderer stop', 'renderer dispose']) {
     }
   });
 }
+
+test('local export bypasses server compaction and keeps temporary code isolated while stopping', async t => {
+  const s = await setup(t);
+  s.w.compactLargeProject = (work: any) => ({ project: { ...work, compacted: true }, beforeBytes: 1, afterBytes: 1 });
+  assert.equal(s.w.cacheAssets, true, 'local media caching is configured before the VM boots');
+  assert.equal(s.w.Entry.exportProject().compacted, true);
+  assert.equal(await s.w.readLocalProject(), s.work, 'local saving uses the complete native export');
+  s.w.beginLiveEditing = (_entry: any, work: any) => {
+    const original = structuredClone(work);
+    (s.work.objects[0] as any).script = 'temporary';
+    return { work: original, applied: false, restore() { delete (s.work.objects[0] as any).script; } };
+  };
+  s.engine.toggleRun(); await s.settle();
+  const release = s.holdStop(), stop = s.engine.toggleStop();
+  assert.equal((await s.w.readLocalProject()).objects[0].script, undefined);
+  release(); await stop;
+});

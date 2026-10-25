@@ -67,7 +67,13 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
   const initEdit = functionEditor?.initEditView;
   const edit = function(this: any, code: any, ...args: any[]) {
     const fn = Object.values(functions ?? {}).find((candidate: any) => candidate.content === code) as any;
-    return initEdit.call(this, fn ? copy(fn, 'content') : code, ...args);
+    try { return initEdit.call(this, fn ? copy(fn, 'content') : code, ...args); }
+    finally { sync(); }
+  };
+  const endEdit = functionEditor?.endEdit;
+  const end = function(this: any, ...args: any[]) {
+    try { return endEdit.apply(this, args); }
+    finally { sync(); }
   };
   const panel = document.createElement('div');
   panel.className = 'entropy-editor-live';
@@ -181,13 +187,18 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     else curtain.style.removeProperty('display');
   };
   const sync = () => {
-    const code = playground.getViewMode?.() === 'code';
-    playground.view_.classList.toggle('entropy-editor-editing', code);
+    const mode = playground.getViewMode?.();
+    const code = mode === 'code' || (mode === 'variable' && functionEditor?.isEdit === true);
+    playground.view_.classList.add('entropy-editor-editing');
     panel.hidden = !code;
-    if (code) curtain?.style.setProperty('display', 'none', 'important');
-    else restoreCurtain();
+    curtain?.style.setProperty('display', 'none', 'important');
   };
-  const changeView = function(this: any, ...args: any[]) { const result = viewMode.apply(this, args); sync(); return result; };
+  const mediaModes = new Set(['picture', 'sound', 'text']);
+  const lockedMessage = '실행 중에는 모양·소리·글상자를 편집할 수 없습니다. 정지 후 편집해주세요.';
+  const changeView = function(this: any, ...args: any[]) {
+    if (mediaModes.has(args[0])) { label.textContent = lockedMessage; return; }
+    const result = viewMode.apply(this, args); sync(); return result;
+  };
   const variableView = playground.toggleOnVariableView;
   const showVariables = function(this: any, ...args: any[]) { const result = variableView.apply(this, args); sync(); return result; };
   let restored = false;
@@ -199,6 +210,7 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     }
     replace(playground, 'injectCode', inject);
     if (typeof initEdit === 'function') replace(functionEditor, 'initEditView', edit);
+    if (typeof endEdit === 'function') replace(functionEditor, 'endEdit', end);
     host.append(panel);
     // Native function deletion/signature changes rewrite call blocks throughout
     // the project, including unopened originals. Keep those operations out of a run.
@@ -208,6 +220,24 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     if (typeof togglePause === 'function') replace(entry.engine, 'togglePause', pause);
     if (typeof viewMode === 'function') replace(playground, 'changeViewMode', changeView);
     if (typeof variableView === 'function') replace(playground, 'toggleOnVariableView', showVariables);
+    for (const mode of mediaModes) {
+      const tab = playground.tabViewElements?.[mode] as HTMLElement | undefined;
+      if (!tab) continue;
+      const title = tab.getAttribute('title'), disabled = tab.getAttribute('aria-disabled');
+      const cursor = tab.style.getPropertyValue('cursor'), priority = tab.style.getPropertyPriority('cursor');
+      const block = (event: Event) => { event.preventDefault(); event.stopImmediatePropagation(); };
+      const key = (event: KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') block(event); };
+      guards.push(() => {
+        if (title === null) tab.removeAttribute('title'); else tab.setAttribute('title', title);
+        if (disabled === null) tab.removeAttribute('aria-disabled'); else tab.setAttribute('aria-disabled', disabled);
+        if (cursor) tab.style.setProperty('cursor', cursor, priority); else tab.style.removeProperty('cursor');
+        tab.removeEventListener('click', block, true); tab.removeEventListener('keydown', key, true);
+      });
+      tab.title = lockedMessage; tab.setAttribute('aria-disabled', 'true');
+      tab.style.setProperty('cursor', 'not-allowed', 'important');
+      tab.addEventListener('click', block, true); tab.addEventListener('keydown', key, true);
+    }
+    if (mediaModes.has(playground.getViewMode?.()) && typeof viewMode === 'function') viewMode.call(playground, 'code');
     if (editingBefore && functionEditor.targetFunc) {
       overlayCode.call(workspace, copy(functionEditor.targetFunc, 'content'));
     }

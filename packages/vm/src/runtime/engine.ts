@@ -329,6 +329,28 @@ export class Vm implements Project {
   }
 
   load(project: EntryProjectLike): void {
+    this.finishLoad(this.loadSteps(project));
+  }
+
+  async loadAsync(project: EntryProjectLike, signal?: AbortSignal): Promise<void> {
+    const pause = loadYield();
+    const steps = this.loadSteps(project);
+    for (;;) {
+      signal?.throwIfAborted();
+      const next = steps.next();
+      if (next.done) return;
+      const pending = pause();
+      if (pending) await pending;
+    }
+  }
+
+  private finishLoad<T>(steps: Generator<void, T, unknown>): T {
+    let next = steps.next();
+    while (!next.done) next = steps.next();
+    return next.value;
+  }
+
+  private *loadSteps(project: EntryProjectLike): Generator<void, void, unknown> {
     this.lastError = null;
     this.masks.clear();
     // Match Entry's project speed fallback and use it for timed blocks.
@@ -341,7 +363,8 @@ export class Vm implements Project {
 
     this.answerVisible = false;
     this.timerVisible = false;
-    this.variables = project.variables.map((raw) => {
+    this.variables = [];
+    for (const raw of project.variables) {
       const type = String(raw.variableType ?? 'variable') as VariableKind;
       const variable = new Variable(
         String(raw.id),
@@ -367,14 +390,15 @@ export class Vm implements Project {
       variable.height = Number(raw.height ?? 120);
       variable.minValue = Number(raw.minValue ?? 0);
       variable.maxValue = Number(raw.maxValue ?? 100);
-      return variable;
-    });
+      this.variables.push(variable);
+      yield;
+    }
     this.storedVars = this.variables.filter((variable) => variable.isStored);
     this.readStore();
 
     this.targets = [];
     this.targetById.clear();
-    project.objects.forEach((raw, index) => {
+    for (const [index, raw] of project.objects.entries()) {
       const target = new Target(
         this,
         String(raw.id),
@@ -407,9 +431,10 @@ export class Vm implements Project {
       target.entity = this.makeEntity(target, raw.entity as Record<string, unknown>, raw);
       this.targets.push(target);
       this.targetById.set(target.id, target);
-    });
+      yield;
+    }
 
-    this.compile(project);
+    yield* this.compileSteps(project);
     this.extras.bind();
     this.save.bind();
     this.snapshot();
@@ -418,6 +443,7 @@ export class Vm implements Project {
       // Preserve saved text height; Entry remeasures only width after setText.
       target.entity.measure(false);
       this.renderer?.addEntity(target.entity);
+      yield;
     }
     this.renderer?.setScene?.(this.currentSceneId);
   }
@@ -466,7 +492,7 @@ export class Vm implements Project {
     return entity;
   }
 
-  private compile(project: EntryProjectLike): void {
+  private *compileSteps(project: EntryProjectLike): Generator<void, void, unknown> {
     this.liveBlockCounts = null;
     let cacheable = true;
     const nextObjectScripts = new Map<number, ParsedSource>();
@@ -482,32 +508,29 @@ export class Vm implements Project {
       next.set(index, { raw, parsed: value });
       return value;
     };
-    const input: CompileInput = {
-      liveEditing: this.liveCode !== null,
-      objects: project.objects.map((raw, index) => ({
-        id: String(raw.id),
-        scene: String(raw.scene ?? this.targetOf(String(raw.id))?.sceneId ?? this.currentSceneId),
-        script: parsed(raw.script, index, this.objectScripts, nextObjectScripts),
-      })),
-      variables: this.variables.map((variable) => ({ id: variable.id, sharedList: variable.isList && !variable.objectId })),
-      functions: project.functions.map((fn, index) => ({
-        id: String(fn.id),
-        type: String(fn.type ?? 'normal'),
-        localVariables:
-          (fn.localVariables as Array<{ id: string; name: string; value: string | number }>) ?? [],
-        // Parse once here; codegen, the kernel planner and name lookups all read the same body.
-        content: parsed(fn.content, index, this.functionScripts, nextFunctionScripts),
-      })),
-      scenes: this.scenes,
-      messages: this.messages,
-      tables: this.tables,
-    };
+    const objects: CompileInput['objects'] = [];
+    for (const [index, raw] of project.objects.entries()) {
+      objects.push({ id: String(raw.id), scene: String(raw.scene ?? this.targetOf(String(raw.id))?.sceneId ?? this.currentSceneId),
+        script: parsed(raw.script, index, this.objectScripts, nextObjectScripts) });
+      yield;
+    }
+    const functions: CompileInput['functions'] = [];
+    for (const [index, fn] of project.functions.entries()) {
+      functions.push({ id: String(fn.id), type: String(fn.type ?? 'normal'),
+        localVariables: (fn.localVariables as FunctionEntry['localVariables']) ?? [],
+        content: parsed(fn.content, index, this.functionScripts, nextFunctionScripts) });
+      yield;
+    }
+    const input: CompileInput = { liveEditing: this.liveCode !== null, objects, functions,
+      variables: this.variables.map(variable => ({ id: variable.id, sharedList: variable.isList && !variable.objectId })),
+      scenes: this.scenes, messages: this.messages, tables: this.tables };
     this.objectScripts = nextObjectScripts;
     this.functionScripts = nextFunctionScripts;
     const reuse = cacheable && this.compileInput !== null && this.compiledProgram !== null
       && this.compiledFactory !== null && sameCompileInput(this.compileInput, input);
     this.compileInput = input;
-    const program = reuse ? this.compiledProgram! : new Codegen(input).compile();
+    const program = reuse ? this.compiledProgram! : yield* new Codegen(input).compileSteps();
+    yield;
     const factory = reuse ? this.compiledFactory!
       : new Function('R', program.source) as ProgramFactory;
     this.compiledProgram = cacheable ? program : null;
@@ -521,7 +544,9 @@ export class Vm implements Project {
     this.functionOf = new WeakMap();
     const note = () => this.rememberFunctions(built.functions, input.functions);
     note();
+    yield;
     this.installKernel(input, built.functions);
+    yield;
     note();
     this.scripts = program.plans.map((plan) => ({
       event: plan.event,

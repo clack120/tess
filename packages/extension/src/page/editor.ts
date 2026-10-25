@@ -6,6 +6,10 @@ import { compactLargeProject, PROJECT_JSON_LIMIT } from './project-compact.ts';
 import { improveSoundLoading } from './editor-sounds.ts';
 import { beginLiveEditing, type LiveEditing } from './editor-live.ts';
 import { beginActorEditing, type ActorEditing } from './editor-actors.ts';
+import { installLocalDownload } from './local-download.ts';
+import { setAssetCache } from '../../../vm/src/web/fetch-retry.ts';
+import { exportNativeProject } from './native-project.ts';
+import { loadYield } from '../../../vm/src/web/load-yield.ts';
 
 interface Editor {
   type: string;
@@ -46,7 +50,7 @@ let attached: Editor | null = null;
 let attachedEngine: Record<string, any> | null = null;
 let restore: (() => void) | null = null;
 let prepared: Prepared | null = null;
-interface RunningEditor { live?: LiveEditing | null; actors?: ActorEditing; cleanup(): void }
+interface RunningEditor { controller: AbortController; preparing: boolean; live?: LiveEditing | null; actors?: ActorEditing; cleanup(): void }
 let active: RunningEditor | null = null;
 let stopping: { entry: Editor; live?: LiveEditing | null; promise: Promise<unknown> } | null = null;
 let dirty = true;
@@ -55,6 +59,7 @@ let cachedExport: { entry: Editor; revision: number; work: EntryWork } | null = 
 let exportingEntry: Editor | null = null;
 let wrappedExport: Editor['exportProject'] | null = null;
 let restoreExport: (() => void) | null = null;
+let originalExport: Editor['exportProject'] | null = null;
 let soundEditor: unknown = null;
 let restoreSound: (() => void) | null = null;
 const incompatible = new WeakSet<Editor>();
@@ -73,7 +78,7 @@ traceEditor('loaded');
 
 function observeExport(entry: Editor | undefined): void {
   if (exportingEntry === entry && entry?.type === 'workspace' && entry.exportProject === wrappedExport) return;
-  restoreExport?.(); restoreExport = null; exportingEntry = null; wrappedExport = null;
+  restoreExport?.(); restoreExport = null; exportingEntry = null; wrappedExport = null; originalExport = null;
   if (entry?.type !== 'workspace' || typeof entry.exportProject !== 'function') return;
   const original = entry.exportProject;
   const compactionCache = new Map();
@@ -103,6 +108,7 @@ function observeExport(entry: Editor | undefined): void {
   if (entry.exportProject !== observed) return;
   exportingEntry = entry;
   wrappedExport = observed;
+  originalExport = original;
   restoreExport = () => {
     try { if (entry.exportProject === observed) entry.exportProject = original; } catch {}
     if (cachedExport?.entry === entry) cachedExport = null;
@@ -124,6 +130,7 @@ function finish(): () => void {
   traceEditor('stopping');
   const old = active;
   active = null;
+  old?.controller.abort();
   restoreActors(old);
   const stopped = tryCleanup(() => prepared?.handle?.stop());
   if (prepared) {
@@ -159,22 +166,30 @@ function withoutBoardPositions(script: unknown): unknown {
   return typeof script === 'string' ? script.replace(BOARD_POSITION, '"x":0,"y":0') : script;
 }
 
-function snapshot(entry: Editor): EditorSnapshot | null {
-  // Entry's own autosave exports the complete project shortly after the same
-  // change event. Reuse that result instead of exporting a large work twice.
-  let work = cachedExport?.entry === entry && cachedExport.revision === editRevision
-    ? cachedExport.work
-    : null;
-  if (!work) {
-    entry.getMainWS()?.syncCode();
-    work = entry.exportProject() || null;
-  }
+async function snapshot(entry: Editor, signal: AbortSignal): Promise<EditorSnapshot | null> {
+  const revision = editRevision;
+  let work = cachedExport?.entry === entry && cachedExport.revision === revision ? cachedExport.work : null;
+  if (!work) work = await exportNativeProject(entry,
+    exportingEntry === entry && originalExport ? originalExport : entry.exportProject, signal) || null;
   if (!work) return null;
-  // Layout-only changes do not invalidate a compiled work or decoded assets.
-  const objects = work.objects?.map(object => ({ ...object, script: withoutBoardPositions(object.script) }));
-  const functions = work.functions?.map(fn => ({ ...fn, content: withoutBoardPositions(fn.content) }));
-  return { source: JSON.stringify({ objects, scenes: work.scenes, variables: work.variables,
-    messages: work.messages, functions, tables: work.tables, speed: work.speed }), work };
+  // Serialize each script separately so a large project cannot monopolize one
+  // task just to compare it with the previous run. Board layout is irrelevant.
+  const parts = [JSON.stringify({ scenes: work.scenes, variables: work.variables, messages: work.messages,
+    tables: work.tables, speed: work.speed, objects: work.objects?.length, functions: work.functions?.length })];
+  const pause = loadYield();
+  for (const object of work.objects ?? []) {
+    signal.throwIfAborted();
+    parts.push(JSON.stringify({ ...object, script: withoutBoardPositions(object.script) }));
+    const pending = pause(); if (pending) await pending;
+  }
+  for (const fn of work.functions ?? []) {
+    signal.throwIfAborted();
+    parts.push(JSON.stringify({ ...fn, content: withoutBoardPositions(fn.content) }));
+    const pending = pause(); if (pending) await pending;
+  }
+  signal.throwIfAborted();
+  if (revision !== editRevision) throw new Error('준비 중 작품이 변경되었습니다. 다시 시작해주세요.');
+  return { source: parts.join('\n'), work };
 }
 
 function schedule(): void {
@@ -239,7 +254,7 @@ function createPrepared(canvas: HTMLCanvasElement, entry: Editor): Prepared {
   layout();
   const timer = setInterval(() => {
     if (!canvas.isConnected) { if (active) void attached?.engine.toggleStop(); discard(); return; }
-    if (active && prepared?.handle?.vm.state === 'stop' && !prepared.busy) void attached?.engine.toggleStop();
+    if (active && !active.preparing && prepared?.handle?.vm.state === 'stop' && !prepared.busy) void attached?.engine.toggleStop();
     if (active) {
       layout();
       try { active.actors?.sync(); }
@@ -436,54 +451,69 @@ function attach(entry: Editor): void {
       if (active) { if (engine.state === 'pause') engine.togglePause(); return; }
       if (!settings.enabled || engine.state !== 'stop') return originalRun.apply(engine, args);
       traceEditor('run-requested');
-      let currentSnapshot: EditorSnapshot;
       let canvas: HTMLCanvasElement;
       try {
-        prepared?.handle?.audio.unlock();
         const element = document.getElementById('entryCanvas');
         if (!(element instanceof HTMLCanvasElement)) throw new Error('엔트리 실행 화면을 찾지 못했습니다');
         canvas = element;
-        const exported = snapshot(entry);
-        if (!exported) throw new Error('엔트리 작품을 읽지 못했습니다');
-        currentSnapshot = exported;
+        if (prepared && (prepared.svg !== settings.svg || prepared.escape !== settings.escape)) discard();
+        prepared ??= createPrepared(canvas, entry);
+        // Preserve the trusted button gesture before asynchronous preparation.
+        prepared.handle?.audio.unlock();
+        void prepared.audioContext?.resume().catch(() => undefined);
       } catch (error) {
         disable(error); discard();
-        return originalRun.apply(engine, args);
+        return;
       }
       const visibility = canvas.style.visibility;
+      let unbrowse = () => {};
       const current: RunningEditor = {
+        controller: new AbortController(), preparing: true,
         cleanup() { canvas.style.visibility = visibility; unbrowse(); },
       };
-      let unbrowse = () => {};
       active = current;
-      try { originalRun.apply(engine, args); } catch (error) { finish()(); throw error; }
-      try { current.live = beginLiveEditing(entry, currentSnapshot.work, () => prepared?.handle?.vm, traceEditor); }
-      catch (error) { console.warn('[entropy] 실행 중 편집을 준비하지 못해 탐색만 허용합니다', error); }
-      if (current.live) unbrowse = () => current.live?.restore();
-      else {
-        try { unbrowse = browse(entry); }
-        catch (error) { console.warn('[entropy] 블록 탐색을 연결하지 못했습니다', error); }
-      }
+      prepared.status.hidden = false;
+      prepared.status.textContent = '작품 정보를 준비하는 중';
+      prepared.root.hidden = false; prepared.root.tabIndex = 0; prepared.root.removeAttribute('aria-hidden');
+      canvas.style.visibility = 'hidden';
       const scene = entry.scene.selectedScene?.id;
-      const ready = prepare(entry, currentSnapshot);
-      void prepared?.audioContext?.resume().catch(() => undefined);
-      if (prepared) {
-        prepared.root.hidden = false; prepared.root.tabIndex = 0; prepared.root.removeAttribute('aria-hidden');
-        canvas.style.visibility = 'hidden';
-      }
-      void ready.then(() => {
+      void (async () => {
+        let currentSnapshot: EditorSnapshot;
+        try {
+          const exported = await snapshot(entry, current.controller.signal);
+          if (!exported) throw new Error('엔트리 작품을 읽지 못했습니다');
+          currentSnapshot = exported;
+        } catch (error) {
+          if (active !== current || current.controller.signal.aborted) return;
+          finish()(); disable(error); discard();
+          originalRun.apply(engine, args);
+          return;
+        }
+        if (active !== current || current.controller.signal.aborted || (window as any).Entry !== entry) return;
+        originalRun.apply(engine, args);
+        try { current.live = beginLiveEditing(entry, currentSnapshot.work, () => prepared?.handle?.vm, traceEditor); }
+        catch (error) { console.warn('[entropy] 실행 중 편집을 준비하지 못해 탐색만 허용합니다', error); }
+        if (current.live) unbrowse = () => current.live?.restore();
+        else {
+          try { unbrowse = browse(entry); }
+          catch (error) { console.warn('[entropy] 블록 탐색을 연결하지 못했습니다', error); }
+        }
+        await prepare(entry, currentSnapshot);
         if (active !== current || !prepared?.handle) return;
+        // An unchanged project reuses its ready handle without entering the
+        // preparation loop, so clear this run's snapshot status here too.
+        prepared.status.hidden = true;
         const handle = prepared.handle;
         handle.vm.setStartScene(scene);
         const unknown = [...handle.vm.unknownBlocks.keys()].filter(type => !type.startsWith('variable:'));
         if (unknown.length) (window as any).Entry.toast?.alert('실행기 안내',
           `이 실행기가 아직 모르는 블록이 ${unknown.length}종 있습니다: ${unknown.slice(0, 6).join(', ')}`);
-        handle.relayout(); handle.start();
+        handle.relayout(); handle.start(); current.preparing = false;
         try { current.actors = beginActorEditing(entry, handle); }
         catch (error) { console.warn('[entropy] 오브젝트 속성 편집을 연결하지 못했습니다', error); }
         traceEditor('running');
         if (engine.state === 'pause') handle.pause();
-      }).catch(error => {
+      })().catch(error => {
         if (active === current) {
           const failed = prepared;
           const message = error instanceof Error ? error.message : String(error);
@@ -558,10 +588,24 @@ function reconcile(): void {
     ['toggleRun', 'toggleStop', 'togglePause', 'update', 'computeFunction', 'raiseEvent', 'raiseKeyEvent', 'raiseEventOnEntity']
       .every(name => typeof entry.engine[name] === 'function')) attach(entry);
 }
+installLocalDownload(async (signal, progress) => {
+  const entry = (window as any).Entry as Editor | undefined;
+  if (!entry || entry.type !== 'workspace') return false;
+  if (active?.live && attached === entry) return active.live.work;
+  if (stopping?.entry === entry && stopping.live) return stopping.live.work;
+  const revision = editRevision;
+  // Server saves keep their compaction wrapper. Local archives have no server
+  // JSON limit and preserve the native export, including defaults and metadata.
+  const work = await exportNativeProject(entry, exportingEntry === entry && originalExport ? originalExport : entry.exportProject, signal, progress);
+  if (revision !== editRevision) throw new Error('준비 중 작품이 변경되었습니다. 다시 저장해주세요.');
+  return work;
+}, () => settings.enabled);
+
 window.addEventListener('message', event => {
   if (event.source !== window || event.data?.__entropy !== 'editor-settings') return;
   settings = { enabled: event.data.enabled === true, svg: event.data.svg !== false,
     cache: event.data.cache === true, escape: event.data.escape !== false };
+  setAssetCache(settings.cache); // Local saving also uses the cache before the first VM run.
   reconcile();
   if (attached && !active && prepared && (prepared.svg !== settings.svg || prepared.escape !== settings.escape)) schedule();
 });

@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { stripTypes } from '@entropy/core/strip-types';
 import { JSDOM } from 'jsdom';
 
-function setup(t: any, phase: 'init' | 'save' | 'assets') {
+function setup(t: any, phase: 'init' | 'compile' | 'save' | 'assets') {
   const dom = new JSDOM('<!doctype html><main></main>', { pretendToBeVisual: true });
   t.after(() => dom.window.close());
   let finish: () => void = () => {};
@@ -24,7 +24,7 @@ function setup(t: any, phase: 'init' | 'save' | 'assets') {
     WebAudioEngine: class { retain() {} unlock() {} async preload() {} close() { calls.closed++; } }, EntryTtsEngine: class {}, EntryTranslator: class {},
     EntryExpansionReader: class {},
     Vm: class { targets = []; currentSceneId = ''; save = { host: null, async load() { if (phase === 'save') await blocked; } };
-      load() {} setStartScene() {} stop() { calls.stopped++; } },
+      async loadAsync() { if (phase === 'compile') await blocked; } setStartScene() {} stop() { calls.stopped++; } },
   });
   const source = stripTypes(fs.readFileSync(new URL('../packages/vm/src/web/boot.ts', import.meta.url), 'utf8'))
     .replace(/^import[\s\S]*?;\n/gm, '').replace(/^export /gm, '');
@@ -33,7 +33,7 @@ function setup(t: any, phase: 'init' | 'save' | 'assets') {
   return { start, finish, calls, document: dom.window.document };
 }
 
-for (const phase of ['init', 'save', 'assets'] as const) {
+for (const phase of ['init', 'compile', 'save', 'assets'] as const) {
   test(`aborting boot during ${phase} releases resources without installing input or exposing a stale VM`, async t => {
     const { start, finish, calls, document } = setup(t, phase);
     const controller = new AbortController();

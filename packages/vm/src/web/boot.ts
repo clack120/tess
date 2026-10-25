@@ -284,14 +284,23 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       kernel: options.kernel !== false,
     });
     cleanups.push(() => vm.stop());
+    const loadController = new AbortController();
+    cleanups.push(() => loadController.abort());
 
     vm.save.host = options.saveStore === null ? null : (options.saveStore ?? dexieSaveStore(storeKey(project)));
+    const checkLoad = () => {
+      loadController.signal.throwIfAborted();
+      signal?.throwIfAborted();
+    };
     async function loadProject(next: EntryProjectLike, scene?: string): Promise<void> {
+      checkLoad();
       vm.stop();
-      vm.load(next);
+      await wait(vm.loadAsync(next, loadController.signal));
+      checkLoad();
       vm.setStartScene(scene);
       // Restore saved values before the work starts on every run.
       await wait(vm.save.load());
+      checkLoad();
       renderer.overlayView?.bind({
         variables: vm.variables,
         ownerName: (objectId) => vm.targetOf(objectId)?.name ?? null,
@@ -334,6 +343,7 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       const assets = Promise.all([costumes, files]).finally(endAssetBulk);
       if (waitForAssets) {
         await wait(assets);
+        checkLoad();
       } else {
         void assets;
       }
@@ -342,6 +352,7 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       void renderer.waitForFonts();
     }
     await loadProject(project, options.scene);
+    let reloadTail = Promise.resolve();
 
     const question = makeQuestionField(frame, (value) => {
       vm.pendingAnswer = value;
@@ -476,7 +487,11 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       inspect: () => diagnosticView.open(),
       downloadDiagnostics: () => diagnosticView.download(),
       relayout: resize,
-      reload: loadProject,
+      reload(next, scene) {
+        const pending = reloadTail.then(() => loadProject(next, scene));
+        reloadTail = pending.catch(() => {});
+        return pending;
+      },
       setStageSize(width: number, height: number) {
         setStageSize(width, height);
         renderer.applyStageSize();

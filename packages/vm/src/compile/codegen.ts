@@ -219,7 +219,7 @@ export class Codegen {
     }
   }
 
-  private *compileSteps(): Generator<void, CompiledProgram, unknown> {
+  *compileSteps(): Generator<void, CompiledProgram, unknown> {
     for (const fn of this.input.functions) {
       this.functionSources.push(yield* this.compileFunction(fn));
       yield;

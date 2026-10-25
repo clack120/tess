@@ -30,12 +30,16 @@ function setup(t: any) {
     changeBoardCode(code: any) { board.code = code; },
     changeOverlayBoardCode(code: any) { overlayBoard.code = code; } };
   const playground = { object: first, view_: w.document.getElementById('view'), mode: 'code',
+    tabViewElements: Object.fromEntries(['picture', 'sound', 'text'].map(mode => {
+      const tab = w.document.createElement('li'); tab.textContent = mode;
+      w.document.getElementById('view').append(tab); return [mode, tab];
+    })),
     injectCode() { workspace.changeBoardCode(this.object.script); },
     getViewMode() { return this.mode; }, changeViewMode(mode: string) { this.mode = mode; } };
   const undo = { before: true }, redo = { after: true };
   let schemaUpdates = 0;
   const entry = { Code, readOnly: false, getMainWS: () => workspace, playground, engine: { state: 'run', togglePause() { this.state = this.state === 'run' ? 'pause' : 'run'; vm.state = this.state; } },
-    Func: { isEdit: false, initEditView(code: any) { workspace.changeOverlayBoardCode(code); },
+    Func: { isEdit: false, initEditView(code: any) { this.isEdit = true; workspace.changeOverlayBoardCode(code); },
       endEdit() { this.isEdit = false; }, generateWsBlock(_fn: any) { schemaUpdates++; } },
     variableContainer: { functions_: { fn }, removeFunction({ id }: { id: string }) {
       second.script.data[0][0].params.push('removed call'); delete (this.functions_ as any)[id];
@@ -87,7 +91,8 @@ test('other objects are copied only when opened, and function body edits are iso
   assert.notEqual(s.fn.content, s.original.fn); assert.equal(s.overlayBoard.code, s.fn.content);
   s.fn.content.data[0][0].statements[0].push({ id: 'body', type: 'dialog', params: ['changed'] });
   await s.apply(); assert.equal(JSON.parse(s.patches[0].functions[0].content)[0][0].statements[0][0].params[0], 'changed');
-  s.playground.changeViewMode('sound');
+  s.entry.Func.endEdit();
+  s.playground.changeViewMode('variable');
   assert.equal(s.w.document.querySelector('.entropy-editor-live').hidden, true);
   s.playground.changeViewMode('code');
   assert.equal(s.w.document.querySelector('.entropy-editor-live').hidden, false);
@@ -161,17 +166,62 @@ test('native read-only workspaces keep their edit restrictions', async t => {
   assert.equal(s.first.script, s.original.first);
 });
 
-test('live editing clears the native curtain without relying on stylesheet delivery and restores it', async t => {
+test('live editing keeps the native curtain hidden across views and restores it on stop', async t => {
   const s = setup(t); s.live.restore();
   const curtain = s.w.document.createElement('div'); curtain.id = 'entryCurtain';
   curtain.style.setProperty('display', 'block', 'important');
   s.playground.view_.append(curtain);
   const live = s.w.begin(s.entry, s.work, () => s.vm);
   assert.equal(curtain.style.display, 'none');
-  s.playground.changeViewMode('sound'); assert.equal(curtain.style.display, 'block');
+  s.playground.changeViewMode('variable'); assert.equal(curtain.style.display, 'none');
+  assert.equal(s.playground.view_.classList.contains('entropy-editor-editing'), true);
+  assert.equal(s.w.document.querySelector('.entropy-editor-live').hidden, true);
+  s.playground.changeViewMode('default'); assert.equal(curtain.style.display, 'none');
+  s.playground.changeViewMode('sound'); assert.equal(curtain.style.display, 'none');
   s.playground.changeViewMode('code'); assert.equal(curtain.style.display, 'none');
   live.restore(); assert.equal(curtain.style.display, 'block');
   assert.equal(curtain.style.getPropertyPriority('display'), 'important');
+});
+
+test('the apply panel stays visible while editing a function from the properties tab', async t => {
+  const s = setup(t);
+  const panel = s.w.document.querySelector('.entropy-editor-live');
+  s.playground.changeViewMode('variable'); assert.equal(panel.hidden, true);
+  s.entry.Func.initEditView(s.fn.content); assert.equal(panel.hidden, false);
+  s.fn.content.data[0][0].statements[0].push({ id: 'body', type: 'dialog', params: ['function edit'] });
+  await s.apply();
+  assert.equal(s.live.applied, true);
+  assert.equal(JSON.parse(s.patches[0].functions[0].content)[0][0].statements[0][0].params[0], 'function edit');
+  s.entry.Func.endEdit(); assert.equal(panel.hidden, true);
+  s.playground.changeViewMode('code'); assert.equal(panel.hidden, false);
+});
+
+test('unsafe media tabs block mouse, keyboard and programmatic entry until stop and restore their attributes', t => {
+  const s = setup(t); s.live.restore();
+  let clicks = 0;
+  for (const tab of Object.values(s.playground.tabViewElements) as any[]) {
+    tab.title = 'original'; tab.setAttribute('aria-disabled', 'false');
+    tab.style.setProperty('cursor', 'crosshair', 'important');
+    tab.addEventListener('click', () => { clicks++; });
+  }
+  s.playground.mode = 'sound';
+  const live = s.w.begin(s.entry, s.work, () => s.vm);
+  assert.equal(s.playground.mode, 'code', 'an already open media editor is left before hiding its curtain');
+  for (const [mode, tab] of Object.entries(s.playground.tabViewElements) as any) {
+    s.playground.changeViewMode(mode); assert.equal(s.playground.mode, 'code');
+    assert.equal(tab.getAttribute('aria-disabled'), 'true');
+    assert.equal(tab.style.cursor, 'not-allowed'); assert.match(tab.title, /정지 후/);
+    tab.click();
+    assert.equal(tab.dispatchEvent(new s.w.KeyboardEvent('keydown', { key: 'Enter', cancelable: true })), false);
+  }
+  assert.equal(clicks, 0);
+  s.entry.engine.state = 'stop'; live.restore();
+  for (const [mode, tab] of Object.entries(s.playground.tabViewElements) as any) {
+    assert.equal(tab.title, 'original'); assert.equal(tab.getAttribute('aria-disabled'), 'false');
+    assert.equal(tab.style.cursor, 'crosshair'); assert.equal(tab.style.getPropertyPriority('cursor'), 'important');
+    tab.click(); s.playground.changeViewMode(mode); assert.equal(s.playground.mode, mode);
+  }
+  assert.equal(clicks, 3);
 });
 
 test('applying edits pauses first, shows progress, prevents duplicate updates and resumes only a running session', async t => {

@@ -25,7 +25,33 @@ object "actor":
   end
 end`;
 
+test('initial asynchronous loading honors an aborted signal before mutating the VM', async () => {
+  const result = compileProject(source);
+  const vm = new Vm({ renderer: null, audio: null });
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(vm.loadAsync(result.project as never, controller.signal), { name: 'AbortError' });
+  assert.equal(vm.targets.length, 0); assert.equal(vm.variables.length, 0);
+  await vm.loadAsync(result.project as never);
+  vm.start(); for (let i = 0; i < 30; i++) vm.tick();
+  assert.deepEqual(vm.errors, []);
+});
+
 for (const liveEditing of [false, true]) {
+  test(`asynchronous initial load preserves execution and reusable code (live=${liveEditing})`, async () => {
+    const result = compileProject(source); assert.deepEqual(result.errors, []);
+    const sync = new Vm({ liveEditing, renderer: null, audio: null });
+    const asyncVm = new Vm({ liveEditing, renderer: null, audio: null });
+    sync.load(result.project as never);
+    await asyncVm.loadAsync(result.project as never);
+    for (const vm of [sync, asyncVm]) {
+      vm.start(); for (let i = 0; i < 30; i++) vm.tick();
+      assert.deepEqual(vm.errors, []);
+    }
+    assert.deepEqual(asyncVm.variables.map(variable => variable.value), sync.variables.map(variable => variable.value));
+    const first = (asyncVm as any).compiledProgram;
+    asyncVm.stop(); await asyncVm.loadAsync(result.project as never);
+    assert.equal((asyncVm as any).compiledProgram, first);
+  });
   test(`cooperative compilation preserves code, trace locations and scoped control flow (live=${liveEditing})`, async () => {
     const result = compileProject(source); assert.deepEqual(result.errors, []);
     const vm = new Vm({ liveEditing, renderer: null, audio: null });
