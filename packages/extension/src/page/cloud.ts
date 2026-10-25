@@ -76,17 +76,14 @@ export class CloudClient implements VariableStore {
       }
       const wsUrl = baseUrl + `/?type=undefined&q=${info.query}&EIO=3&transport=websocket`;
       
-      console.log("[CloudClient] Connecting to", wsUrl);
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onmessage = (event) => {
         const msg = String(event.data);
-        console.log("[CloudClient] Recv:", msg);
         if (msg.startsWith('0')) {
           const packet = JSON.parse(msg.slice(1));
           
           // Send 40 to open the Socket.IO namespace after the Engine.IO handshake.
-          console.log("[CloudClient] Sending 40 to init Socket.IO");
           this.ws?.send('40');
 
           if (packet.pingInterval) {
@@ -123,7 +120,6 @@ export class CloudClient implements VariableStore {
       this.ws.onerror = (e) => console.error("[CloudClient] Socket error", e);
 
       this.ws.onclose = () => {
-        console.log("[CloudClient] Socket closed");
         clearInterval(this.pingTimer);
       };
     } catch (e) {
@@ -136,7 +132,6 @@ export class CloudClient implements VariableStore {
   }
 
   private handleWelcome(payload: any) {
-    console.log("[CloudClient] Handling welcome", payload);
     const vars = payload.variables || [];
     for (const v of vars) {
       const entryId = String(v.id);
@@ -261,7 +256,6 @@ export class CloudClient implements VariableStore {
         variableType,
         ...actionData
       }]);
-      console.log("[CloudClient] Send:", payload);
       this.ws.send(payload);
     }
   }

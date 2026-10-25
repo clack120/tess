@@ -22,6 +22,7 @@ function setup(t: any, phase: 'init' | 'save' | 'assets') {
   const context = vm.createContext({ document: dom.window.document, window: dom.window,
     navigator: { userAgent: '', maxTouchPoints: 0 }, AbortController, PixiRenderer: Renderer, setAssetCache() {}, beginAssetBulk() {}, endAssetBulk() {},
     WebAudioEngine: class { retain() {} async preload() {} close() { calls.closed++; } }, EntryTtsEngine: class {}, EntryTranslator: class {},
+    EntryExpansionReader: class {},
     Vm: class { targets = []; currentSceneId = ''; save = { host: null, async load() { if (phase === 'save') await blocked; } };
       load() {} setStartScene() {} stop() { calls.stopped++; } },
   });

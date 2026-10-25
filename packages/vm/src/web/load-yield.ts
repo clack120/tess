@@ -19,12 +19,20 @@ function nextTask(): Promise<void> {
   if (typeof MessageChannel === 'undefined') return new Promise(resolve => setTimeout(resolve, 0));
   if (!channel) {
     channel = new MessageChannel();
-    channel.port1.onmessage = () => waiting.shift()?.();
-    // Node keeps a listening port alive; tests must still exit.
-    (channel.port1 as { unref?: () => void }).unref?.();
+    channel.port1.onmessage = () => {
+      waiting.shift()?.();
+      if (waiting.length === 0) portRef('unref');
+    };
+    portRef('unref');
   }
   return new Promise(resolve => {
+    if (waiting.length === 0) portRef('ref');
     waiting.push(resolve);
     channel!.port2.postMessage(0);
   });
+}
+
+// Keep server-side runtimes alive only while a posted task is pending.
+function portRef(method: 'ref' | 'unref'): void {
+  (channel?.port1 as unknown as Record<'ref' | 'unref', (() => void) | undefined>)?.[method]?.();
 }

@@ -144,14 +144,14 @@ export class Context {
     return null;
   }
 
-  warn(node: Node | null | undefined, message: string): null {
-    this.#report(this.warnings, node, message);
+  warn(node: Node | null | undefined, message: string, details: DiagnosticDetails = {}): null {
+    this.#report(this.warnings, node, message, details);
     return null;
   }
 
   // Entry resolves these names at runtime; strict mode reports warnings instead.
-  notice(node: Node | null | undefined, message: string): null {
-    this.#report(this.notices, node, message);
+  notice(node: Node | null | undefined, message: string, details: DiagnosticDetails = {}): null {
+    this.#report(this.notices, node, message, details);
     return null;
   }
 

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import zlib from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
@@ -127,8 +128,20 @@ test('없는 주소는 404 를 준다', async () => {
   });
 });
 
+test('로컬 실행 서버는 외부 Host 와 Origin 을 거절한다', async () => {
+  await withServer({}, async (server: any) => {
+    assert.equal(await rawStatus(server.url, '/project.json', { host: 'work.example' }), 403);
+    assert.equal(await rawStatus(server.url, '/__log', {
+      origin: 'https://work.example',
+      'content-type': 'application/json',
+    }, 'POST'), 403);
+  });
+});
+
 test('설치된 entryjs 가 없으면 CDN 을 가리킨다', async () => {
-  await withServer({ cwd: os.tmpdir() }, async (server: any) => {
+  const missing = path.join(os.tmpdir(), `entropy-no-runtime-${process.pid}`);
+  assert.equal(findLocalRuntime(missing), null);
+  await withServer({ cwd: missing }, async (server: any) => {
     assert.match(server.runtime, /^CDN/);
     const page = await (await fetch(server.url)).text();
     // Load Entry from unpkg because its package exceeds jsDelivr's size limit.
@@ -165,11 +178,14 @@ test('lib 바깥 파일은 주지 않는다', async (t) => {
   fs.mkdirSync(dist, { recursive: true });
   fs.writeFileSync(path.join(dist, 'entry.min.js'), 'x');
   fs.writeFileSync(path.join(fake, 'secret.txt'), '비밀');
+  fs.writeFileSync(path.join(fake, 'node_modules', '@entrylabs', 'entry-secret.txt'), '더 비밀');
   t.after(() => fs.rmSync(fake, { recursive: true, force: true }));
 
   await withServer({ cwd: fake }, async (server: any) => {
     const escaped = await fetch(`${server.url}lib/${encodeURIComponent('../../../secret.txt')}`);
     assert.equal(escaped.status, 404);
+    assert.equal(await rawStatus(server.url, '/lib/%2e%2e/entry-secret.txt'), 404);
+    assert.equal(await rawStatus(server.url, '/%ZZ'), 400);
   });
 });
 
@@ -269,20 +285,35 @@ test('run --boost 는 엔트리를 부스트 모드(WebGL 렌더러)로 띄운�
 
 test('부스트 모드는 실행기가 CDN 이어도 기본 그림을 같은 origin 으로 내보낸다', async () => {
   // Proxy default images through the local origin because Entry omits crossOrigin for WebGL textures.
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-boost-'));
-  try {
-    await withServer({ cwd, boost: true }, async (server: any) => {
-      const page = await (await fetch(server.url)).text();
-      assert.match(page, /libDir: "\/lib"/);
-      assert.match(page, /src="https:\/\/unpkg\.com\/@entrylabs\/entry@[\d.]+\/dist\/entry\.min\.js"/);
-    });
-    await withServer({ cwd }, async (server: any) => {
-      assert.match(await (await fetch(server.url)).text(), /libDir: "https:\/\/unpkg\.com\//);
-    });
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
+  const cwd = path.join(os.tmpdir(), `entropy-no-boost-runtime-${process.pid}`);
+  await withServer({ cwd, boost: true }, async (server: any) => {
+    const page = await (await fetch(server.url)).text();
+    assert.match(page, /libDir: "\/lib"/);
+    assert.match(page, /src="https:\/\/unpkg\.com\/@entrylabs\/entry@[\d.]+\/dist\/entry\.min\.js"/);
+  });
+  await withServer({ cwd }, async (server: any) => {
+    assert.match(await (await fetch(server.url)).text(), /libDir: "https:\/\/unpkg\.com\//);
+  });
 });
+
+function rawStatus(
+  base: string,
+  requestPath: string,
+  headers?: Record<string, string>,
+  method = 'GET',
+): Promise<number> {
+  const target = new URL(base);
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: target.hostname, port: target.port, path: requestPath, headers, method,
+    }, (response) => {
+      response.resume();
+      response.on('end', () => resolve(response.statusCode ?? 0));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
 
 test('부스트 모드에서는 캔버스 버퍼 대신 렌더러 해상도를 올린다', async () => {
   // Use renderer resolution instead of changing PIXI's canvas width directly.

@@ -33,11 +33,12 @@ export interface RunningServer {
   }): void;
 }
 
-// Proxy TTS through the local server because Entry's service does not allow browser CORS.
-const TTS_PROXY_PATH = '/api/expansionBlock/tts/read.mp3';
+// Proxy Entry expansion APIs through the local server because they do not allow browser CORS.
+const EXPANSION_PROXY_PREFIX = '/api/expansionBlock/';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
   '.map': 'application/json; charset=utf-8',
@@ -50,7 +51,7 @@ const MIME: Record<string, string> = {
 };
 
 // Use unpkg because Entry's package exceeds jsDelivr's package size limit.
-const CDN = 'https://unpkg.com/@entrylabs/entry@4.0.22';
+const CDN = 'https://unpkg.com/@entrylabs/entry@4.0.23';
 
 const DEBUG_UI_FILE = fileURLToPath(new URL('./debug-ui.ts', import.meta.url));
 
@@ -72,6 +73,7 @@ export function findPreactDir() {
 
 export function findLocalRuntime(from = process.cwd()) {
   let dir = path.resolve(from);
+  if (!fs.existsSync(dir)) return null;
   for (;;) {
     const candidate = path.join(dir, 'node_modules', '@entrylabs', 'entry');
     if (fs.existsSync(path.join(candidate, 'dist', 'entry.min.js'))) return candidate;
@@ -120,7 +122,15 @@ export function serveProject({
   };
 
   const server = http.createServer((request, response) => {
-    const url = decodeURIComponent((request.url ?? '/').split('?')[0]);
+    if (!isLoopbackHost(request.headers.host)) {
+      return send(response, 403, '.txt', 'forbidden');
+    }
+    let url: string;
+    try {
+      url = decodeURIComponent((request.url ?? '/').split('?')[0]);
+    } catch {
+      return send(response, 400, '.txt', 'bad request');
+    }
 
     if (reload && url === '/__reload') {
       response.writeHead(200, {
@@ -134,8 +144,13 @@ export function serveProject({
       return;
     }
 
-    if (request.method === 'POST' && url === '/__log') return receiveLog(request, response);
-    if (url === TTS_PROXY_PATH) return proxyTts(request, response);
+    if (request.method === 'POST' && url === '/__log') {
+      if (!isOwnOrigin(request)) return send(response, 403, '.txt', 'forbidden');
+      return receiveLog(request, response);
+    }
+    if (request.method === 'GET' && url.startsWith(EXPANSION_PROXY_PREFIX) && !url.includes('..')) {
+      return proxyEntryApi(request, response);
+    }
 
     if (url === '/' || url === '/index.html') return send(response, 200, '.html', renderPage());
     if (url === '/project.json') return send(response, 200, '.json', JSON.stringify(servedProject));
@@ -144,7 +159,7 @@ export function serveProject({
       cachedBundle ??= makeEntryBundle(currentProject, currentAssets);
       return cachedBundle.then(
         (bytes: Buffer) => send(response, 200, '.ent', bytes),
-        (error: Error) => send(response, 500, '.html', `<h1>작품을 묶지 못했습니다: ${error.message}</h1>`),
+        (error: Error) => send(response, 500, '.txt', `작품을 묶지 못했습니다: ${error.message}`),
       );
     }
 
@@ -152,7 +167,7 @@ export function serveProject({
 
     if (localRuntime && url.startsWith('/lib/')) {
       const target = path.join(localRuntime, url.slice('/lib/'.length));
-      if (target.startsWith(localRuntime) && fs.existsSync(target)) return sendFile(response, target);
+      if (inside(localRuntime, target) && fs.existsSync(target)) return sendFile(response, target);
     }
     if (!localRuntime && boost && url.startsWith('/lib/')) return proxyRuntimeFile(url, response);
 
@@ -160,7 +175,7 @@ export function serveProject({
 
     if (preactDir && url.startsWith(PREACT_PATH)) {
       const target = path.join(preactDir, url.slice(PREACT_PATH.length));
-      if (target.startsWith(preactDir) && fs.existsSync(target)) return sendFile(response, target);
+      if (inside(preactDir, target) && fs.existsSync(target)) return sendFile(response, target);
     }
 
     return send(response, 404, '.html', '<h1>404</h1>');
@@ -212,8 +227,8 @@ function receiveLog(request: http.IncomingMessage, response: http.ServerResponse
     try {
       const { kind, message, stack, time } = JSON.parse(body);
       const when = new Date(time ?? Date.now()).toLocaleTimeString('ko-KR', { hour12: false });
-      console.error(`\n[${when}] 엔트리 실행 중 ${kind ?? '오류'}: ${message ?? '(메시지 없음)'}`);
-      if (stack) console.error(stack);
+      console.error(`\n[${when}] 엔트리 실행 중 ${plainText(kind) || '오류'}: ${plainText(message) || '(메시지 없음)'}`);
+      if (stack) console.error(plainText(stack));
     } catch {
       // Keep the server running if a browser log body cannot be read.
     }
@@ -221,18 +236,24 @@ function receiveLog(request: http.IncomingMessage, response: http.ServerResponse
   });
 }
 
-async function proxyTts(request: http.IncomingMessage, response: http.ServerResponse) {
+async function proxyEntryApi(request: http.IncomingMessage, response: http.ServerResponse) {
   const target = `https://playentry.org${request.url}`;
   try {
-    const upstream = await fetch(target);
+    const upstream = await fetch(target, {
+      headers: { accept: '*/*', referer: 'https://playentry.org/' },
+      signal: AbortSignal.timeout(5000),
+    });
     if (!upstream.ok || !upstream.body) {
-      send(response, upstream.status || 502, '.html', '<h1>tts 요청이 playentry.org 에서 실패했습니다</h1>');
+      send(response, upstream.status || 502, '.txt', '확장 데이터 요청이 playentry.org 에서 실패했습니다');
       return;
     }
-    response.writeHead(200, { 'content-type': upstream.headers.get('content-type') ?? 'audio/mpeg' });
+    response.writeHead(upstream.status, {
+      'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream',
+      'cache-control': 'no-store',
+    });
     Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(response);
   } catch (error) {
-    send(response, 502, '.html', `<h1>tts 요청을 playentry.org 로 보내지 못했습니다: ${(error as Error).message}</h1>`);
+    send(response, 502, '.txt', `확장 데이터 요청을 playentry.org 로 보내지 못했습니다: ${(error as Error).message}`);
   }
 }
 
@@ -247,7 +268,7 @@ async function proxyRuntimeFile(url: string, response: http.ServerResponse) {
     const body = Buffer.from(await upstream.arrayBuffer());
     return send(response, 200, path.extname(rest).toLowerCase(), body);
   } catch (error) {
-    return send(response, 502, '.html', `<h1>실행기 파일을 CDN 에서 받지 못했습니다: ${(error as Error).message}</h1>`);
+    return send(response, 502, '.txt', `실행기 파일을 CDN 에서 받지 못했습니다: ${(error as Error).message}`);
   }
 }
 
@@ -266,6 +287,29 @@ function sendFile(response: http.ServerResponse, file: string) {
   } catch {
     send(response, 404, '.html', '<h1>404</h1>');
   }
+}
+
+function inside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function isLoopbackHost(host: string | undefined): boolean {
+  if (!host) return false;
+  const name = host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
+  return name === '127.0.0.1' || name === 'localhost' || name === '::1';
+}
+
+function isOwnOrigin(request: http.IncomingMessage): boolean {
+  const origin = request.headers.origin;
+  return origin === undefined || origin === `http://${request.headers.host}`;
+}
+
+const CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
+
+function plainText(value: unknown): string {
+  const text = typeof value === 'string' ? value : (JSON.stringify(value) ?? '');
+  return text.replace(CONTROL_CHARS, ' ');
 }
 
 function safeName(name: string) {

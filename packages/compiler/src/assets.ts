@@ -124,6 +124,15 @@ export function makeAsset(
   if (resolved) {
     bytes = host(ctx).readFile(resolved);
     if (bytes) {
+      const limit = isImage ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+      if (bytes.length > limit) {
+        ctx.warn(node, `'${file}' 크기가 ${(bytes.length / 1024 / 1024).toFixed(1)}MB라 Entry의 ${isImage ? '이미지 5MB' : '오디오 10MB'} 기준을 넘습니다.`, {
+          code: 'W0006',
+          help: isImage
+            ? '투명도가 필요하면 PNG 팔레트·해상도를 줄이고, 필요 없으면 JPEG 품질을 조정하세요.'
+            : 'MP3 비트레이트를 낮추거나 소리를 나누세요. 업로드가 조용히 실패할 수 있습니다.',
+        });
+      }
       if (isImage && !size) size = imageSize(bytes);
       if (!isImage && seconds === null) seconds = audioDuration(bytes, ext);
     }

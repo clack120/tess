@@ -92,8 +92,8 @@ function isOwnOrigin(request: http.IncomingMessage): boolean {
   return origin === undefined || origin === `http://${request.headers.host}`;
 }
 
-// Proxy translation through the local origin because Entry's API does not allow browser CORS.
-const PAPAGO_PREFIX = '/api/expansionBlock/papago/';
+// Proxy expansion APIs through the local origin because Entry does not allow browser CORS.
+const EXPANSION_PREFIX = '/api/expansionBlock/';
 const ENTRY_ORIGIN = 'https://playentry.org';
 // Match Entry's API timeout before returning the default answer.
 const API_TIMEOUT_MS = 3000;
@@ -115,11 +115,15 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
   const listeners = new Set<http.ServerResponse>();
 
   const server = http.createServer((request, response) => {
-    const url = decodeURIComponent((request.url ?? '/').split('?')[0] ?? '/');
-
     // Reject foreign Host headers before serving project data or VM files.
     if (!isLoopbackHost(request.headers.host)) {
       return send(response, 403, 'text/plain', 'forbidden');
+    }
+    let url: string;
+    try {
+      url = decodeURIComponent((request.url ?? '/').split('?')[0] ?? '/');
+    } catch {
+      return send(response, 400, 'text/plain', 'bad request');
     }
 
     if (url === '/' || url === '/index.html') {
@@ -146,7 +150,7 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
       return send(response, 200, MIME['.json']!, sourceMapJson);
     }
 
-    if (request.method === 'GET' && url.startsWith(PAPAGO_PREFIX) && !url.includes('..')) {
+    if (request.method === 'GET' && url.startsWith(EXPANSION_PREFIX) && !url.includes('..')) {
       return void passToEntry(request, response);
     }
 
@@ -163,7 +167,7 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
     }
     if (preactDir && url.startsWith(PREACT_PATH)) {
       const file = path.join(preactDir, url.slice(PREACT_PATH.length));
-      if (file.startsWith(preactDir) && fs.existsSync(file)) {
+      if (inside(preactDir, file) && fs.existsSync(file)) {
         return sendFile(response, file, MIME['.mjs']!);
       }
       return send(response, 404, 'text/plain', 'not found');
@@ -192,7 +196,7 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
     if (url.startsWith('/vm/')) {
       const relative = url.slice('/vm/'.length);
       const file = path.join(SRC_DIR, relative);
-      if (!file.startsWith(SRC_DIR) || !fs.existsSync(file)) {
+      if (!inside(SRC_DIR, file) || !fs.existsSync(file)) {
         return send(response, 404, 'text/plain', 'not found');
       }
       const source = fs.readFileSync(file, 'utf-8');
@@ -231,15 +235,15 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
   };
 }
 
-// Proxy only the translation path to Entry's own host.
 async function passToEntry(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
   try {
     const answer = await fetch(`${ENTRY_ORIGIN}${request.url ?? ''}`, {
       // Set the work referer because Entry accepts API calls only for its pages.
-      headers: { accept: 'application/json', referer: `${ENTRY_ORIGIN}/` },
+      headers: { accept: '*/*', referer: `${ENTRY_ORIGIN}/` },
       signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
-    send(response, answer.status, MIME['.json']!, await answer.text());
+    const type = answer.headers.get('content-type') ?? 'application/octet-stream';
+    send(response, answer.status, type, Buffer.from(await answer.arrayBuffer()));
   } catch {
     // Keep Entry's default answer when offline or past its timeout.
     send(response, 502, MIME['.json']!, '{}');
@@ -269,7 +273,12 @@ function receiveLog(request: http.IncomingMessage, response: http.ServerResponse
   });
 }
 
-function send(response: http.ServerResponse, status: number, type: string, body: string): void {
+function send(
+  response: http.ServerResponse,
+  status: number,
+  type: string,
+  body: string | Uint8Array,
+): void {
   response.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
   response.end(body);
 }
@@ -288,6 +297,11 @@ function sendFile(response: http.ServerResponse, file: string, type: string): vo
     'cache-control': 'no-cache',
   });
   fs.createReadStream(file).pipe(response);
+}
+
+function inside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
 // Prefer a stable port so bookmarks keep working.

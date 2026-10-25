@@ -1,4 +1,4 @@
-import type { Diagnostic, Expr, FunctionDeclNode, ObjectNode, ParseRoot } from '@entropy/parser';
+import type { Diagnostic, Expr, FunctionDeclNode, ObjectNode, ParseRoot, VarDeclNode } from '@entropy/parser';
 import type { CompilerHost } from './host.ts';
 
 export type EntryParam = EntryBlock | string | number | boolean | null;
@@ -241,8 +241,9 @@ export interface FunctionScope {
   name: string;
   params: Map<string, string>;
   // Include locals allocated by nested blocks, keyed by ID.
-  localVars: Map<string, { id: string; displayName: string }>;
-  bindings: Map<string, { id: string; displayName: string }>;
+  localVars: Map<string, { id: string; displayName: string; value?: string | number }>;
+  bindings: Map<string, { id: string; displayName: string; value?: string | number }>;
+  declarations: Map<VarDeclNode, { id: string; displayName: string; value: string | number }>;
   returnId?: string;
 }
 

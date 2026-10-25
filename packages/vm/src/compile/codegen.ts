@@ -5,6 +5,7 @@ import { blockCounts } from './block-count.ts';
 import { isNumber } from '../runtime/cast.ts';
 export type { RawBlock, FunctionEntry } from './blocks.ts';
 import type { GeneratedTrace } from '../runtime/diagnostics.ts';
+import { expansionBlock } from '@entropy/core';
 
 let nextSourceId = 0;
 
@@ -1069,6 +1070,16 @@ export class Codegen {
         return { code: `O.soundDuration(e, ${this.field(p[1])})`, kind: 'num' };
 
       default: {
+        const expansion = expansionBlock(block.type);
+        if (expansion) {
+          const args = expansion.slots.map((slot, index) => slot === 'value'
+            ? this.raw(p[index])
+            : this.field(p[index]));
+          return {
+            code: `(yield* O.expansion(${literal(block.type)}, [${args.join(', ')}]))`,
+            kind: expansion.kind === 'boolean' ? 'bool' : 'any',
+          };
+        }
         if (block.type.startsWith('func_')) {
           return { code: this.callFunction(block, '', true).code, kind: 'any' };
         }

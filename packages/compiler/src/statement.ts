@@ -855,11 +855,16 @@ function compileDeclaration(node: VarDeclNode | ListDeclNode, ctx: Context): Ent
     if (node.type === 'ListDecl') {
       return blocksOf([ctx.error(node, '함수 안에서는 리스트를 선언할 수 없습니다. 전역 리스트를 쓰세요.')]);
     }
-    // Resolve the initializer before this declaration shadows an outer binding.
-    const value = compileValue(node.value, ctx);
-    const local = { id: `${ctx.funcScope.id}_${ctx.newId()}`, displayName: node.displayName ?? node.name };
+    const declared = ctx.funcScope.declarations.get(node);
+    // Resolve non-literal initializers before this declaration shadows an outer binding.
+    const value = declared ? null : compileValue(node.value, ctx);
+    const local = declared ?? {
+      id: `${ctx.funcScope.id}_${ctx.newId()}`,
+      displayName: node.displayName ?? node.name,
+    };
     ctx.funcScope.localVars.set(local.id, local);
     ctx.funcScope.bindings.set(node.name, local);
+    if (declared) return [];
     return value ? [ctx.block('set_func_variable', [local.id, value, null])] : [];
   }
   // Event declarations still belong to the object when a loop counter shadows their name.

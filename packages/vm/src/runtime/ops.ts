@@ -1271,6 +1271,13 @@ export function createOps(vm: Vm) {
       return LANGUAGE_NAMES[code] ?? UNKNOWN_SENTENCE;
     },
 
+    *expansion(type: string, params: unknown[]): Generator<number, unknown> {
+      const fallback = type.startsWith('check_') ? false
+        : type.startsWith('count_') ? 0 : '데이터 없음';
+      const answer = vm.expansion?.read(type, params);
+      return answer ? yield* settle(answer, fallback) : fallback;
+    },
+
     timerAction(action: string): void {
       if (action === 'START') {
         vm.startTimer();

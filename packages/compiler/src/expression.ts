@@ -4,7 +4,7 @@ import { didYouMean, orHint } from '@entropy/core';
 import { requireMinMax, requirePowerRefiner, requireStoreFlag } from './runtime.ts';
 import { requireStringHelper } from './string-functions.ts';
 import { BUILTIN_FUNCTIONS, OPTION_KEYWORDS, STATE_VALUES, STORE_FLAG_ON } from '@entropy/core';
-import { expansionBlock } from '@entropy/core';
+import { expansionBlock, expansionField } from '@entropy/core';
 import type {
   BinaryNode, CallNode, Expr, IndexNode, Node, UnaryNode,
 } from '@entropy/parser';
@@ -502,8 +502,8 @@ function compileExpansion(node: CallNode, ctx: Context): EntryBlock | null {
   const params = slots.map((slot, index): EntryParam => {
     const argument = args[index]!;
     if (slot === 'value') return compileValue(argument, ctx);
-    if (argument.type === 'String') return argument.value;
-    if (argument.type === 'Number') return String(argument.value);
+    if (argument.type === 'String') return expansionField(callee, index, argument.value);
+    if (argument.type === 'Number') return expansionField(callee, index, String(argument.value));
     return ctx.error(argument, `${callee}() 의 ${index + 1}번째 칸은 목록에서 고르는 자리라 "..." 로 직접 적어야 합니다.`);
   });
   if (params.some((param) => param === null)) return null;

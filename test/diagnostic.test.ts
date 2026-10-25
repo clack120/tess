@@ -155,3 +155,55 @@ test('literal string bounds warnings show valid positions without replacing nati
     'function slice(text, start, finish) do\n  return text\nend'));
   assert.ok(shadow.warnings.every(item => item.code !== 'W0003'), 'user function semantics are unknown');
 });
+
+test('recursive call cycles warn about EntryJS stack risk with linked call sites', () => {
+  const direct = compileProject(`function walk(n) do
+  if n > 0:
+    walk(n - 1)
+  end
+end
+${work('walk(2000)')}`);
+  const warning = direct.warnings.find(item => item.code === 'W0004')!;
+  assert.match(warning.message, /재귀 호출.*작품 전체가 멈출/);
+  assert.match(warning.help!, /1,500.*브라우저.*기기.*환경/);
+  assert.match(warning.detail!, /walk\(n - 1\)/);
+
+  const mutual = compileProject(`function left(n) do
+  right(n)
+end
+function right(n) do
+  left(n)
+end
+${work('left(1)')}`);
+  const cycle = mutual.warnings.filter(item => item.code === 'W0004');
+  assert.equal(cycle.length, 1);
+  assert.match(cycle[0]!.message, /left|right/);
+  assert.ok((cycle[0]!.related?.length ?? 0) >= 1);
+
+  const plain = compileProject(`function leaf(n) do
+  say n
+end
+${work('leaf(1)')}`);
+  assert.ok(plain.warnings.every(item => item.code !== 'W0004'));
+});
+
+test('Entry runtime limits and first-scene behavior have targeted diagnostics', () => {
+  const firstScene = compileProject(`scene "first":
+  object "o":
+    when scene start do
+      say 1
+    end
+  end
+end`);
+  const sceneWarning = firstScene.warnings.find(item => item.code === 'W0005')!;
+  assert.match(sceneWarning.message, /처음 시작할 때 실행되지/);
+  assert.match(sceneWarning.help!, /when start do/);
+
+  const values = Array.from({ length: 5001 }, (_, index) => index).join(', ');
+  const list = compileProject(`list too_many = [${values}]`);
+  const limit = list.errors.find(item => item.code === 'E0008')!;
+  assert.match(limit.message, /5,001.*5,000/);
+  assert.match(limit.help!, /여러 리스트/);
+  assert.ok(list.project, 'loose mode still returns a project');
+  assert.ok(list.project!.variables.every(variable => variable.name !== 'too_many'), 'the oversized list is not emitted');
+});

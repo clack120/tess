@@ -14,6 +14,7 @@ import { Codegen, serveVm, Vm } from '@entropy/vm';
 import { decompileEnt } from '@entropy/decompiler';
 import { parse } from '@entropy/parser';
 import { entropyComment, entropyCommentLines, entropyString } from '../packages/decompiler/src/ident.ts';
+import { stub } from './stub.ts';
 
 const utf8 = (data: Uint8Array) => new TextDecoder('utf-8').decode(data);
 
@@ -526,6 +527,12 @@ test('run 서버는 자기 이름으로 오지 않은 요청을 거절한다', a
   });
 });
 
+test('run 서버는 잘못 인코딩된 URL 을 안전하게 거절한다', async () => {
+  await withVmServer(async ({ port }) => {
+    assert.equal((await request(port, { path: '/%ZZ' })).status, 400);
+  });
+});
+
 // Log endpoints must reject foreign origins because form-style requests need no preflight.
 test('오류 기록 자리는 이 페이지가 보낸 것만 받는다', async () => {
   await withVmServer(async ({ port }) => {
@@ -576,8 +583,8 @@ test('터미널에 적히는 글에서는 제어 문자가 빠진다', async () 
   assert.ok(all.includes('줄2'), all);
 });
 
-// Restrict the translation proxy to the one supported API path.
-test('번역 호출은 정해진 자리와 방법으로만 넘어간다', async () => {
+// Restrict the expansion proxy to Entry's read-only API path.
+test('확장 API 호출은 정해진 자리와 방법으로만 넘어간다', async () => {
   await withVmServer(async ({ port }) => {
     assert.equal(
       (await request(port, { path: '/api/expansionBlock/papago/translate/n2mt', method: 'POST' })).status,
@@ -587,7 +594,6 @@ test('번역 호출은 정해진 자리와 방법으로만 넘어간다', async 
       (await request(port, { path: '/api/expansionBlock/papago/../../../etc/passwd' })).status,
       404,
     );
-    assert.equal((await request(port, { path: '/api/expansionBlock/tts/read.mp3' })).status, 404);
     assert.equal(
       (await request(port, {
         path: '/api/expansionBlock/papago/translate/n2mt',
@@ -595,5 +601,29 @@ test('번역 호출은 정해진 자리와 방법으로만 넘어간다', async 
       })).status,
       403,
     );
+  });
+});
+
+test('확장 API 프록시는 음성 같은 바이너리의 형식을 보존한다', async (t) => {
+  const audio = Uint8Array.of(0, 255, 1, 254);
+  stub(t, globalThis, 'fetch', async () => new Response(audio, {
+    status: 206,
+    headers: { 'content-type': 'audio/mpeg' },
+  }));
+  await withVmServer(async ({ port }) => {
+    const received = await new Promise<{ status: number; type: string; body: Buffer }>((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port, path: '/api/expansionBlock/tts/read' }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => resolve({
+          status: response.statusCode ?? 0,
+          type: String(response.headers['content-type'] ?? ''),
+          body: Buffer.concat(chunks),
+        }));
+      }).on('error', reject);
+    });
+    assert.equal(received.status, 206);
+    assert.equal(received.type, 'audio/mpeg');
+    assert.deepEqual(received.body, Buffer.from(audio));
   });
 });

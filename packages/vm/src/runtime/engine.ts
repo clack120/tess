@@ -56,6 +56,10 @@ export interface Translator {
   detect(text: string): Promise<string>;
 }
 
+export interface ExpansionReader {
+  read(type: string, params: unknown[]): Promise<unknown>;
+}
+
 export interface TextMeasurer {
   measureTextBox(entity: Entity): { width: number; height: number } | null;
 }
@@ -112,6 +116,8 @@ export interface VmOptions {
   speech?: SpeechEngine | null;
   // Without a translation host, return Entry's offline result.
   translator?: Translator | null;
+  // Browser hosts provide Entry's weather, festival, and safety data APIs.
+  expansion?: ExpansionReader | null;
   // Use the host Entry label when naming new table columns.
   tableColumnName?: string;
   // Leave unset to use the project's speed.
@@ -171,6 +177,7 @@ export class Vm implements Project {
   readonly tableColumnName: string;
   speech: SpeechEngine | null;
   translator: Translator | null;
+  expansion: ExpansionReader | null;
   renderer: Renderer | null;
   audio: AudioEngine | null;
   readonly cast = cast;
@@ -249,6 +256,7 @@ export class Vm implements Project {
     this.audio = options.audio ?? null;
     this.speech = options.speech ?? null;
     this.translator = options.translator ?? null;
+    this.expansion = options.expansion ?? null;
     this.tableColumnName = options.tableColumnName ?? '새로운 열';
     this.requestedFps = options.fps;
     this.frameRate = options.fps ?? DEFAULT_FPS;

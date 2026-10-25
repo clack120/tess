@@ -3,6 +3,8 @@ import { EMPTY_HOST, dirname } from './host.ts';
 import { loadProgram, createCompileCache } from './include.ts';
 import { buildCommentMap } from './comments.ts';
 import { makeAsset } from './assets.ts';
+import { diagnoseEntryRisks } from './entry-risks.ts';
+import { verifyEntryProject } from './verify.ts';
 import { compileStatements, compileStatement } from './statement.ts';
 import { compileValue } from './expression.ts';
 import { KEY_CODES, STORE_PREFIX, keyCodeOf } from '@entropy/core';
@@ -81,6 +83,7 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   collectObjects(program, ctx);
   collectFunctions(program, ctx);
   collectMessages(program, ctx);
+  diagnoseEntryRisks(ctx);
   timer.mark('심볼 · 리소스 수집');
 
   compileFunctions(ctx);
@@ -88,6 +91,20 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   timer.mark('스크립트 컴파일');
 
   const project = assemble(program, ctx, options);
+  const projectBytes = new TextEncoder().encode(JSON.stringify(project)).length;
+  if (projectBytes > 10 * 1024 * 1024) {
+    ctx.warn(program, `project.json 크기가 ${(projectBytes / 1024 / 1024).toFixed(1)}MB라 Entry 업로드 기준 10MB를 넘습니다.`, {
+      code: 'W0008',
+      help: '큰 리스트와 반복 생성된 블록을 줄이거나 작품을 나누세요. .ent 압축 크기가 작아도 project.json 원문 크기는 별도 제한을 받습니다.',
+    });
+  }
+  const verificationProblems = verifyEntryProject(project, { references: false });
+  for (const problem of verificationProblems) {
+    ctx.error(program, `엔트리에서 안전하게 열 수 없는 작품이 만들어졌습니다: ${problem}`, {
+      code: 'E9001',
+      help: '소스 문제가 아니라 컴파일러의 Entry 블록 스키마 검증 실패입니다. 이 진단과 소스를 함께 버그로 신고하세요.',
+    });
+  }
   timer.mark('작품 조립');
 
   const ok = ctx.errors.length === 0;
@@ -95,7 +112,7 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   const warnings = strict ? [...ctx.warnings, ...ctx.notices] : ctx.warnings;
   return {
     ok,
-    project: ok || !strict ? project : null,
+    project: verificationProblems.length === 0 && (ok || !strict) ? project : null,
     errors: withFrames(ctx.errors),
     warnings: withFrames(withoutDuplicates(warnings, ctx.errors)),
     notices: strict ? [] : withFrames(withoutDuplicates(ctx.notices, ctx.errors)),
@@ -280,6 +297,18 @@ function makeVariable(
 
   if (node.type === 'ListDecl') {
     const elements = node.value.type === 'ListLiteral' ? node.value.elements : [];
+    if (elements.length > 5000) {
+      return ctx.error(node, `리스트 '${entryName}' 의 초기 항목이 ${elements.length.toLocaleString('en-US')}개라 Entry 한도 5,000개를 넘습니다.`, {
+        code: 'E0008',
+        help: '데이터를 여러 리스트로 나누거나, 필요한 범위만 저장하세요. Entry는 로드할 때 초과 항목을 잘라 데이터가 사라질 수 있습니다.',
+      });
+    }
+    if (elements.length >= 4500) {
+      ctx.notice(node, `리스트 '${entryName}' 이(가) ${elements.length.toLocaleString('en-US')}개로 Entry 한도 5,000개에 가깝습니다.`, {
+        code: 'N0001',
+        help: '실행 중 항목을 더 넣는다면 고정 크기 슬롯을 재사용하거나, 추가 전에 길이를 검사하세요.',
+      });
+    }
     const items = elements.map((element) => constantOf(element, ctx));
     if (items.some((item) => item === null)) return null;
     return {
@@ -548,9 +577,22 @@ function compileFunctions(ctx: Context) {
       params: fn.paramTypes,
       localVars: new Map(),
       bindings: new Map(),
+      declarations: new Map(),
     };
 
     const declared = fn.node!;
+    // Entry clones function locals for every call. Store simple top-level initializers there
+    // instead of emitting a duplicate assignment, which also keeps decompile/recompile stable.
+    for (const statement of declared.body) {
+      if (statement.type !== 'VarDecl') continue;
+      const value = functionLocalInitialValue(statement.value);
+      if (value === null) continue;
+      ctx.funcScope.declarations.set(statement, {
+        id: `${ctx.funcScope.id}_${ctx.newId()}`,
+        displayName: statement.displayName ?? statement.name,
+        value,
+      });
+    }
     const tail = declared.body[declared.body.length - 1] as ReturnNode | undefined;
     const simpleReturn = tail?.type === 'Return' && tail.value !== null && findReturns(declared.body).length === 1;
     if (fn.isValue && !simpleReturn) {
@@ -575,7 +617,7 @@ function compileFunctions(ctx: Context) {
     create.y = 30;
 
     fn.localVariables = [...ctx.funcScope.localVars].map(
-      ([, local]) => ({ id: local.id, name: local.displayName, value: 0 }),
+      ([, local]) => ({ id: local.id, name: local.displayName, value: local.value ?? 0 }),
     );
     fn.content = [[create]];
     fn.type = fn.isValue ? 'value' : 'normal';
@@ -583,6 +625,17 @@ function compileFunctions(ctx: Context) {
     ctx.funcScope = null;
     ctx.locals = new Map();
     ctx.object = null;
+  }
+}
+
+function functionLocalInitialValue(value: Expr): string | number | null {
+  switch (value.type) {
+    case 'Number': case 'String': case 'Color': return value.value;
+    case 'Transparent': return 'transparent';
+    case 'Unary': return value.operator === '-' && value.argument.type === 'Number'
+      ? -value.argument.value
+      : null;
+    default: return null;
   }
 }
 

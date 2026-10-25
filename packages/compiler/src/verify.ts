@@ -1,4 +1,5 @@
 import { BLOCK_PARAM_COUNTS } from './block-params.ts';
+import { expansionBlock } from '@entropy/core';
 import type { EntryProject } from './types.ts';
 
 type AnyBlock = Record<string, any>;
@@ -8,6 +9,11 @@ type ReferenceKind = 'variable' | 'list' | 'message' | 'scene' | 'picture' | 'so
 interface BlockOwner {
   pictures: Set<string>;
   sounds: Set<string>;
+}
+
+export interface VerifyEntryProjectOptions {
+  // Loose compilation may intentionally preserve dangling IDs from a decompiled project.
+  references?: boolean;
 }
 
 const BLOCK_FIELDS = ['id', 'x', 'y', 'type', 'params', 'statements'];
@@ -43,9 +49,13 @@ const REFERENCES: Record<string, Array<[number, ReferenceKind]>> = {
   text_read: [[0, 'objectOrSelf']],
 };
 
-export function verifyEntryProject(project: EntryProject): string[] {
+export function verifyEntryProject(
+  project: EntryProject,
+  options: VerifyEntryProjectOptions = {},
+): string[] {
   const problems: string[] = [];
   const add = (message: string) => problems.push(message);
+  const checkReferences = options.references !== false;
 
   for (const key of PROJECT_KEYS) {
     if (!(key in project)) add(`프로젝트에 '${key}' 항목이 없습니다.`);
@@ -55,6 +65,21 @@ export function verifyEntryProject(project: EntryProject): string[] {
   const sceneIds = new Set(project.scenes.map((scene) => scene.id));
   const messageIds = new Set(project.messages.map((message) => message.id));
   const functionIds = new Set(project.functions.map((fn) => fn.id));
+  const functionParamCounts = new Map<string, { fields: number; statementIcon: boolean }>();
+  for (const fn of project.functions) {
+    try {
+      const create = JSON.parse(fn.content)?.[0]?.[0];
+      let count = 0;
+      let field = create?.params?.[0];
+      while (field && typeof field === 'object') {
+        if (field.type === 'function_field_string' || field.type === 'function_field_boolean') count += 1;
+        field = field.params?.[1];
+      }
+      functionParamCounts.set(fn.id, { fields: count, statementIcon: fn.type !== 'value' });
+    } catch {
+      // The detailed function-content error is reported below.
+    }
+  }
   const variableIds = new Set<string>();
   const listIds = new Set<string>();
   for (const variable of project.variables) {
@@ -83,17 +108,32 @@ export function verifyEntryProject(project: EntryProject): string[] {
     if (!Array.isArray(block.params)) add(`${path}: params 가 배열이 아닙니다.`);
     if (!Array.isArray(block.statements)) add(`${path}: statements 가 배열이 아닙니다.`);
 
-    const expected = BLOCK_PARAM_COUNTS[block.type];
+    const expansion = expansionBlock(block.type);
+    const expected = BLOCK_PARAM_COUNTS[block.type] ?? expansion?.slots.length;
     if (expected !== undefined && block.params?.length !== expected) {
       add(`${path}: ${block.type} 의 params 가 ${block.params?.length}개입니다. (엔트리는 ${expected}개)`);
     }
 
     if (block.type.startsWith('func_')) {
       const id = block.type.slice(5);
-      if (!functionIds.has(id)) add(`${path}: 함수 '${id}' 가 functions 에 없습니다.`);
+      if (checkReferences && !functionIds.has(id)) add(`${path}: 함수 '${id}' 가 functions 에 없습니다.`);
+      const call = functionParamCounts.get(id);
+      // Void functions have a trailing icon slot as statements, but Entry also accepts
+      // them without that slot when they are embedded in a value position.
+      const validCounts = call && (call.statementIcon ? [call.fields, call.fields + 1] : [call.fields]);
+      if (validCounts && !validCounts.includes(block.params?.length)) {
+        add(`${path}: ${block.type} 호출의 params 가 ${block.params?.length}개입니다. (함수 스키마는 ${validCounts.join('개 또는 ')}개)`);
+      }
     }
 
-    for (const [index, kind] of REFERENCES[block.type] ?? []) {
+    if (expansion) {
+      const modules = expansion.ai ? project.aiUtilizeBlocks : project.expansionBlocks;
+      if (!modules.includes(expansion.module)) {
+        add(`${path}: ${block.type} 에 필요한 '${expansion.module}' 모듈이 프로젝트에 없습니다.`);
+      }
+    }
+
+    for (const [index, kind] of checkReferences ? (REFERENCES[block.type] ?? []) : []) {
       const value = block.params?.[index];
       if (value === null || value === undefined) continue;
       if (typeof value !== 'string') continue;
@@ -126,7 +166,7 @@ export function verifyEntryProject(project: EntryProject): string[] {
 
   for (const object of project.objects) {
     const label = `오브젝트 '${object.name}'`;
-    if (!sceneIds.has(object.scene)) add(`${label}: 없는 장면 '${object.scene}' 에 속해 있습니다.`);
+    if (checkReferences && !sceneIds.has(object.scene)) add(`${label}: 없는 장면 '${object.scene}' 에 속해 있습니다.`);
     if (!['sprite', 'textBox'].includes(object.objectType)) {
       add(`${label}: objectType 이 '${object.objectType}' 입니다.`);
     }
@@ -138,7 +178,7 @@ export function verifyEntryProject(project: EntryProject): string[] {
     };
 
     if (object.objectType === 'sprite') {
-      if (object.selectedPictureId && !owner.pictures.has(object.selectedPictureId)) {
+      if (checkReferences && object.selectedPictureId && !owner.pictures.has(object.selectedPictureId)) {
         add(`${label}: selectedPictureId 가 모양 목록에 없습니다.`);
       }
     } else if (typeof object.text !== 'string') {
