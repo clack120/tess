@@ -1,5 +1,5 @@
 import { imageSize } from '../../compiler/src/assets.ts';
-import { append, safeIdentifier, entropyString, entropyNumber, entropyLiteral, entropyComment, displayNamePart } from './ident.ts';
+import { append, safeIdentifier, entropyString, entropyNumber, entropyLiteral, entropyComment, displayNamePart, resourceInfo } from './ident.ts';
 import {
   autoParamName, KEY_CODES, parseEntryBlockData, STORE_PREFIX, STORE_SAVE_ASYNC_FUNCTION,
   STORE_SAVE_FUNCTION, tableRowCells, tableRows,
@@ -76,6 +76,9 @@ const SIZE_SLACK = 1;
 const decoder = new TextDecoder('utf-8');
 const encoder = new TextEncoder();
 
+// Keep long static declarations out of the code people edit most often.
+const DECLARATION_FILE_LINES = 20;
+
 function headText(bytes: Uint8Array, limit: number): string {
   return decoder.decode(bytes.subarray(0, limit));
 }
@@ -145,16 +148,36 @@ function decompileProjectUnchecked(
   const ctx = buildContext(project, entries, options);
 
   const lines: string[] = [];
-  for (const varInfo of ctx.globalVars) append(lines, declarationLine(varInfo, 0, ctx.positions));
-  if (ctx.globalVars.length) lines.push('', '');
+  const section = (file: string, content: string[]) => {
+    if (!content.length) return;
+    if (ctx.inline) append(lines, content);
+    else {
+      sourceFile(ctx, file, content);
+      lines.push(`use ${entropyString(file)}`);
+    }
+    lines.push('');
+  };
+  const variables: string[] = [];
+  for (const info of ctx.globalVars) {
+    const declaration = declarationLine(info, 0, ctx.positions);
+    if (!ctx.inline && info.isList && declaration.length > DECLARATION_FILE_LINES) {
+      const file = `data/${info.identifier}.etp`;
+      sourceFile(ctx, file, declaration);
+      // Keep each declaration in place: Entry's variable/list order affects lookup cost.
+      variables.push(`use ${entropyString(file)}`);
+    } else append(variables, declaration);
+  }
+  section('var.etp', variables);
 
   const withRows = options.tableRows !== false;
   const heldRows: string[][][] = [];
+  const tables: string[] = [];
   for (const [, info] of ctx.tablesById) {
-    append(lines, tableLines(info, withRows));
-    lines.push('');
+    append(tables, tableLines(info, withRows));
+    tables.push('');
     if (!withRows) heldRows.push(tableRows(info.source).map((row) => row.map((cell) => String(cell ?? ''))));
   }
+  section('table.etp', tables);
 
   lines.push('project:');
   lines.push(`  title ${entropyString(project.name ?? 'Entropy 작품')}`);
@@ -163,8 +186,12 @@ function decompileProjectUnchecked(
   lines.push('end');
   lines.push('');
 
-  for (const scene of project.scenes) append(lines, sceneLines(scene, project, ctx));
+  for (const scene of project.scenes) {
+    const info = ctx.scenesById.get(scene.id)!;
+    section(`scene/${info.identifier}.etp`, sceneLines(scene, project, ctx));
+  }
 
+  const functions: string[] = [];
   for (const fn of project.functions ?? []) {
     const entry = ctx.functionsById.get(fn.id);
     if (!entry) continue;
@@ -175,23 +202,28 @@ function decompileProjectUnchecked(
       const content = parseEntryBlockData<RawBlock>(fn.content ?? []);
       const createBlock = functionCreateBlock(content);
       if (!createBlock) continue;
-      append(lines, functionDeclarationLines(entry, createBlock, ctx));
-      lines.push('');
+      append(functions, functionDeclarationLines(entry, createBlock, ctx));
+      functions.push('');
     } catch (error) {
       ctx.warnings.add(`함수 '${entry.name}' 을(를) 읽지 못했습니다: ${(error as Error).message}`);
     }
   }
-
+  section('func.etp', functions);
 
   const strict = options.strict === true;
   return {
     source: `${lines.join('\n').trimEnd()}\n`,
+    files: ctx.sourceFiles,
     warnings: strict ? [...ctx.warnings, ...ctx.notices] : [...ctx.warnings],
     notices: strict ? [] : [...ctx.notices],
     assets: ctx.collectedAssets,
     name: project.name ?? 'project',
     ...(withRows ? {} : { tableRows: heldRows }),
   };
+}
+
+function sourceFile(ctx: DecompileContext, path: string, lines: string[]): void {
+  ctx.sourceFiles.push({ path, data: encodeText(`${lines.join('\n').trimEnd()}\n`) });
 }
 
 // Restore omitted table rows in their original order.
@@ -303,12 +335,17 @@ function reviveDanglingVariables(project: RawEntity, ctx: DecompileContext, used
   }
 }
 
-// Keep functions global unless every referenced resource belongs to one object.
-function soleResourceOwner(content: unknown, ctx: DecompileContext): string | null {
+// Keep a function with the one object whose locals or resources it uses.
+function soleFunctionOwner(content: unknown, ctx: DecompileContext): string | null {
   const owners = new Set<string>();
   for (const id of resourceIdsIn(content, ctx)) {
-    const info = (ctx.picturesById.get(id) ?? ctx.soundsById.get(id))!;
-    owners.add(info.owner.id);
+    for (const owner of ctx.resourceOwnersById.get(id) ?? []) owners.add(owner);
+    if (owners.size > 1) return null;
+  }
+  const variables = variableIdsIn(content);
+  for (const id of [...variables.variables, ...variables.lists]) {
+    const owner = ctx.varsById.get(id)?.objectId;
+    if (owner) owners.add(owner);
     if (owners.size > 1) return null;
   }
   return owners.size === 1 ? [...owners][0]! : null;
@@ -374,7 +411,11 @@ function buildContext(
     scaleById: new Map(),
     picturesById: new Map(),
     soundsById: new Map(),
+    resourcesByObject: new Map(),
+    resourceOwnersById: new Map(),
+    objectId: null,
     collectedAssets: [],
+    sourceFiles: [],
     assetDataByPath: new Map(),
     // Use scene subfolders only when the project has several scenes.
     multiScene: (project.scenes ?? []).length > 1,
@@ -409,14 +450,14 @@ function buildContext(
       return ctx.funcParamsByBlockType.get(ctx.functionId ?? '')?.get(blockType) ?? null;
     },
     pictureName(id: string) {
-      const info = ctx.picturesById.get(id);
+      const info = resourceInfo(ctx, id, ctx.picturesById);
       if (info) return info.identifier;
       // Entry resolves resource IDs, names, then positions at runtime.
       ctx.notices.add(`모양 id '${id}' 가 작품에 없어 그대로 남겼습니다. 실행할 때 이름으로 찾습니다.`);
       return String(id);
     },
     soundName(id: string) {
-      const info = ctx.soundsById.get(id);
+      const info = resourceInfo(ctx, id, ctx.soundsById);
       if (info) return info.identifier;
       ctx.notices.add(`소리 id '${id}' 가 작품에 없어 그대로 남겼습니다. 실행할 때 이름으로 찾습니다.`);
       return String(id);
@@ -450,13 +491,22 @@ function buildContext(
 
     // Resource names are local to each object, so retain the owner when naming asset files.
     const localUsed = new Set<string>();
+    const pictures = new Map<string, ResourceInfo>();
+    const sounds = new Map<string, ResourceInfo>();
+    ctx.resourcesByObject.set(object.id, { pictures, sounds });
+    const register = (id: string, info: ResourceInfo, local: Map<string, ResourceInfo>, global: Map<string, ResourceInfo>) => {
+      local.set(id, info);
+      if (!global.has(id)) global.set(id, info);
+      if (!ctx.resourceOwnersById.has(id)) ctx.resourceOwnersById.set(id, new Set());
+      ctx.resourceOwnersById.get(id)!.add(object.id);
+    };
     for (const picture of object.sprite?.pictures ?? []) {
       const picId = safeIdentifier(picture.name, localUsed, 'costume');
-      ctx.picturesById.set(picture.id, { identifier: picId, source: picture, owner: object });
+      register(picture.id, { identifier: picId, source: picture, owner: object }, pictures, ctx.picturesById);
     }
     for (const sound of object.sprite?.sounds ?? []) {
       const sndId = safeIdentifier(sound.name?.replace(/\.[a-z0-9]+$/i, ''), localUsed, 'sound');
-      ctx.soundsById.set(sound.id, { identifier: sndId, source: sound, owner: object });
+      register(sound.id, { identifier: sndId, source: sound, owner: object }, sounds, ctx.soundsById);
     }
   }
 
@@ -536,13 +586,21 @@ function buildContext(
 
   reviveDanglingVariables(project, ctx, usedNames);
 
+  const originalVars = (project.variables ?? []).filter((entry: RawEntity) => ctx.varsById.has(entry.id));
+  const objectsInOrder = (project.scenes ?? []).flatMap((scene: RawEntity) =>
+    (project.objects ?? []).filter((object: RawEntity) => object.scene === scene.id));
+  const groupedVars = [...ctx.globalVars, ...objectsInOrder.flatMap((object: RawEntity) => ctx.localVarsByObject.get(object.id) ?? [])];
+  if (originalVars.some((entry: RawEntity, index: number) => groupedVars[index]?.source !== entry)) {
+    originalVars.forEach((entry: RawEntity, index: number) => { ctx.varsById.get(entry.id)!.order = index + 1; });
+  }
+
   // Keep global resource IDs; functions owned by one object can use resource names instead.
   for (const fn of project.functions ?? []) {
     let content = null;
     try { content = parseEntryBlockData<RawBlock>(fn.content ?? []); } catch { }
     if (!content) continue;
 
-    const ownerId = soleResourceOwner(content, ctx);
+    const ownerId = soleFunctionOwner(content, ctx);
     const entry = ctx.functionsById.get(fn.id);
     const createBlock = functionCreateBlock(content);
     if (ownerId && entry && createBlock) {
@@ -598,7 +656,8 @@ function buildContext(
     return relative;
   };
 
-  for (const [, info] of ctx.picturesById) {
+  const resourcesInOrder = objectsInOrder.map((object: RawEntity) => ctx.resourcesByObject.get(object.id)!);
+  for (const info of resourcesInOrder.flatMap((resources: { pictures: Map<string, ResourceInfo> }) => [...resources.pictures.values()])) {
     const pic = info.source;
     const png = capturedPngFor(pic.fileurl, entriesByPath);
     // Keep both formats when the vector preserves framing; otherwise keep the saved raster.
@@ -623,7 +682,7 @@ function buildContext(
     }
     info.blankImage = BLANK_IMAGE.test(pic.fileurl ?? '');
   }
-  for (const [, info] of ctx.soundsById) {
+  for (const info of resourcesInOrder.flatMap((resources: { sounds: Map<string, ResourceInfo> }) => [...resources.sounds.values()])) {
     const snd = info.source;
     const ext = safeExt(snd.ext || extnameOf(snd.fileurl || '').slice(1), '.mp3');
     info.relativePath = registerAsset(info, 'sound', ext);
@@ -676,6 +735,7 @@ function declarationLine(info: VarInfo, indentLevel = 0, positions = false): str
   const entryName = info.store ? String(source.name).slice(STORE_PREFIX.length) : source.name;
   const named = displayNamePart(info.identifier, entryName);
   const shown = source.visible ? ' visible' : '';
+  const order = info.order === undefined ? '' : ` order ${info.order}`;
   const at = positions
     ? ` at ${entropyNumber(Number(source.x) || 0)} ${entropyNumber(Number(source.y) || 0)}`
     : '';
@@ -685,12 +745,30 @@ function declarationLine(info: VarInfo, indentLevel = 0, positions = false): str
     const width = Number(source.width ?? 100);
     const height = Number(source.height ?? 120);
     const size = width !== 100 || height !== 120 ? ` size ${entropyNumber(width)} ${entropyNumber(height)}` : '';
-    return [`${pad}${scope}list ${info.identifier}${named} = [${items.join(', ')}]${shown}${at}${size}`];
+    const head = `${pad}${scope}list ${info.identifier}${named} = [`;
+    const tail = `]${shown}${at}${size}${order}`;
+    if (head.length + items.join(', ').length + tail.length <= 100) {
+      return [`${head}${items.join(', ')}${tail}`];
+    }
+    // Wrap at item boundaries; splitting packed strings would change their data.
+    const lines = [head];
+    let row = `${pad}  `;
+    for (let i = 0; i < items.length; i += 1) {
+      const item = `${items[i]}${i < items.length - 1 ? ',' : ''}`;
+      if (row.trim() && row.length + item.length + 1 > 100) {
+        lines.push(row);
+        row = `${pad}  `;
+      }
+      row += `${row.trim() ? ' ' : ''}${item}`;
+    }
+    if (row.trim()) lines.push(row);
+    lines.push(`${pad}${tail}`);
+    return lines;
   }
   const range = source.variableType === 'slide'
     ? ` from ${entropyNumber(Number(source.minValue) || 0)} to ${entropyNumber(Number(source.maxValue) || 0)}`
     : '';
-  return [`${pad}${scope}var ${info.identifier}${named} = ${entropyLiteral(source.value)}${range}${shown}${at}`];
+  return [`${pad}${scope}var ${info.identifier}${named} = ${entropyLiteral(source.value)}${range}${shown}${at}${order}`];
 }
 
 function sceneLines(scene: RawEntity, project: RawEntity, ctx: DecompileContext): string[] {
@@ -719,10 +797,9 @@ function useObjectLine(object: RawEntity, ctx: DecompileContext, sceneIdentifier
   }
   const dir = ctx.multiScene ? `objects/${sceneIdentifier}` : 'objects';
   const relativePath = `${dir}/${info.identifier}.etp`;
-  const data = encodeText(`${fragment.join('\n').trimEnd()}\n`);
-  ctx.collectedAssets.push({ path: relativePath, data });
-  ctx.assetDataByPath.set(relativePath, data);
-  return [`  ${isText ? 'usetext' : 'useobject'} ${entropyString(relativePath)}`];
+  sourceFile(ctx, relativePath, fragment);
+  // Scene files live one directory below the entry point.
+  return [`  ${isText ? 'usetext' : 'useobject'} ${entropyString(`../${relativePath}`)}`];
 }
 
 function sameSize(ctx: DecompileContext, path: string, dimension: { width?: number; height?: number } | undefined): boolean {
@@ -734,11 +811,14 @@ function sameSize(ctx: DecompileContext, path: string, dimension: { width?: numb
 function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: boolean): string[] {
   const info = ctx.objectsById.get(object.id)!;
   const lines: string[] = [];
+  const previousObject = ctx.objectId;
+  ctx.objectId = object.id;
 
   if (info.identifier !== info.displayName) lines.push(`name ${entropyString(info.displayName)}`);
 
+  const resources: string[] = [];
   for (const picture of object.sprite?.pictures ?? []) {
-    const picInfo = ctx.picturesById.get(picture.id);
+    const picInfo = ctx.resourcesByObject.get(object.id)!.pictures.get(picture.id);
     if (!picInfo) continue;
     const isDefault = object.selectedPictureId === picture.id;
     // Write size when the file cannot reproduce the project's saved dimensions.
@@ -750,18 +830,26 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
     const filePart = picInfo.relativePath ?? (picture.fileurl ?? `${picInfo.identifier}.png`);
     const namePart = displayNamePart(picInfo.identifier, picture.name);
     const forcePart = ctx.forcedIds.has(picture.id) ? ` force id ${entropyString(picture.id)}` : '';
-    lines.push(`${isDefault ? 'default costume' : 'costume'} ${picInfo.identifier} ${entropyString(filePart)}${sizePart}${namePart}${forcePart}`);
+    resources.push(`${isDefault ? 'default costume' : 'costume'} ${picInfo.identifier} ${entropyString(filePart)}${sizePart}${namePart}${forcePart}`);
   }
   for (const sound of object.sprite?.sounds ?? []) {
-    const sndInfo = ctx.soundsById.get(sound.id);
+    const sndInfo = ctx.resourcesByObject.get(object.id)!.sounds.get(sound.id);
     if (!sndInfo) continue;
     // Preserve Entry's sound duration because it controls loading and play-and-wait timing.
     const durationPart = ` for ${entropyNumber(Number.isFinite(sound.duration) ? sound.duration : 1)}`;
     const filePart = sndInfo.relativePath ?? (sound.fileurl ?? `${sndInfo.identifier}.mp3`);
     const namePart = displayNamePart(sndInfo.identifier, sound.name);
     const forcePart = ctx.forcedIds.has(sound.id) ? ` force id ${entropyString(sound.id)}` : '';
-    lines.push(`sound ${sndInfo.identifier} ${entropyString(filePart)}${durationPart}${namePart}${forcePart}`);
+    resources.push(`sound ${sndInfo.identifier} ${entropyString(filePart)}${durationPart}${namePart}${forcePart}`);
   }
+
+  if (!ctx.inline && resources.length > DECLARATION_FILE_LINES) {
+    const scene = ctx.scenesById.get(info.sceneId)!;
+    const dir = ctx.multiScene ? `objects/${scene.identifier}` : 'objects';
+    const name = `${info.identifier}.assets.etp`;
+    sourceFile(ctx, `${dir}/${name}`, resources);
+    lines.push(`use ${entropyString(name)}`);
+  } else append(lines, resources);
 
   append(lines, objectPropertyLines(object, isText, 0));
 
@@ -794,6 +882,7 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
     append(lines, functionDeclarationLines(owned.entry, owned.createBlock, ctx, object.id));
   }
   ctx.objectScale = null;
+  ctx.objectId = previousObject;
 
   return lines;
 }
@@ -841,7 +930,15 @@ function objectPropertyLines(object: RawEntity, isText: boolean, indentLevel: nu
   if (entity.direction !== undefined && entity.direction !== 90) lines.push(`${pad}way = ${entropyNumber(entity.direction)}`);
   if (entity.scaleX !== undefined && entity.scaleX !== 1) lines.push(`${pad}scale_x = ${entropyNumber(scalePercent(entity.scaleX))}`);
   if (entity.scaleY !== undefined && entity.scaleY !== 1) lines.push(`${pad}scale_y = ${entropyNumber(scalePercent(entity.scaleY))}`);
-  if (!isText) append(lines, centerLine(object, pad));
+  if (!isText) {
+    append(lines, centerLine(object, pad));
+    const pictures = (object.sprite?.pictures ?? []) as RawEntity[];
+    const selected = pictures.find((picture) => picture.id === object.selectedPictureId) ?? pictures[0];
+    if (Number.isFinite(entity.width) && Number.isFinite(entity.height) &&
+        (entity.width !== (selected?.dimension?.width ?? 100) || entity.height !== (selected?.dimension?.height ?? 100))) {
+      lines.push(`${pad}size ${entropyNumber(entity.width)} ${entropyNumber(entity.height)}`);
+    }
+  }
 
   if (isText) {
     if (object.text) lines.push(`${pad}text_content = ${entropyString(object.text)}`);

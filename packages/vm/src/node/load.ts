@@ -130,8 +130,8 @@ async function loadEnt(file: string, options: LoadOptions): Promise<LoadedProjec
       const decompiled = decompileProject(project, entries, { tableRows: false });
       const root = path.resolve(options.decompileTo);
       fs.mkdirSync(root, { recursive: true });
-      fs.writeFileSync(path.join(root, 'main.etp'), decompiled.source);
-      for (const asset of decompiled.assets) {
+      fs.writeFileSync(path.join(root, 'entry.etp'), decompiled.source);
+      for (const asset of [...decompiled.files, ...decompiled.assets]) {
         const target = path.resolve(root, asset.path);
         if (target !== root && !target.startsWith(root + path.sep)) {
           throw new Error(`작품이 폴더 밖의 파일을 가리킵니다: ${asset.path}`);

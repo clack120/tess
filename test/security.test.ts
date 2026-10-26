@@ -346,7 +346,7 @@ test('작품의 글자가 되돌린 소스의 문법을 바꾸지 못한다', as
   ];
   const bytes = entFile(work(script, { name: 'o\u2028INJECTED' }));
   const out = await decompileEnt(bytes, {});
-  const fragment = out.assets.find((asset) => asset.path.endsWith('.etp'));
+  const fragment = out.files.find((file) => file.path.startsWith('objects/'));
   assert.ok(fragment, '오브젝트 조각이 나와야 합니다');
   const text = utf8(fragment.data);
 
@@ -428,7 +428,7 @@ test('만든 .ent 를 되돌리기가 실제로 읽는다', async () => {
   // Verify the archive fixture itself so malformed empty input cannot make the security checks pass.
   const out = await decompileEnt(entFile(work([HAT])), {});
   assert.match(out.source, /scene/);
-  assert.ok(out.assets.some((asset) => asset.path.endsWith('.etp')));
+  assert.ok(out.files.some((file) => file.path.startsWith('objects/')));
 });
 
 test('파일을 쓰는 자리가 폴더 밖 경로를 거부한다', () => {

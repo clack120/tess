@@ -10,7 +10,7 @@ test('small exports keep their identity and data, including explicit defaults', 
   const work = { objects: [{ script: JSON.stringify([[{ id: 'hat', type: 'when_run_button_click', ...defaults }]]) }] };
   const size = new TextEncoder().encode(JSON.stringify(work)).byteLength;
   assert.strictEqual(compactLargeProject(work, size).project, work);
-  assert.equal(PROJECT_JSON_LIMIT, 16_700_000);
+  assert.equal(PROJECT_JSON_LIMIT, 16_737_823);
 });
 
 test('large exports remove only known defaults from scripts, functions and PNG metadata', () => {

@@ -203,6 +203,7 @@ export interface VarDeclNode extends Base {
   shown: boolean;
   // Null lets the runtime choose the monitor position.
   at: { x: Expr; y: Expr } | null;
+  order?: number;
 }
 
 export interface ListDeclNode extends Base {
@@ -216,6 +217,7 @@ export interface ListDeclNode extends Base {
   at: { x: Expr; y: Expr } | null;
   // Null uses Entry's default list size of 100 by 120.
   size: { width: Expr; height: Expr } | null;
+  order?: number;
 }
 
 export type EventName =

@@ -86,7 +86,7 @@ test('keeping Entropy source never makes it the execution input', async (t) => {
   const { file, dir, work } = fixture(t);
   const kept = path.join(dir, 'kept');
   const loaded = await load(t, file, { decompileTo: kept });
-  assert.ok(fs.existsSync(path.join(kept, 'main.etp')));
+  assert.ok(fs.existsSync(path.join(kept, 'entry.etp')));
   assert.equal(loaded.decompiledTo, kept);
   assert.deepEqual(loaded.project, work);
 });

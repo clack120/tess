@@ -816,6 +816,56 @@ test('useobject 로 만든 오브젝트는 파일 이름으로 서로를 가리�
   assert.equal(thread[1].params[0].params[1], enemy.id);
 });
 
+test('an object fragment cannot include itself through a nested use', () => {
+  const files: Record<string, string> = {
+    '/p/entry.etp': 'scene "s":\n  useobject "objects/hero.etp"\nend',
+    '/p/objects/hero.etp': 'use "parts/props.etp"',
+    '/p/objects/parts/props.etp': 'use "../hero.etp"',
+  };
+  const result = compileProject(files['/p/entry.etp']!, {
+    path: '/p/entry.etp', strict: true, readFile: (file) => files[file]!,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0]!.message, /use 가 순환/);
+  assert.equal(result.errors[0]!.file, '/p/objects/parts/props.etp');
+});
+
+test('declaration order keeps globals and object locals in the same Entry lookup order', () => {
+  const compiled = compileProject(`var global_ = 1 order 4
+list global_list = [2] order 2
+object "o":
+  var local_ = 3 order 1
+  list local_list = [4] order 3
+  when start do
+    order front
+  end
+end`, { strict: true });
+  assert.deepEqual(compiled.errors, []);
+  assert.deepEqual(compiled.project!.variables.slice(0, 4).map((v) => v.name), ['local_', 'global_list', 'local_list', 'global_']);
+  assert.equal(JSON.parse(compiled.project!.objects[0]!.script)[0][1].type, 'change_object_index');
+  for (const order of [0, 1.5]) {
+    const invalid = compileProject(`var n = 0 order ${order}`, { strict: true });
+    assert.equal(invalid.ok, false);
+    assert.match(invalid.errors[0]!.message, /order.*1 이상/);
+  }
+  const local = compileProject('function f():\n  var n = 0 order 1\nend', { strict: true });
+  assert.match(local.errors[0]!.message, /함수 지역 변수.*order/);
+});
+
+test('native function headers keep their editor copy and assembly flags', () => {
+  const { project, errors } = compileProject('function f(n):\n  say n\nend');
+  assert.deepEqual(errors, []);
+  const create = JSON.parse(project!.functions[0]!.content)[0][0];
+  assert.equal(create.copyable, false);
+  const label = create.params[0];
+  assert.equal(label.copyable, false);
+  let field = label;
+  while (field.type !== 'function_field_string') field = field.params[1];
+  assert.equal(field.copyable, false);
+  assert.equal(field.assemble, false);
+});
+
 test('크기·길이를 적어 두면 파일이 없어도 알리지 않는다', () => {
   const declared = compileProject(`scene "s":
   object "o":

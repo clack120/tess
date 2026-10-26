@@ -142,12 +142,14 @@ export function makeAsset(
   }
   if (isImage && !size) size = { width: 100, height: 100 };
 
-  const filename = assetFilename(`${kind}:${file}:${bytes ? bytes.length : 0}`);
+  const savedPath = !resolved && /^temp\/[\w-]+\/[\w-]+\/(?:image|sound)\/[\w.-]+$/.test(file);
+  const filename = file === '' ? '' : savedPath ? basename(file, ext) : assetFilename(`${kind}:${file}:${bytes ? bytes.length : 0}`);
   const asset: EntryAsset = {
     id,
     name: name ?? basename(file),
     filename,
-    fileurl: fileUrlFor(kind, filename, ext),
+    // Keep missing archive paths stable instead of hashing the previous hash.
+    fileurl: savedPath || file === '' ? file : fileUrlFor(kind, filename, ext),
     ext,
   };
 

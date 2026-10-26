@@ -67,12 +67,11 @@ end`);
   assert.match(errors[0], /글상자\(text\) 전용 속성/);
 });
 
-test('size 가로 세로 는 object 에서 쓸 수 없다', () => {
+test('size 가로 세로 는 object 의 저장 크기도 보존한다', () => {
   const errors = messages(`object "o":
   size 300 50
 end`);
-  assert.equal(errors.length, 1);
-  assert.match(errors[0], /글상자\(text\) 전용/);
+  assert.deepEqual(errors, []);
 });
 
 test('size 가로 세로 는 text 에서는 괜찮고, size = 배율과 함께 쓸 수 있다', () => {

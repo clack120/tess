@@ -1,5 +1,5 @@
 import { KEY_CODES, STORE_FLAG_ON, STORE_FLAG_VARIABLE } from '@entropy/core';
-import { entropyNumber, entropyString, entropyLiteral, ownsResource, isExactNumber } from './ident.ts';
+import { entropyNumber, entropyString, entropyLiteral, ownsResource, isExactNumber, resourceInfo } from './ident.ts';
 import { isBooleanBlock } from '../../compiler/src/expression.ts';
 import { expansionBlock } from '@entropy/core';
 import type { DecompileContext, RawBlock, ResourceInfo } from './types.ts';
@@ -90,7 +90,7 @@ function resourceRef(
   byId: Map<string, ResourceInfo>,
   nameOf: (id: string) => string,
 ): string {
-  if (ctx.inFunction && byId.has(id) && !ownsResource(ctx, byId.get(id))) return entropyString(id);
+  if (ctx.inFunction && byId.has(id) && !ownsResource(ctx, resourceInfo(ctx, id, byId))) return entropyString(id);
   return entropyString(nameOf(id));
 }
 
@@ -152,9 +152,7 @@ class PendingExpression {
   }
 }
 
-// Evaluate nested reporters with an explicit stack. Real Entry projects can
-// contain expression trees deeper than the JavaScript call stack even though
-// Entropy's VM itself has no such limit.
+// Use a stack to read deeply nested value blocks.
 export function exprOf(block: any, ctx: DecompileContext): string {
   const immediate = immediateExpression(block);
   if (immediate !== null) return immediate;
@@ -281,9 +279,7 @@ function renderExpression(
     case 'boolean_and': return `(${condition(at(0))} and ${condition(at(2))})`;
     case 'boolean_or': return `(${condition(at(0))} or ${condition(at(2))})`;
     case 'boolean_not': {
-      // Native projects can accumulate thousands of nested not blocks. Emitting
-      // the same number of parentheses only moves the stack overflow into the
-      // Entropy parser, while pairs of not blocks are semantically redundant.
+      // Keep the Boolean cast when removing paired not blocks.
       let value = at(1);
       let negate = true;
       while (value?.type === 'boolean_not') {
@@ -291,7 +287,8 @@ function renderExpression(
         negate = !negate;
       }
       const inner = condition(value);
-      return negate ? `not (${inner})` : inner;
+      if (negate) return `not (${inner})`;
+      return value == null || isJudgement(value) ? inner : `not (not (${inner}))`;
     }
     case 'True': return 'true';
     case 'False': return 'false';
@@ -368,8 +365,10 @@ function renderExpression(
     case 'get_value_from_cell':
       return `${ctx.tableName(at(0))}[${read(at(1))}]`;
     // Entry stores one-based column numbers even when the dropdown displays names.
-    case 'get_table_fields':
-      return entropyLiteral(at(0));
+    case 'get_table_fields': {
+      const value = String(at(0) ?? '');
+      return isExactNumber(value) ? value : entropyLiteral(at(0));
+    }
     case 'get_value_from_last_row':
       return `last_row(${ctx.tableName(at(0))}, ${read(at(1))})`;
     case 'calc_values_from_table': {

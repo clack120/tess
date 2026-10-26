@@ -359,6 +359,7 @@ export class EntropyAstVisitor extends BaseVisitor {
       scope: ctx.scope ? this.visit(ctx.scope) : null,
       value: this.visit(ctx.value),
       range: ctx.min ? { min: this.visit(ctx.min), max: this.visit(ctx.max) } : null,
+      ...(ctx.order ? { order: Number(ctx.order[0].image) } : {}),
       shown: Boolean(ctx.shown),
       at: ctx.atX ? { x: this.visit(ctx.atX), y: this.visit(ctx.atY) } : null,
       loc: nodeLoc(node),
@@ -375,6 +376,7 @@ export class EntropyAstVisitor extends BaseVisitor {
       shown: Boolean(ctx.shown),
       at: ctx.atX ? { x: this.visit(ctx.atX), y: this.visit(ctx.atY) } : null,
       size: ctx.sizeW ? { width: this.visit(ctx.sizeW), height: this.visit(ctx.sizeH) } : null,
+      ...(ctx.order ? { order: Number(ctx.order[0].image) } : {}),
       loc: nodeLoc(node),
     };
   }

@@ -27,6 +27,26 @@ test('very deep Entry reporter blocks still unfold into editable Entropy source'
   assert.ok(compiled.project);
 });
 
+test('paired not blocks keep Boolean conversion for non-Boolean values', () => {
+  const project = minimalProject();
+  project.objects = project.objects.slice(0, 1);
+  const text = { type: 'text', params: ['hello'], statements: [] };
+  const inner = { type: 'boolean_not', params: [null, text, null], statements: [] };
+  const outer = { type: 'boolean_not', params: [null, inner, null], statements: [] };
+  project.objects[0].script = JSON.stringify([[
+    { type: 'when_run_button_click', params: [null], statements: [] },
+    { type: 'dialog', params: [outer, 'speak', null], statements: [] },
+  ]]);
+  const result = decompileProject(project, [], { inline: true });
+  assert.match(result.source, /say not \(not \("hello"\)\)/);
+  const compiled = compileProject(result.source);
+  assert.deepEqual(compiled.errors, []);
+  const value = JSON.parse(compiled.project!.objects[0]!.script)[0][1].params[0];
+  assert.equal(value.type, 'boolean_not');
+  assert.equal(value.params[1].type, 'boolean_not');
+  assert.equal(decompileProject(compiled.project!, [], { inline: true }).source, result.source);
+});
+
 test('many colliding names advance their suffix instead of rescanning from two', () => {
   const used = new Set(['same_2', 'same_4']);
   assert.equal(safeIdentifier('same', used), 'same');
@@ -34,6 +54,17 @@ test('many colliding names advance their suffix instead of rescanning from two',
   assert.equal(safeIdentifier('same', used), 'same_5');
   for (let index = 0; index < 10_000; index += 1) safeIdentifier('same', used);
   assert.equal(used.size, 10_005);
+});
+
+test('duplicate reserved names keep their spelling over repeated decompilation', () => {
+  const names = new Set<string>();
+  const first = safeIdentifier('reset', names);
+  const second = safeIdentifier('reset', names);
+  assert.equal(first, 'reset_');
+  assert.equal(second, 'reset_2');
+  const next = new Set<string>();
+  assert.equal(safeIdentifier(first, next), first);
+  assert.equal(safeIdentifier(second, next), second);
 });
 
 test('initial values preserve leading zeroes, precision and boolean spelling', () => {
@@ -52,9 +83,9 @@ test('initial values preserve leading zeroes, precision and boolean spelling', (
   assert.deepEqual(compiled.errors, []);
   const variables = compiled.project!.variables;
   values.forEach((value, index) => {
-    assert.equal(String(variables.find((item) => item.name === `value${index}`)!.value), value);
+    assert.equal(variables.find((item) => item.name === `value${index}`)!.value, value);
   });
-  assert.deepEqual(variables.find((item) => item.name === 'packed')!.array!.map((item) => String(item.data)), values);
+  assert.deepEqual(variables.find((item) => item.name === 'packed')!.array!.map((item) => item.data), values);
 });
 
 
@@ -112,15 +143,18 @@ test('되돌리기는 기본적으로 오브젝트마다 objects/이름.etp 조�
   const project = minimalProject(1);
   const result = decompileProject(project, []);
 
-  assert.match(result.source, /useobject "objects\/주인공\.etp"/);
-  assert.match(result.source, /usetext "objects\/점수판\.etp"/);
+  assert.match(result.source, /use "scene\/장면_1\.etp"/);
+  const scene = utf8(result.files.find((file) => file.path === 'scene/장면_1.etp')!.data);
+  assert.match(scene, /useobject "\.\.\/objects\/주인공\.etp"/);
+  assert.match(scene, /usetext "\.\.\/objects\/점수판\.etp"/);
   assert.doesNotMatch(result.source, /object "주인공"/);
   assert.doesNotMatch(result.source, /text "점수판"/);
 
-  const fragmentPaths = result.assets.map((a) => a.path).sort();
-  assert.deepEqual(fragmentPaths, ['objects/점수판.etp', 'objects/주인공.etp']);
+  const fragmentPaths = result.files.map((a) => a.path).sort();
+  assert.deepEqual(fragmentPaths, ['objects/점수판.etp', 'objects/주인공.etp', 'scene/장면_1.etp']);
+  assert.deepEqual(result.assets, []);
 
-  const heroFragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const heroFragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.doesNotMatch(heroFragment, /^object /m);
   assert.match(heroFragment, /^when start do$/m);
   assert.match(heroFragment, /^ {2}wait 1$/m);
@@ -130,11 +164,12 @@ test('장면이 여러 개면 objects/장면이름/이름.etp 로 장면마다 �
   const project = minimalProject(2);
   const result = decompileProject(project, []);
 
-  assert.match(result.source, /useobject "objects\/장면_1\/주인공\.etp"/);
-  assert.match(result.source, /usetext "objects\/장면_2\/점수판\.etp"/);
+  const scenes = result.files.filter((file) => file.path.startsWith('scene/')).map((file) => utf8(file.data)).join('\n');
+  assert.match(scenes, /useobject "\.\.\/objects\/장면_1\/주인공\.etp"/);
+  assert.match(scenes, /usetext "\.\.\/objects\/장면_2\/점수판\.etp"/);
 
-  const fragmentPaths = result.assets.map((a) => a.path).sort();
-  assert.deepEqual(fragmentPaths, ['objects/장면_1/주인공.etp', 'objects/장면_2/점수판.etp']);
+  const fragmentPaths = result.files.map((a) => a.path).sort();
+  assert.deepEqual(fragmentPaths, ['objects/장면_1/주인공.etp', 'objects/장면_2/점수판.etp', 'scene/장면_1.etp', 'scene/장면_2.etp']);
 });
 
 test('되돌린 결과(main.etp + 조각 파일)는 다시 정상적으로 컴파일된다', () => {
@@ -144,7 +179,7 @@ test('되돌린 결과(main.etp + 조각 파일)는 다시 정상적으로 컴�
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-decompile-'));
   const mainFile = path.join(dir, 'main.etp');
   fs.writeFileSync(mainFile, result.source);
-  for (const asset of result.assets) {
+  for (const asset of [...result.files, ...result.assets]) {
     const target = path.join(dir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
@@ -242,7 +277,7 @@ test('다른 함수의 매개변수를 가리키는 블록은 이름이 아니�
       ]]),
     },
   ];
-  const result = decompileProject(project as unknown as RawEntity, []);
+  const result = decompileProject(project as unknown as RawEntity, [], { inline: true });
   const mine = result.source.slice(result.source.indexOf('function mine('));
   assert.match(mine.slice(0, mine.indexOf('end')), /return 0/, '다른 함수의 매개변수는 빈 값이 된다');
   const yours = result.source.slice(result.source.indexOf('function yours('));
@@ -257,7 +292,7 @@ test('다른 함수의 매개변수를 가리키는 블록은 이름이 아니�
 
 test('모양/소리 값에 진짜 엔트리 id 를 그대로 박아 넣은 트릭은 이름으로 되돌린다', () => {
   const result = decompileProject(trickProject(), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^ {2}play sound "효과음"$/m);
   assert.match(fragment, /^ {2}costume = "점프"$/m);
@@ -272,7 +307,7 @@ test('되돌린 트릭 코드도 다시 정상적으로 컴파일된다', () => 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-decompile-trick-'));
   const mainFile = path.join(dir, 'main.etp');
   fs.writeFileSync(mainFile, result.source);
-  for (const asset of result.assets) {
+  for (const asset of [...result.files, ...result.assets]) {
     const target = path.join(dir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
@@ -329,7 +364,7 @@ function nthResourceProject(numberValue: any) {
 for (const [label, numberValue] of NUMBER_VALUES) {
   test(`모양·소리 순번(${label})은 문자열이 아니라 숫자로 되돌아온다`, () => {
     const result = decompileProject(nthResourceProject(numberValue), []);
-    const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+    const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
     assert.match(fragment, /^ {2}costume = 1$/m);
     assert.match(fragment, /^ {2}play sound 1$/m);
@@ -343,7 +378,7 @@ for (const [label, numberValue] of NUMBER_VALUES) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-decompile-nth-'));
     const mainFile = path.join(dir, 'main.etp');
     fs.writeFileSync(mainFile, result.source);
-    for (const asset of result.assets) {
+    for (const asset of [...result.files, ...result.assets]) {
       const target = path.join(dir, asset.path);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, asset.data);
@@ -362,7 +397,7 @@ for (const [label, numberValue] of NUMBER_VALUES) {
 // Keep numeric-looking text unchanged when conversion would alter its spelling.
 test('"01" 처럼 다시 적으면 달라지는 값은 숫자로 바꾸지 않는다', () => {
   const result = decompileProject(nthResourceProject(() => ({ type: 'text', params: ['01'] })), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^ {2}costume = "01"$/m);
 });
@@ -389,7 +424,7 @@ end`;
   const decompiled = decompileProject(compiled.project!, []);
   assert.deepEqual(decompiled.warnings, []);
 
-  const fragment = utf8(decompiled.assets.find((a) => a.path === 'objects/o.etp')!.data);
+  const fragment = utf8(decompiled.files.find((a) => a.path === 'objects/o.etp')!.data);
   assert.doesNotMatch(fragment, /\[decompile/);
   assert.match(fragment, /^ {2}이름 = costume\("다른"\)$/m);
   assert.match(fragment, /^ {2}번호 = costume_number\("다른"\)$/m);
@@ -461,8 +496,8 @@ for (const shared of [false, true]) {
     const actual = decompileProject(project, []);
 
     assert.deepEqual(actual, expected);
-    assert.match(actual.source, /^var missing_var_deleted = 0$/m);
-    const fragment = utf8(actual.assets.find((asset) => asset.path === 'objects/주인공.etp')!.data);
+    assert.match(utf8(actual.files.find((file) => file.path === "var.etp")!.data), /^var missing_var_deleted = 0$/m);
+    const fragment = utf8(actual.files.find((asset) => asset.path === 'objects/주인공.etp')!.data);
     assert.match(fragment, /^when start do\n  점프하기\(\)\n  missing_var_deleted = 1\nend$/m);
   });
 }
@@ -471,7 +506,7 @@ function recompileResult(result: any, prefix: any) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const mainFile = path.join(dir, 'main.etp');
   fs.writeFileSync(mainFile, result.source);
-  for (const asset of result.assets) {
+  for (const asset of [...result.files, ...result.assets]) {
     const target = path.join(dir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
@@ -486,7 +521,7 @@ for (const [label, shapeValue] of SHAPE_VALUES) {
 
     assert.doesNotMatch(result.source, /^function /m);
 
-    const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+    const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
     assert.match(fragment, /^function 점프하기\(\):$/m);
     assert.match(fragment, /^ {2}costume = "점프"$/m);
     assert.doesNotMatch(fragment, /qio1/);
@@ -511,12 +546,12 @@ for (const [label, shapeValue] of SHAPE_VALUES) {
     const result = decompileProject(hardcodedFunctionProject(shapeValue, { shared: true }), []);
     assert.deepEqual(result.warnings, []);
 
-    assert.match(result.source, /^function 점프하기\(\):$/m);
-    assert.match(result.source, /^ {2}costume = "qio1"$/m); // A global function must keep IDs because resource names depend on the caller.
-    assert.match(result.source, /^ {2}costume = "zzz1"$/m);
+    assert.match(utf8(result.files.find((file) => file.path === "func.etp")!.data), /^function 점프하기\(\):$/m);
+    assert.match(utf8(result.files.find((file) => file.path === "func.etp")!.data), /^ {2}costume = "qio1"$/m); // A global function must keep IDs because resource names depend on the caller.
+    assert.match(utf8(result.files.find((file) => file.path === "func.etp")!.data), /^ {2}costume = "zzz1"$/m);
 
-    const hero = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
-    const other = utf8(result.assets.find((a) => a.path === 'objects/조연.etp')!.data);
+    const hero = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
+    const other = utf8(result.files.find((a) => a.path === 'objects/조연.etp')!.data);
     assert.match(hero, /^costume 점프 "점프\.png" size 10 10 force id "qio1"$/m);
     assert.match(other, /^costume 구르기 "구르기\.png" size 10 10 force id "zzz1"$/m);
     assert.doesNotMatch(hero, /^function /m);
@@ -545,8 +580,8 @@ test('모양·소리를 안 쓰는 함수는 전역에 그대로 둔다', () => 
   }]]);
 
   const result = decompileProject(project, []);
-  assert.match(result.source, /^function 인사하기\(\):$/m);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  assert.match(utf8(result.files.find((file) => file.path === "func.etp")!.data), /^function 인사하기\(\):$/m);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.doesNotMatch(fragment, /^function /m);
 });
 
@@ -582,7 +617,7 @@ function builtinObjectProject() {
 
 test('엔트리 기본 오브젝트의 모양·소리는 entryjs 에서 꺼내 와 assets/ 에 담는다', () => {
   const result = decompileProject(builtinObjectProject(), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/엔트리봇.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/엔트리봇.etp')!.data);
 
   // Never emit unavailable bower_components paths into the source.
   assert.doesNotMatch(fragment, /bower_components/);
@@ -604,7 +639,7 @@ test('되돌린 기본 오브젝트를 다시 컴파일하면 그림 파일에�
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-decompile-builtin-'));
   const mainFile = path.join(dir, 'main.etp');
   fs.writeFileSync(mainFile, result.source);
-  for (const asset of result.assets) {
+  for (const asset of [...result.files, ...result.assets]) {
     const target = path.join(dir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
@@ -634,14 +669,14 @@ test('모양 없이 만든 "새 오브젝트"의 _1x1.png 도 꺼내 오고, 선
   project.objects[0].selectedPictureId = 'p1x1';
 
   const result = decompileProject(project, []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/새_오브젝트.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/새_오브젝트.etp')!.data);
   assert.doesNotMatch(fragment, /bower_components/);
   assert.match(fragment, /^default costume 새그림 "assets\/image\/새_오브젝트_새그림\.png" size 960 540$/m);
   assert.ok(result.assets.find((a) => a.path === 'assets/image/새_오브젝트_새그림.png')?.data.length! > 0);
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-decompile-1x1-'));
   fs.writeFileSync(path.join(dir, 'main.etp'), result.source);
-  for (const asset of result.assets) {
+  for (const asset of [...result.files, ...result.assets]) {
     const target = path.join(dir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
@@ -675,7 +710,7 @@ function functionHeadProject(field: any, body: any[] = []): RawEntity {
   };
 }
 
-const declarationOf = (field: any, body?: any[]) => decompileProject(functionHeadProject(field, body), [])
+const declarationOf = (field: any, body?: any[]) => decompileProject(functionHeadProject(field, body), [], { inline: true })
   .source.match(/^function .*/m)![0];
 
 test('함수 머리의 라벨·판단 칸을 지나서 매개변수를 끝까지 읽는다', () => {
@@ -713,7 +748,7 @@ test('함수 본문의 매개변수 블록은 이름으로 되짚는다', () => 
     params: [{ type: 'booleanParam_b1', params: [null] }],
     statements: [[]],
   }];
-  const result = decompileProject(functionHeadProject(field, body), []);
+  const result = decompileProject(functionHeadProject(field, body), [], { inline: true });
   assert.deepEqual(result.warnings, []);
   assert.match(result.source, /^ {2}say a$/m);
   assert.match(result.source, /^ {2}if 체력:$/m);
@@ -722,7 +757,7 @@ test('함수 본문의 매개변수 블록은 이름으로 되짚는다', () => 
 test('되돌린 함수 머리는 다시 컴파일하면 원래 사슬로 돌아간다', () => {
   const field = fieldLabel('스폰', fieldString('p1', fieldLabel('체력', fieldString('p2', null))));
   const body = [{ type: 'dialog', params: [{ type: 'stringParam_p2', params: [] }, 'speak'], statements: [] }];
-  const result = decompileProject(functionHeadProject(field, body), []);
+  const result = decompileProject(functionHeadProject(field, body), [], { inline: true });
 
   const recompiled = compileProject(result.source, { path: 'main.etp' });
   assert.deepEqual(recompiled.errors, [], recompiled.errors.map((e) => e.message).join('\n'));
@@ -743,14 +778,14 @@ test('(<판단>의 값) 블록은 boolean_value 로 옮긴다', () => {
     params: [{ type: 'get_boolean_value', params: [{ type: 'True', params: [null] }] }, 'speak'],
     statements: [],
   }];
-  const result = decompileProject(functionHeadProject(field, body), []);
+  const result = decompileProject(functionHeadProject(field, body), [], { inline: true });
   assert.deepEqual(result.warnings, []);
   assert.match(result.source, /^ {2}say boolean_value\(true\)$/m);
 });
 
 test('when 본문은 한 단 들여쓰고, 선언 뭉치 뒤에는 두 줄을 띄운다', () => {
   const result = decompileProject(minimalProject(1), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.equal(fragment, 'x = 10\n\n\nwhen start do\n  wait 1\nend\n');
 });
 
@@ -766,7 +801,7 @@ test('파일을 담은 모양은 크기를 적지 않고, 1×1 빈 그림만 예
   });
 
   const result = decompileProject(project, []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/엔트리봇.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/엔트리봇.etp')!.data);
   assert.match(fragment, /^default costume 엔트리봇_걷기1 "assets\/image\/엔트리봇_엔트리봇_걷기1\.svg"$/m);
   assert.match(fragment, /^sound 강아지_짖는_소리 "assets\/sound\/엔트리봇_강아지_짖는_소리\.mp3" for 1\.3 as "강아지 짖는 소리"$/m);
   assert.match(fragment, /^costume 새그림 "assets\/image\/엔트리봇_새그림\.png" size 960 540$/m);
@@ -774,7 +809,7 @@ test('파일을 담은 모양은 크기를 적지 않고, 1×1 빈 그림만 예
 
 test('sizes 옵션을 켜면 모든 모양에 size 가로 세로 를 적는다', () => {
   const result = decompileProject(builtinObjectProject(), [], { sizes: true });
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/엔트리봇.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/엔트리봇.etp')!.data);
 
   assert.match(fragment, /^default costume 엔트리봇_걷기1 "assets\/image\/엔트리봇_엔트리봇_걷기1\.svg" size 144 246$/m);
   assert.match(fragment, /^costume 엔트리봇_걷기2 "assets\/image\/엔트리봇_엔트리봇_걷기2\.svg" size 144 246$/m);
@@ -810,7 +845,7 @@ function textBoxProject(entityExtra: RawEntity = {}): RawEntity {
 
 test('글상자는 옵션 없이도 size 가로 세로 를 적는다', () => {
   const result = decompileProject(textBoxProject(), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/안내문.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/안내문.etp')!.data);
 
   assert.match(fragment, /^size 65\.49 104\.65$/m);
 });
@@ -821,7 +856,7 @@ test('되돌린 글상자를 다시 컴파일하면 원본 틀 크기가 그대�
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-decompile-textbox-'));
   const mainFile = path.join(dir, 'main.etp');
   fs.writeFileSync(mainFile, result.source);
-  for (const asset of result.assets) {
+  for (const asset of [...result.files, ...result.assets]) {
     const target = path.join(dir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
@@ -891,7 +926,7 @@ function numberShapeProject() {
 
 test('판단값 · 계산식 · 함수 인수 · 순번 안의 숫자는 숫자로 되돌아온다', () => {
   const result = decompileProject(numberShapeProject(), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^ {2}if \(단계 == 14\):$/m);
   assert.match(fragment, /^ {2}단계 = \(3 \* \(2 \+ 5\)\)$/m);
@@ -951,7 +986,7 @@ function exponentProject(entityX: number) {
 
 test('지수 표기 값은 글자 그대로 두고 되돌린 소스는 다시 컴파일된다', () => {
   const result = decompileProject(exponentProject(0) as unknown as RawEntity, []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^ {2}값 = \("1\.6059043836821613e-10" \* 2\)$/m);
 
@@ -965,7 +1000,7 @@ test('지수 표기 값은 글자 그대로 두고 되돌린 소스는 다시 �
 
 test('지수 표기로 적히는 수는 소수점 표기로 펴서 적는다', () => {
   const result = decompileProject(exponentProject(1e-7) as unknown as RawEntity, []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^x = 0\.0000001$/m);
 
@@ -1008,7 +1043,7 @@ test('소리 길이와 색 고르기 칸을 되돌리고 다시 컴파일한다'
 
   const result = decompileProject(project, []);
   assert.deepEqual([...result.warnings], []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/점수판.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/점수판.etp')!.data);
   assert.match(fragment, /^ {2}길이 = sound_duration\("점프음"\)$/m);
   assert.match(fragment, /^ {2}font_color = #16d8a3$/m);
   assert.doesNotMatch(fragment, /\[decompile/);
@@ -1033,7 +1068,7 @@ test('sound_speed 를 되돌리고 다시 컴파일한다', () => {
 
   const result = decompileProject(project, []);
   assert.deepEqual([...result.warnings], []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.match(fragment, /^ {2}속도 = sound_speed$/m);
   assert.doesNotMatch(fragment, /\[decompile/);
 
@@ -1071,7 +1106,7 @@ test('숫자로 시작하는 모양 이름도 숫자를 잃지 않는다', () =>
   };
 
   const result = decompileProject(project, []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.match(fragment, /^default costume costume_3_png /m);
   assert.match(fragment, /^costume costume_1_png /m);
   assert.match(fragment, /^costume costume_2_png /m);
@@ -1107,13 +1142,13 @@ function centerProject(regX: any, regY: any) {
 
 test('옮겨진 중심점은 center 가로 세로 로 되돌아온다', () => {
   const result = decompileProject(centerProject(461.84, 116.7), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.match(fragment, /^center 461\.84 116\.7$/m);
 });
 
 test('중심점이 모양 한가운데면 center 줄을 적지 않는다', () => {
   const result = decompileProject(centerProject(72, 123), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.doesNotMatch(fragment, /^center /m);
 });
 
@@ -1142,14 +1177,14 @@ test('크기를 모르는 글상자는 size 줄을 적지 않는다', () => {
   delete project.objects[0].entity.height;
 
   const result = decompileProject(project, []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/안내문.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/안내문.etp')!.data);
   assert.doesNotMatch(fragment, /^size /m);
 });
 
 test('판단 매개변수는 이름? 로 되돌아오고, 다시 컴파일해도 판단 칸이다', () => {
   const field = fieldLabel('스폰', fieldString('p1', fieldLabel('살았나', fieldBoolean('b1', null))));
   const body = [{ type: '_if', params: [{ type: 'booleanParam_b1', params: [null] }], statements: [[]] }];
-  const result = decompileProject(functionHeadProject(field, body), []);
+  const result = decompileProject(functionHeadProject(field, body), [], { inline: true });
   assert.match(result.source, /^function 스폰\(a, 살았나\?\):$/m);
   assert.match(result.source, /^ {2}if 살았나:$/m);
 
@@ -1219,7 +1254,7 @@ test('모양 이름이 겹쳐도 오브젝트 이름을 붙여서 파일이 안 
     .map((a) => utf8(a.data));
   assert.equal(new Set(contents).size, 2);
 
-  const chiro = utf8(result.assets.find((a) => a.path === 'objects/치로.etp')!.data);
+  const chiro = utf8(result.files.find((a) => a.path === 'objects/치로.etp')!.data);
   assert.match(chiro, /"assets\/image\/치로_새그림\.png"/);
 });
 
@@ -1244,7 +1279,7 @@ test('여러 모양이 같은 파일을 쓰면 한 번만 저장한다', () => {
   const images = result.assets.filter((a) => a.path.startsWith('assets/image/'));
   assert.equal(images.length, 1);
   for (const name of ['치로', '엔트리봇']) {
-    const fragment = utf8(result.assets.find((a) => a.path === `objects/${name}.etp`)!.data);
+    const fragment = utf8(result.files.find((a) => a.path === `objects/${name}.etp`)!.data);
     assert.match(fragment, new RegExp(images[0].path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 });
@@ -1295,7 +1330,7 @@ test('SVG 모양은 기본적으로 엔트리가 함께 저장한 PNG 로 가져
   assert.deepEqual(images.map((a) => a.path), ['assets/image/주인공_배경.png']);
   assert.equal(utf8(images[0].data), '가운데로 안 옮겨진 그림');
 
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.match(fragment, /default costume 배경 "assets\/image\/주인공_배경\.png"/);
 });
 
@@ -1349,7 +1384,7 @@ test('함수 지역 변수는 이름을 되찾아 몸통 맨 위에 var 로 선�
     [{ name: '누적', value: 0, id: 'fn1_a' }],
     [setLocal('fn1_a', 3), { type: 'dialog', params: [getLocal('fn1_a'), 'speak'], statements: [] }],
   );
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
 
   assert.deepEqual(result.warnings, []);
   assert.match(result.source, /^function 계산\(a\):\n {2}var 누적 = 0\n {2}누적 = 3\n {2}say 누적$/m);
@@ -1361,7 +1396,7 @@ test('지역 변수 이름이 매개변수·전역과 겹치면 다른 이름을
     [setLocal('fn1_a', 1), setLocal('fn1_b', 2)],
     [{ id: 'g1', name: '점수', variableType: 'variable', value: 0, object: null }],
   );
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
 
   assert.match(result.source, /^ {2}var a_2 as "a" = 0$/m);
   assert.match(result.source, /^ {2}var 점수_2 as "점수" = 0$/m);
@@ -1372,7 +1407,7 @@ test('이름으로 쓸 수 없는 낱말은 뒤에 _ 를 붙여 되돌린다', (
     [{ name: 'skip', value: 0, id: 'fn1_a' }],
     [setLocal('fn1_a', 1)],
   );
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
 
   assert.match(result.source, /^ {2}var skip_ as "skip" = 0$/m);
   assert.match(result.source, /^ {2}skip_ = 1$/m);
@@ -1384,7 +1419,7 @@ test('지역 변수 이름이 내장 이름과 겹치면 내장 이름을 가리
     [{ name: 'x', value: 0, id: 'fn1_a' }],
     [{ type: 'set_func_variable', params: ['fn1_a', coordinate, null], statements: [] }],
   );
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
 
   // Rename the local x so it cannot hide the coordinate read on the assignment's right side.
   assert.match(result.source, /^ {2}var x_ as "x" = 0$/m);
@@ -1406,7 +1441,7 @@ test('내장 이름과 겹치는 전역 변수·함수 이름도 비껴 준다',
     [],
     [{ id: 'g1', name: 'size', variableType: 'variable', value: 0, object: null }],
   );
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
 
   assert.match(result.source, /^var size_ as "size" = 0$/m);
 });
@@ -1416,7 +1451,7 @@ test('되돌린 지역 변수는 다시 컴파일해도 함수의 지역 변수�
     [{ name: '누적', value: 0, id: 'fn1_a' }],
     [setLocal('fn1_a', 3), { type: 'dialog', params: [getLocal('fn1_a'), 'speak'], statements: [] }],
   );
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
 
   const recompiled = compileProject(result.source, { path: 'main.etp' });
   assert.deepEqual(recompiled.errors, [], recompiled.errors.map((e) => e.message).join('\n'));
@@ -1434,7 +1469,7 @@ test('함수 정의 앞에 주석 블록이 놓여 있어도 정의를 찾아낸
     [{ id: 'c1', type: 'comment', value: '메모', params: [], statements: [] }],
     content[0],
   ]);
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
 
   assert.match(result.source, /^function 계산\(a\):\n {2}var 누적 = 0\n {2}누적 = 3\nend$/m);
 });
@@ -1461,7 +1496,7 @@ function namedResourceProject() {
 }
 
 function fragmentOf(result: any, name = '주인공') {
-  return utf8(result.assets.find((a: any) => a.path === `objects/${name}.etp`).data);
+  return utf8(result.files.find((a: any) => a.path === `objects/${name}.etp`).data);
 }
 
 test('식별자로 적을 수 없는 모양 · 소리 이름은 as 로 남긴다', () => {
@@ -1494,7 +1529,7 @@ test('공유 · 실시간 변수는 shared · realtime 로 적고 그대로 되�
       isCloud: false, isRealTime: true, cloudDate: false, visible: false, value: 0, x: 0, y: 0,
     },
   ];
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
   assert.match(result.source, /^shared list 순위_공유 as "순위\(공유\)" = \[\]$/m);
   assert.match(result.source, /^realtime var 접속자 = 0$/m);
 
@@ -1521,7 +1556,7 @@ test('작품에 없는 변수 id 를 가리키는 블록은 선언을 되살려�
     { type: 'when_run_button_click', params: [null], statements: [] },
     { type: 'set_variable', params: ['지워진id', { type: 'number', params: ['1'], statements: [] }, null], statements: [] },
   ]]);
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
   assert.match(result.source, /^var missing_var_지워진id = 0$/m);
 
   const recompiled = recompileResult(result, 'entropy-decompile-missing-');
@@ -1575,8 +1610,8 @@ end`;
 
   const back = decompileProject(compiled.project!, []);
   assert.deepEqual(back.warnings, []);
-  assert.match(back.source, /^table 점수표:\n {2}columns "이름", "점수"\n {2}row "철수", 10\nend$/m);
-  const fragment = utf8(back.assets.find((a) => a.path === 'objects/o.etp')!.data);
+  assert.match(utf8(back.files.find((file) => file.path === "table.etp")!.data), /^table 점수표:\n {2}columns "이름", "점수"\n {2}row "철수", "10"\nend$/m);
+  const fragment = utf8(back.files.find((a) => a.path === 'objects/o.etp')!.data);
   assert.equal(
     fragment.trim(),
     ['when start do', ...body.map((line) => `  ${line}`), 'end'].join('\n'),
@@ -1658,7 +1693,7 @@ test('읽을 수 없는 글꼴 크기는 캔버스가 실제로 그리는 글꼴
   }];
 
   const back = decompileProject(project, []);
-  const fragment = utf8(back.assets.find((a) => a.path.endsWith('.etp'))!.data);
+  const fragment = utf8(back.files.find((a) => a.path.endsWith('.etp'))!.data);
   assert.match(fragment, /^font_size = 10$/m);
   assert.match(fragment, /^font = "sans-serif"$/m);
   assert.doesNotMatch(fragment, /NaNpx/);
@@ -1978,7 +2013,7 @@ function paramClashProject() {
 }
 
 test('변수와 이름이 겹치는 라벨은 매개변수 이름으로 그대로 쓰지 않는다', () => {
-  const result = decompileProject(paramClashProject(), []);
+  const result = decompileProject(paramClashProject(), [], { inline: true });
 
   assert.match(result.source, /^function 걷기\(a, (?!넉백횟수\))[\p{L}\p{N}_]+\):$/mu);
   assert.match(result.source, /^ {2}넉백횟수 = [\p{L}\p{N}_]+$/mu);
@@ -1991,7 +2026,7 @@ test('이름이 겹쳐도 되돌린 함수는 다시 컴파일되어 전역 변�
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-decompile-clash-'));
   const mainFile = path.join(dir, 'main.etp');
   fs.writeFileSync(mainFile, result.source);
-  for (const asset of result.assets) {
+  for (const asset of [...result.files, ...result.assets]) {
     const target = path.join(dir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
@@ -2042,14 +2077,14 @@ function recompiledThread(project: RawEntity) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-decompile-value-'));
   const mainFile = path.join(dir, 'main.etp');
   fs.writeFileSync(mainFile, result.source);
-  for (const asset of result.assets) {
+  for (const asset of [...result.files, ...result.assets]) {
     const target = path.join(dir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
   }
   const recompiled = compileProject(result.source, { path: mainFile, assetDirs: [dir] });
   assert.deepEqual(recompiled.errors, [], recompiled.errors.map((e) => e.message).join('\n'));
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   return {
     source: fragment,
     warnings: result.warnings,
@@ -2211,7 +2246,7 @@ function danglingResourceProject(): RawEntity {
 
 test('작품에 없는 모양 id 는 그대로 남기고 주의로 알린다', () => {
   const result = decompileProject(danglingResourceProject(), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^ {2}costume = "지워진모양"$/m);
   assert.deepEqual(result.warnings, []);
@@ -2219,7 +2254,7 @@ test('작품에 없는 모양 id 는 그대로 남기고 주의로 알린다', (
 });
 
 test('되돌리기의 strict 는 주의를 경고로 올린다', () => {
-  const loose = decompileProject(danglingResourceProject(), []);
+  const loose = decompileProject(danglingResourceProject(), [], { inline: true });
   const strict = decompileProject(danglingResourceProject(), [], { strict: true });
 
   assert.deepEqual(strict.notices, []);
@@ -2270,7 +2305,7 @@ function loopFlowProject(): RawEntity {
 
 test("'이번 반복 건너뛰기' 는 continue 로, 판단 자리에 넣은 트릭은 skip 으로 되돌린다", () => {
   const result = decompileProject(loopFlowProject(), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^ {4}continue$/m);
   assert.match(fragment, /^ {4}skip$/m);
@@ -2284,7 +2319,7 @@ test('되돌린 continue · skip 은 원래 블록 모양 그대로 다시 컴�
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-decompile-flow-'));
   const mainFile = path.join(dir, 'main.etp');
   fs.writeFileSync(mainFile, result.source);
-  for (const asset of result.assets) {
+  for (const asset of [...result.files, ...result.assets]) {
     const target = path.join(dir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
@@ -2348,7 +2383,7 @@ test('calc_operation 은 어떤 연산자로도 옮길 수 있다 — 모르는 
     'log', 'ln', 'unnatural', 'floor', 'ceil', 'round', 'factorial', 'abs',
   ];
   for (const op of known) {
-    const result = decompileProject(calcOperationProject(op), []);
+    const result = decompileProject(calcOperationProject(op), [], { inline: true });
     assert.deepEqual(result.warnings, [], op);
     assert.doesNotMatch(result.source, /calc_operation/, op);
   }
@@ -2357,7 +2392,7 @@ test('calc_operation 은 어떤 연산자로도 옮길 수 있다 — 모르는 
 test('엔트리가 모르는 연산자는 엔트리와 같이 round 로 읽는다', () => {
   // Entry treats unrecognized calc_operation names as round.
   const result = decompileProject(calcOperationProject('없는연산'), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.match(fragment, /round\(5\)/);
   assert.deepEqual(result.warnings, []);
 });
@@ -2375,7 +2410,7 @@ end`;
   const blocks = JSON.stringify(JSON.parse(compiled.project!.objects[0]!.script as string));
   assert.match(blocks, /"type":"calc_operation","params":\[null,.*"factorial"/);
   const back = decompileProject(compiled.project as never, []);
-  const fragment = utf8(back.assets.find((a) => a.path === 'objects/o.etp')!.data);
+  const fragment = utf8(back.files.find((a) => a.path === 'objects/o.etp')!.data);
   assert.match(fragment, /say factorial\(5\) for 1/);
   assert.deepEqual(back.warnings, []);
 });
@@ -2420,7 +2455,7 @@ function skipCarrierProject(inLoop: boolean): RawEntity {
 
 test('하드웨어 블록으로 만든 반복 건너뛰기 치트는 조용히 skip 으로 되돌린다', () => {
   const result = decompileProject(skipCarrierProject(true), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^ {4}skip$/m);
   assert.doesNotMatch(fragment, /Talebot_Move/);
@@ -2430,7 +2465,7 @@ test('하드웨어 블록으로 만든 반복 건너뛰기 치트는 조용히 s
 
 test('반복문 밖의 같은 치트는 아무것도 남기지 않는다', () => {
   const result = decompileProject(skipCarrierProject(false), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.doesNotMatch(fragment, /skip/);
   assert.doesNotMatch(fragment, /Talebot_Move/);
@@ -2513,7 +2548,7 @@ function parkedStatementProject(): RawEntity {
 
 test("값 자리에 끼워 둔 문장은 바깥 블록을 못 옮겨도 살아남는다", () => {
   const result = decompileProject(parkedStatementProject(), []);
-  const fragment = utf8(result.assets.find((a) => a.path === "objects/주인공.etp")!.data);
+  const fragment = utf8(result.files.find((a) => a.path === "objects/주인공.etp")!.data);
 
   assert.match(fragment, /in 기록 add 1/);
   // Unsupported parent hardware blocks remain notes with warnings.
@@ -2556,7 +2591,7 @@ function unattachedProject(): RawEntity {
 
 test('연결되지 않은 블록을 주석으로 남기는 것은 아무것도 알리지 않는다', () => {
   const result = decompileProject(unattachedProject(), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^# forward 10$/m);
   assert.deepEqual(result.warnings, []);
@@ -2572,7 +2607,7 @@ test('워크스페이스에 떨어져 있던 블록은 옮기지 못했다고 �
     [{ type: 'calc_rand', params: [null, { type: 'number', params: ['1'] }, null, { type: 'number', params: ['10'] }, null], statements: [] }],
   ]);
 
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
   assert.deepEqual(result.warnings, []);
   assert.deepEqual(result.notices, []);
 });
@@ -2585,7 +2620,7 @@ test('연결된 코드의 못 옮기는 블록은 그대로 알린다', () => {
     { type: '아직_없는_블록', params: [], statements: [] },
   ]]);
 
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
   assert.match(result.warnings[0]!, /'아직_없는_블록' 은\(는\) 아직 옮길 수 없습니다/);
 });
 
@@ -2607,7 +2642,7 @@ const COMMENT_BLOCK = {
 
 test('떠 있는 메모(comment)는 블록이 아니라 주석으로 되돌린다', () => {
   const result = decompileProject(loneCommentProject(), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^# 메모 첫 줄$/m);
   assert.match(fragment, /^# 메모 둘째 줄$/m);
@@ -2639,7 +2674,7 @@ function attachedCommentProject(): RawEntity {
 
 test('블록에 붙은 메모는 그 문장 위의 주석으로 되돌아온다', () => {
   const result = decompileProject(attachedCommentProject(), []);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^# 시작할 때\nwhen start do$/m);
   assert.match(fragment, /^ {2}# 앞으로\n {2}# 두 줄짜리 메모\n {2}forward 10$/m);
@@ -2653,7 +2688,7 @@ test('되돌린 주석은 다시 컴파일하면 같은 블록에 붙는다', ()
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entropy-decompile-note-'));
   const mainFile = path.join(dir, 'main.etp');
   fs.writeFileSync(mainFile, result.source);
-  for (const asset of result.assets) {
+  for (const asset of [...result.files, ...result.assets]) {
     const target = path.join(dir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
@@ -2683,7 +2718,7 @@ test('함수 정의에 붙은 메모도 되돌아온다', () => {
     }]]),
   }];
 
-  const result = decompileProject(project, []);
+  const result = decompileProject(project, [], { inline: true });
   assert.match(result.source, /^# 쓰는 법: 인사\(\)\nfunction 인사\(\):$/m);
 });
 
@@ -2705,7 +2740,7 @@ test('팔레트에서 내려간 boolean_and · boolean_or 는 and · or 로 되�
   ]]);
 
   const result = decompileProject(project, []);
-  const fragment = utf8(result.assets
+  const fragment = utf8(result.files
     .find((asset) => asset.path === 'objects/주인공.etp')!.data);
   assert.match(fragment, /if \(true and false\):/);
   assert.match(fragment, /if \(true or false\):/);
@@ -2724,7 +2759,7 @@ test('함수 정의 다음에 이어 붙은 본문도 되돌린다 (playentry �
   // playentry stores the body after the definition in its stack.
   const flat = unattachedProject();
   (flat as any).functions = [{ id: 'fn1', content: JSON.stringify([[define, body]]) }];
-  assert.match(decompileProject(flat, []).source, /^function 짓기\(\):\n {2}forward 10\nend$/m);
+  assert.match(decompileProject(flat, [], { inline: true }).source, /^function 짓기\(\):\n {2}forward 10\nend$/m);
 
   // Saved archives nest the same body inside the definition's statement slot.
   const nested = unattachedProject();
@@ -2732,7 +2767,7 @@ test('함수 정의 다음에 이어 붙은 본문도 되돌린다 (playentry �
     id: 'fn1',
     content: JSON.stringify([[{ ...define, statements: [[body]] }]]),
   }];
-  assert.match(decompileProject(nested, []).source, /^function 짓기\(\):\n {2}forward 10\nend$/m);
+  assert.match(decompileProject(nested, [], { inline: true }).source, /^function 짓기\(\):\n {2}forward 10\nend$/m);
 });
 
 // Sound probes read as loaded because entropy preloads every sound before starting.
@@ -2811,7 +2846,7 @@ test('여러 함수가 같은 매개변수·지역변수 id 를 가져도 각자
   });
   project.functions = [copy('aaaa', 'first'), copy('bbbb', 'second')];
 
-  const result = decompileProject(project as unknown as RawEntity, []);
+  const result = decompileProject(project as unknown as RawEntity, [], { inline: true });
   for (const label of ['first', 'second']) {
     const body = result.source.slice(result.source.indexOf(`function ${label}(`));
     const upToEnd = body.slice(0, body.indexOf('\nend'));
@@ -2936,7 +2971,7 @@ test('<textPath> 는 <text> 로 치지 않는다', () => {
     { name: 'temp/aa/aa/image/aaaa.png', data: Buffer.from('png') },
   ] as never);
 
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.match(fragment, /default costume 배경 "assets\/image\/주인공_배경\.svg"/);
 });
 
@@ -2949,7 +2984,7 @@ test('한 픽셀 어긋난 벡터는 같은 그림으로 보고 그대로 쓴다
     { name: 'temp/aa/aa/image/aaaa.png', data: Buffer.from('png') },
   ] as never;
   const result = decompileProject(project, near);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.match(fragment, /default costume 배경 "assets\/image\/주인공_배경\.svg"/);
 
   const reframed = [
@@ -2957,7 +2992,7 @@ test('한 픽셀 어긋난 벡터는 같은 그림으로 보고 그대로 쓴다
     { name: 'temp/aa/aa/image/aaaa.png', data: Buffer.from('png') },
   ] as never;
   const far = decompileProject(svgPictureProject(), reframed);
-  const other = utf8(far.assets.find((a) => a.path === 'objects/주인공.etp')!.data);
+  const other = utf8(far.files.find((a) => a.path === 'objects/주인공.etp')!.data);
   assert.match(other, /default costume 배경 "assets\/image\/주인공_배경\.png"/);
 });
 
@@ -2974,7 +3009,7 @@ function tableProject(rows: number): RawEntity {
 }
 
 test('행이 아주 많은 테이블도 스택을 넘치지 않고 되돌린다', () => {
-  const result = decompileProject(tableProject(200_000), []);
+  const result = decompileProject(tableProject(200_000), [], { inline: true });
   assert.equal(result.source.split('\n').filter((line) => line.startsWith('  row ')).length, 200_000);
 });
 
@@ -3012,7 +3047,7 @@ test('a costume whose file measures differently from its saved size keeps the sa
   project.objects[0]!.selectedPictureId = 'shrunk';
   const entries = [{ name: 'temp/aa/bb/image/shrunk.png', data: png }, { name: 'temp/aa/bb/image/same.png', data: png.slice() }];
   const result = decompileProject(project as never, entries);
-  const fragment = utf8(result.assets.find((a) => a.path === 'objects/엔트리봇.etp')!.data);
+  const fragment = utf8(result.files.find((a) => a.path === 'objects/엔트리봇.etp')!.data);
   assert.match(fragment, /^default costume shrunk "[^"]+" size 100 100$/m);
   assert.match(fragment, /^costume same "[^"]+"$/m);
 });

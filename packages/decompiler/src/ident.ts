@@ -21,7 +21,7 @@ export function safeIdentifier(raw: unknown, usedNames: Set<string>, fallback = 
   if (!suffixes) NEXT_SUFFIX.set(usedNames, suffixes = new Map());
   let n = suffixes.get(cleaned) ?? 2;
   while (usedNames.has(candidate)) {
-    candidate = `${cleaned}_${n}`;
+    candidate = `${cleaned}${cleaned.endsWith('_') ? '' : '_'}${n}`;
     n += 1;
   }
   suffixes.set(cleaned, n);
@@ -96,11 +96,17 @@ export function ownsResource(ctx: DecompileContext, info: ResourceInfo | undefin
   return Boolean(ctx.functionOwnerId) && info?.owner?.id === ctx.functionOwnerId;
 }
 
+// Resource IDs can be shared by different objects.
+export function resourceInfo(ctx: DecompileContext, id: string, byId: Map<string, ResourceInfo>): ResourceInfo | undefined {
+  const owner = ctx.inFunction ? ctx.functionOwnerId : ctx.objectId;
+  const resources = owner ? ctx.resourcesByObject.get(owner) : undefined;
+  return (byId === ctx.picturesById ? resources?.pictures : resources?.sounds)?.get(id) ?? byId.get(id);
+}
+
 export function entropyLiteral(value: unknown): string {
   if (typeof value === 'number') return entropyNumber(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   const text = String(value ?? '');
-  if (isExactNumber(text)) return text;
   return entropyString(text);
 }
 

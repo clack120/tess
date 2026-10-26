@@ -12,10 +12,12 @@ export interface TarEntry {
   data: Uint8Array;
 }
 
-export interface CollectedAsset {
+export interface OutputFile {
   path: string;
   data: Uint8Array;
 }
+
+export type CollectedAsset = OutputFile;
 
 export interface VarInfo {
   identifier: string;
@@ -23,6 +25,7 @@ export interface VarInfo {
   objectId: string | null;
   source: RawEntity;
   store?: boolean;
+  order?: number;
 }
 
 export interface ResourceInfo {
@@ -82,7 +85,7 @@ export interface DecompileOptions {
   keepSvg?: boolean;
   // Include saved monitor positions; otherwise Entry lays them out automatically.
   positions?: boolean;
-  // Inline objects when the caller has nowhere to write fragment files.
+  // Keep declarations, scenes, functions and objects in one source string.
   inline?: boolean;
   // Keep original URLs when no bundled-asset reader is available.
   builtinAssets?(fileurl: string): Uint8Array | null;
@@ -108,7 +111,11 @@ export interface DecompileContext {
   functionsById: Map<string, FunctionInfo>;
   picturesById: Map<string, ResourceInfo>;
   soundsById: Map<string, ResourceInfo>;
+  resourcesByObject: Map<string, { pictures: Map<string, ResourceInfo>; sounds: Map<string, ResourceInfo> }>;
+  resourceOwnersById: Map<string, Set<string>>;
+  objectId: string | null;
   collectedAssets: CollectedAsset[];
+  sourceFiles: OutputFile[];
   assetDataByPath: Map<string, Uint8Array>;
   multiScene: boolean;
   forcedIds: Set<string>;
@@ -138,7 +145,9 @@ export interface DecompileContext {
 }
 
 export interface DecompileResult {
+  // The entry.etp entry point. Other .etp files are separate from media assets.
   source: string;
+  files: OutputFile[];
   warnings: string[];
   // Strict mode merges these notices into warnings.
   notices: string[];

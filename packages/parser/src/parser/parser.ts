@@ -487,6 +487,10 @@ export class EntropyParser extends CstParser {
         $.SUBRULE($.posExpr, { LABEL: 'atX' });
         $.SUBRULE2($.posExpr, { LABEL: 'atY' });
       } });
+      $.OPTION6({ GATE: () => $.sameLine() && $.leads(kw.order), DEF: () => {
+        $.CONSUME(kw.order);
+        $.CONSUME(NumberLiteral, { LABEL: 'order' });
+      } });
     });
 
     $.RULE('listDecl', () => {
@@ -506,6 +510,10 @@ export class EntropyParser extends CstParser {
         $.CONSUME(kw.size);
         $.SUBRULE3($.posExpr, { LABEL: 'sizeW' });
         $.SUBRULE4($.posExpr, { LABEL: 'sizeH' });
+      } });
+      $.OPTION6({ GATE: () => $.sameLine() && $.leads(kw.order), DEF: () => {
+        $.CONSUME(kw.order);
+        $.CONSUME(NumberLiteral, { LABEL: 'order' });
       } });
     });
 

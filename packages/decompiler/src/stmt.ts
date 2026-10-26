@@ -9,6 +9,7 @@ import {
   isExactNumber,
   entropyLiteral,
   displayNamePart,
+  resourceInfo,
 } from "./ident.ts";
 import type {
   DecompileContext,
@@ -143,8 +144,7 @@ function slotTrick(param: unknown): string | null {
   return LOOP_TRICK[inner?.type ?? ""] ?? null;
 }
 
-// Entry executes flow blocks in value slots before reaching their carrier block.
-// Unwrap statements in function fields because Entry evaluates slots before the parent block.
+// Read flow blocks in value slots before their parent block.
 function parkedStatement(param: unknown): RawBlock | null {
   const field = param as RawBlock | undefined;
   if (
@@ -689,7 +689,7 @@ function resourceExpr(
   const raw = literalOf(value);
   const literal = raw === null ? null : String(raw);
   if (literal !== null && byId.has(literal)) {
-    const info = byId.get(literal)!;
+    const info = resourceInfo(ctx, literal, byId)!;
     // Keep forced IDs in global functions; object-owned functions can use local resource names.
     if (ctx.inFunction && !ownsResource(ctx, info)) return entropyString(literal);
     return entropyString(info.identifier);

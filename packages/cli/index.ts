@@ -49,6 +49,7 @@ interface CliOptions {
   warnings?: boolean;
   sizes?: boolean;
   keepSvg?: boolean;
+  noAssets?: boolean;
   strict?: boolean;
   rounds?: number;
   // Reuse parsed files across watch rebuilds.
@@ -76,7 +77,8 @@ const USAGE = `사용법
   -o, --out <경로>   출력 파일 또는 폴더를 지정합니다.
                      - build 명령 시: 확장자가 .json이면 project.json으로,
                        .ent이면 tar 묶음으로 저장합니다.
-                     - decompile 명령 시: 폴더를 생성하여 main.etp와 에셋을 저장합니다.
+                     - decompile 명령 시: entry.etp, var.etp, func.etp,
+                       scene/ 및 objects/의 소스와 에셋을 저장합니다.
                        (기본값: <파일 이름>_entropy/)
   --assets <폴더>    모양 및 소리 파일을 검색할 폴더를 지정합니다. (여러 번 지정 가능)
   --name <이름>      작품 이름을 지정합니다. (기본값: project 블록의 title)
@@ -97,11 +99,11 @@ const USAGE = `사용법
                      (기본적으로는 소스 내에 '# [decompile]' 주석으로만 남깁니다.)
   --sizes            decompile 명령 시 모든 모양(costume)에 'size 가로 세로' 속성을 명시합니다.
                      (기본적으로 글상자를 제외한 모양 크기는 이미지 파일 자체의 크기를 따릅니다.)
-  --keep-svg         decompile 명령 시 SVG 모양을 PNG로 대체하지 않고 원본 그대로 유지합니다.`;
+  --keep-svg         decompile 명령 시 SVG 모양을 PNG로 대체하지 않고 원본 그대로 유지합니다.
+  --no-assets        decompile 명령 시 이미지·소리 파일을 제외하고 모든 .etp 소스를 저장합니다.`;
 
 function parseArgs(argv: string[]) {
-  // The CLI favors reproducible output. Library callers still opt into strict
-  // mode explicitly, while command-line users can request recovery as needed.
+  // Use strict mode by default for CLI commands.
   const options: CliOptions = { assets: [], strict: true };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
@@ -125,6 +127,7 @@ function parseArgs(argv: string[]) {
     else if (arg === "--warnings") options.warnings = true;
     else if (arg === "--sizes") options.sizes = true;
     else if (arg === "--keep-svg") options.keepSvg = true;
+    else if (arg === "--no-assets") options.noAssets = true;
     else if (arg === "--strict") options.strict = true;
     else if (arg === "--no-strict") options.strict = false;
     else if (arg === "--rounds") options.rounds = Number(argv[++i]);
@@ -609,7 +612,8 @@ async function runDecompile(
   let result;
   try {
     result = await decompileEnt(bytes, {
-      sizes: options.sizes,
+      // Without image bytes the saved dimensions are the only size information.
+      sizes: options.sizes || options.noAssets,
       keepSvg: options.keepSvg,
       strict: options.strict,
     });
@@ -621,24 +625,21 @@ async function runDecompile(
   reading.done("작품 읽기");
 
   const outDir = options.out ?? `${file.replace(/\.ent$/i, "")}_entropy`;
-  const writing = out.working("소스와 에셋 쓰는 중");
+  const writing = out.working(options.noAssets ? "소스 쓰는 중" : "소스와 에셋 쓰는 중");
   fs.mkdirSync(outDir, { recursive: true });
-  const mainFile = path.join(outDir, "main.etp");
+  const mainFile = path.join(outDir, "entry.etp");
   fs.writeFileSync(mainFile, result.source);
-  for (const asset of result.assets) {
+  const media = options.noAssets ? [] : result.assets;
+  for (const asset of [...result.files, ...media]) {
     const target = path.join(outDir, asset.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, asset.data);
   }
   writing.done("파일 쓰기");
 
-  const fragmentCount = result.assets.filter((asset) =>
-    asset.path.endsWith(".etp"),
-  ).length;
-
   const rows: Array<[string, string]> = [
-    ["오브젝트 조각", `${fragmentCount}개`],
-    ["모양 · 소리", `${result.assets.length - fragmentCount}개`],
+    ["소스 파일", `${result.files.length + 1}개`],
+    ["모양 · 소리", options.noAssets ? "제외" : `${media.length}개`],
   ];
   if (result.warnings.length > 0) {
     rows.push(["경고", out.yellow(`${result.warnings.length}개`)]);
@@ -650,7 +651,7 @@ async function runDecompile(
 
   showDecompileNotes(result.warnings, result.notices, options);
 
-  try {
+  if (!options.noAssets) try {
     const recheck = compileProject(result.source, {
       path: mainFile,
       assetDirs: [outDir],

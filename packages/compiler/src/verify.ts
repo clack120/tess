@@ -16,7 +16,7 @@ export interface VerifyEntryProjectOptions {
   references?: boolean;
 }
 
-const BLOCK_FIELDS = ['id', 'x', 'y', 'type', 'params', 'statements'];
+const BLOCK_FIELDS = ['id', 'type'];
 
 const PROJECT_KEYS = [
   'objects', 'scenes', 'variables', 'messages', 'functions', 'tables',
@@ -152,8 +152,8 @@ export function verifyEntryProject(
 
       const params = Array.isArray(block.params) ? block.params : [];
       const statements = Array.isArray(block.statements) ? block.statements : [];
-      if (!Array.isArray(block.params)) add(`${path}: params 가 배열이 아닙니다.`);
-      if (!Array.isArray(block.statements)) add(`${path}: statements 가 배열이 아닙니다.`);
+      if ('params' in block && !Array.isArray(block.params)) add(`${path}: params 가 배열이 아닙니다.`);
+      if ('statements' in block && !Array.isArray(block.statements)) add(`${path}: statements 가 배열이 아닙니다.`);
 
       const expansion = expansionBlock(block.type);
       const expected = BLOCK_PARAM_COUNTS[block.type] ?? expansion?.slots.length;
@@ -165,8 +165,7 @@ export function verifyEntryProject(
         const id = block.type.slice(5);
         if (checkReferences && !functionIds.has(id)) add(`${path}: 함수 '${id}' 가 functions 에 없습니다.`);
         const fields = functionParamCounts.get(id);
-        // Native Entry saves some calls with a trailing null icon slot, including value
-        // functions from older works. The icon is not an argument and may be omitted.
+        // A trailing null icon is allowed after the actual function arguments.
         const count = params.length;
         const trailingIcon = fields !== undefined
           && count === fields + 1 && params[fields] === null;

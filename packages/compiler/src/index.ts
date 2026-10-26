@@ -7,7 +7,7 @@ import { diagnoseEntryRisks } from './entry-risks.ts';
 import { verifyEntryProject } from './verify.ts';
 import { compileStatements, compileStatement } from './statement.ts';
 import { compileValue } from './expression.ts';
-import { KEY_CODES, STORE_PREFIX, keyCodeOf } from '@entropy/core';
+import { KEY_CODES, STORE_PREFIX, keyCodeOf, compactLargeProject, PROJECT_JSON_LIMIT } from '@entropy/core';
 import { didYouMean } from '@entropy/core';
 import { codeFrame, validate } from '@entropy/parser';
 import { isAutoParamName } from '@entropy/core';
@@ -29,10 +29,8 @@ export { createCompileCache };
 const DEFAULT_SCENE_NAME = '장면 1';
 // Entry's font-family is Nanum Gothic; the Korean label has no matching font face.
 const DEFAULT_FONT = 'Nanum Gothic';
-// A compact 16,737,823-byte project was saved successfully, while the next byte
-// failed on the tested Entry server path. Keep a little margin below that measured
-// boundary; importing a local .ent and saving it online are separate limits.
-export const ENTRY_PROJECT_JSON_LIMIT = 16_700_000;
+// Share the measured save boundary with the editor.
+export const ENTRY_PROJECT_JSON_LIMIT = PROJECT_JSON_LIMIT;
 // Entry has no saved brush defaults, so apply them in an initial start script.
 const BRUSH_DEFAULT_PROPERTIES = ['draw_color', 'fill_color', 'draw_width', 'draw_alpha'];
 
@@ -94,7 +92,7 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   compileObjects(ctx);
   timer.mark('스크립트 컴파일');
 
-  const project = assemble(program, ctx, options);
+  const { project, afterBytes: projectBytes } = compactLargeProject(assemble(program, ctx, options), ENTRY_PROJECT_JSON_LIMIT);
   const scalarCount = project.variables.filter(variable => variable.variableType !== 'list').length;
   const listCount = project.variables.length - scalarCount;
   if (scalarCount >= 500 || listCount >= 500) {
@@ -104,9 +102,8 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
         help: '먼저 실제 작품을 프로파일한 뒤, 자주 조회되는 숨김 변수·리스트를 같은 종류의 선언 중 앞쪽에 두세요. 보이는 항목의 자리를 바꾸거나 정적 참조 횟수만 보고 무작정 정렬하면 다른 실행 경로가 느려질 수 있습니다.',
       });
   }
-  const projectBytes = new TextEncoder().encode(JSON.stringify(project)).length;
   if (projectBytes > ENTRY_PROJECT_JSON_LIMIT) {
-    ctx.warn(program, `project.json 크기가 ${projectBytes.toLocaleString('en-US')}바이트라 Entry 저장의 실측 운영선 16,700,000바이트를 넘습니다.`, {
+    ctx.warn(program, `project.json 크기가 ${projectBytes.toLocaleString('en-US')}바이트라 Entry 저장의 실측 경계 직전값 ${ENTRY_PROJECT_JSON_LIMIT.toLocaleString('en-US')}바이트를 넘습니다.`, {
       code: 'W0008',
       help: '큰 정적 리스트와 반복 생성된 블록부터 줄이세요. .ent 압축 크기와 자산 크기는 이 값과 다르고, 실제 상한은 Entry 서버나 저장 경로에 따라 바뀔 수 있습니다.',
     });
@@ -306,6 +303,11 @@ function makeVariable(
     x: node.at ? Number(constantOf(node.at.x, ctx) ?? 0) : 0,
     y: node.at ? Number(constantOf(node.at.y, ctx) ?? 0) : 0,
   };
+  if (node.order !== undefined) {
+    if (!Number.isSafeInteger(node.order) || node.order < 1) {
+      ctx.error(node, '변수·리스트 order 는 1 이상의 정수여야 합니다.');
+    } else ctx.variableOrder.set(base.id, node.order);
+  }
 
   if (node.type === 'ListDecl') {
     const elements = node.value.type === 'ListLiteral' ? node.value.elements : [];
@@ -593,8 +595,7 @@ function compileFunctions(ctx: Context) {
     };
 
     const declared = fn.node!;
-    // Entry clones function locals for every call. Store simple top-level initializers there
-    // instead of emitting a duplicate assignment, which also keeps decompile/recompile stable.
+    // Store constant initializers in Entry’s per-call locals.
     for (const statement of declared.body) {
       if (statement.type !== 'VarDecl') continue;
       const value = functionLocalInitialValue(statement.value);
@@ -767,6 +768,7 @@ function assemble(program: ProgramNode, ctx: Context, options: CompileOptions): 
   };
 
   const objects = ctx.objects.map((object) => buildObject(object, ctx));
+  ctx.variables.sort((a, b) => (ctx.variableOrder.get(a.id) ?? Infinity) - (ctx.variableOrder.get(b.id) ?? Infinity));
   addSystemVariables(ctx);
 
   const project: EntryProject = {
@@ -857,8 +859,8 @@ function buildObject(object: CompiledObject, ctx: Context): EntryObject {
     Object.assign(entity, {
       regX: object.center?.x ?? width / 2,
       regY: object.center?.y ?? height / 2,
-      width,
-      height,
+      width: object.boxSize?.width ?? width,
+      height: object.boxSize?.height ?? height,
     });
   }
 

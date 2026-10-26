@@ -130,17 +130,20 @@ export function loadProgram({
     }
     sources.set(target, text);
     visiting.add(target);
-    const members = load(text, target, 'object');
-    visiting.delete(target);
-    if (!members) return null;
-
-    return {
-      type: 'Object',
-      kind: item.kind,
-      name: basename(target, extname(target)),
-      body: expand(members as ObjectMember[], target, 'object') as ObjectMember[],
-      loc: item.loc,
-    };
+    try {
+      const members = load(text, target, 'object');
+      if (!members) return null;
+      return {
+        type: 'Object',
+        kind: item.kind,
+        name: basename(target, extname(target)),
+        body: expand(members as ObjectMember[], target, 'object') as ObjectMember[],
+        loc: item.loc,
+      };
+    } finally {
+      // An object fragment stays active while its own use directives expand.
+      visiting.delete(target);
+    }
   };
 
   const expandNested = (item: Member, file: string): Member => {

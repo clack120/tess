@@ -121,7 +121,7 @@ async function main(): Promise<number> {
   });
   try {
     if (loaded.decompiledTo) {
-      console.log(`${path.basename(file)} → ${path.join(loaded.decompiledTo, 'main.etp')} (되돌린 Entropy 소스)`);
+      console.log(`${path.basename(file)} → ${path.join(loaded.decompiledTo, 'entry.etp')} (되돌린 Entropy 소스)`);
     }
     const grades = [
       ['에러', loaded.errors, console.error],

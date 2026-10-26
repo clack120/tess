@@ -130,6 +130,51 @@ test('.ent check 는 지원하지 못한 블록을 버린 왕복을 OK로 보고
   assert.doesNotMatch(result.output, /\bOK\b/);
 });
 
+for (const noAssets of [false, true]) {
+  test(`decompile writes entry, declarations, scenes and object sources (no-assets=${noAssets})`, (t) => {
+    const dir = project(t, {});
+    const source = `var score = 0
+list packed = [${Array.from({ length: 30 }, (_, i) => JSON.stringify(`${i}${'x'.repeat(110)}`)).join(', ')}]
+function twice(n):
+  return n * 2
+end
+scene "s":
+  object "o":
+    ${Array.from({ length: 25 }, (_, i) => `${i ? '' : 'default '}costume p${i} "image.png" size 1 1`).join('\n    ')}
+    when start do
+      score = twice(3)
+    end
+  end
+end`;
+    const compiled = compileProject(source);
+    assert.deepEqual(compiled.errors, []);
+    const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4yQAAAAASUVORK5CYII=', 'base64');
+    const file = path.join(dir, 'work.ent');
+    fs.writeFileSync(file, makeTar([
+      { name: 'temp/project.json', data: Buffer.from(JSON.stringify(compiled.project)) },
+      { name: compiled.project!.objects[0]!.sprite.pictures[0]!.fileurl, data: image },
+    ]));
+    const out = path.join(dir, 'out');
+    const result = cli('decompile', file, '-o', out, ...(noAssets ? ['--no-assets'] : []));
+    assert.equal(result.code, 0, result.output);
+    for (const name of ['entry.etp', 'var.etp', 'func.etp', 'scene/s.etp', 'objects/o.etp', 'objects/o.assets.etp', 'data/packed.etp']) {
+      assert.ok(fs.existsSync(path.join(out, name)), name);
+    }
+    assert.equal(fs.existsSync(path.join(out, 'assets')), !noAssets);
+    assert.match(result.output, /소스 파일/);
+    if (noAssets) {
+      assert.match(result.output, /모양 · 소리\s+제외/);
+      assert.match(fs.readFileSync(path.join(out, 'objects/o.assets.etp'), 'utf8'), /size 1 1/);
+    } else assert.match(result.output, /정상적으로 컴파일/);
+    const entry = path.join(out, 'entry.etp');
+    const again = compileProject(fs.readFileSync(entry, 'utf8'), { path: entry, strict: true });
+    assert.deepEqual(again.errors, []);
+    assert.equal(again.project!.objects.length, 1);
+    assert.equal(again.project!.objects[0]!.sprite.pictures.length, 25);
+    assert.equal(again.project!.functions.length, 1);
+  });
+}
+
 test('문법 에러는 그대로 위치와 함께 알려 준다', (t) => {
   const dir = project(t, { 'main.etp': 'object "o":\n  when start do\n    x +=\n' });
   const result = cli('check', path.join(dir, 'main.etp'));

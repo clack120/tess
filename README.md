@@ -15,6 +15,18 @@ bun entropy build examples/all_blocks.etp -o blocks.ent
 
 `build` 결과는 Entropy 확장 없이 Entry의 **불러오기 → 오프라인 작품 불러오기**로 실행할 수 있는 표준 `.ent`입니다.
 
+기존 작품을 편집하려면 디컴파일한 `entry.etp`부터 여세요. 전역 선언·함수·장면·오브젝트는 `use`로 연결된 별도 `.etp` 파일로 나뉩니다.
+
+```bash
+bun entropy decompile work.ent -o work
+bun entropy build work/entry.etp -o edited.ent
+
+# 이미지·소리 없이 코드만 살펴보기
+bun entropy decompile work.ent -o source --no-assets
+```
+
+큰 작품을 컴파일할 때는 Entry의 기본 블록 속성을 생략해 저장 JSON이 불필요하게 커지는 것을 줄입니다. 변수·리스트 데이터와 블록 ID는 유지합니다.
+
 ```bash
 # .ent → .etp → .ent 왕복과 Entry 블록 스키마를 기본 3회 검사
 bun entropy check blocks.ent

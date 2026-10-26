@@ -92,12 +92,11 @@ function observeExport(entry: Editor | undefined): void {
         work = result.project;
         if (result.beforeBytes > PROJECT_JSON_LIMIT) {
           const message = `[Entropy] 저장 JSON 축약: ${result.beforeBytes.toLocaleString()} → ${result.afterBytes.toLocaleString()} bytes`;
-          if (result.afterBytes > PROJECT_JSON_LIMIT) console.warn(`${message} (16,700,000 bytes 한도 초과)`);
+          if (result.afterBytes > PROJECT_JSON_LIMIT) console.warn(`${message} (${PROJECT_JSON_LIMIT.toLocaleString()} bytes 기준 초과)`);
           else console.info(message);
         }
       } catch (error) {
-        // Preserve native saving if a future Entry format cannot be compacted,
-        // but leave enough evidence to diagnose an over-limit save failure.
+        // Keep native saving available if compaction fails.
         console.warn('[Entropy] 저장 JSON을 축약하지 못해 원본을 사용합니다', error);
       }
       cachedExport = { entry, revision: editRevision, work };
@@ -194,8 +193,7 @@ async function snapshot(entry: Editor, signal: AbortSignal): Promise<EditorSnaps
 
 function schedule(): void {
   dirty = true;
-  // Entry already owns the editor's decoded media. Do not create another
-  // renderer or decode a second copy of every asset while the user is editing.
+  // Reuse the editor’s decoded media.
 }
 
 function createPrepared(canvas: HTMLCanvasElement, entry: Editor): Prepared {
@@ -594,8 +592,7 @@ installLocalDownload(async (signal, progress) => {
   if (active?.live && attached === entry) return active.live.work;
   if (stopping?.entry === entry && stopping.live) return stopping.live.work;
   const revision = editRevision;
-  // Server saves keep their compaction wrapper. Local archives have no server
-  // JSON limit and preserve the native export, including defaults and metadata.
+  // Keep local archives unchanged; compact only online saves.
   const work = await exportNativeProject(entry, exportingEntry === entry && originalExport ? originalExport : entry.exportProject, signal, progress);
   if (revision !== editRevision) throw new Error('준비 중 작품이 변경되었습니다. 다시 저장해주세요.');
   return work;

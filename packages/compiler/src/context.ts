@@ -29,8 +29,8 @@ export function makeBlock(
     deletable: 1,
     emphasized: false,
     readOnly: null,
-    copyable: true,
-    assemble: true,
+    copyable: !['function_create', 'function_create_value', 'function_field_label', 'function_field_string', 'function_field_boolean'].includes(type),
+    assemble: type !== 'function_field_string' && type !== 'function_field_boolean',
     extensions: [],
   };
 }
@@ -74,6 +74,7 @@ export class Context {
   objectByName: Map<string, CompiledObject>;
 
   variables: EntryVariable[];
+  variableOrder: Map<string, number>;
 
   globals: Map<string, EntryVariable>;
 
@@ -124,6 +125,7 @@ export class Context {
     this.objects = [];
     this.objectByName = new Map();
     this.variables = [];
+    this.variableOrder = new Map();
     this.globals = new Map();
     this.messages = [];
     this.messageByName = new Map();

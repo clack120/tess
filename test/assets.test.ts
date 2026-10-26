@@ -166,6 +166,20 @@ end`;
   assert.ok(names.includes('temp/project.json'));
 });
 
+test('missing archive assets and empty sounds keep stable paths', () => {
+  const image = 'temp/aa/bb/image/aabbcc.png';
+  const compiled = compileProject(`object "o":
+  default costume p "${image}" size 10 20
+  sound empty "" for 0
+end`);
+  assert.deepEqual(compiled.errors, []);
+  assert.equal(compiled.project!.objects[0]!.sprite.pictures[0]!.fileurl, image);
+  assert.equal(compiled.project!.objects[0]!.sprite.pictures[0]!.filename, 'aabbcc');
+  assert.equal(compiled.project!.objects[0]!.sprite.sounds[0]!.fileurl, '');
+  assert.equal(compiled.project!.objects[0]!.sprite.sounds[0]!.filename, '');
+  assert.equal(compiled.project!.objects[0]!.sprite.sounds[0]!.duration, 0);
+});
+
 test('TAR 은 긴 경로·gzip·pax 이름을 읽고 쓴다', async () => {
   const long = `temp/${'a'.repeat(80)}/${'b'.repeat(60)}.png`;
   const tar = makeTar([{ name: long, data: Buffer.from('x') }, { name: 'temp/한글.json', data: Buffer.alloc(513, 1) }]);

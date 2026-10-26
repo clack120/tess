@@ -70,6 +70,10 @@ object "플레이어":
 end
 ```
 
+문자열 초기값은 숫자처럼 보여도 문자열로 보존합니다. `"0"`과 `0`, `"001"`과 `1`을 디컴파일 과정에서 합치지 않습니다.
+
+원본의 전역·오브젝트 지역 변수가 섞여 있으면 디컴파일러가 선언 끝에 `order 1` 같은 순번을 붙입니다. 파일을 나눠도 Entry 변수·리스트의 조회 순서를 유지하기 위한 값이며, 제어 흐름은 바꾸지 않습니다. 직접 쓸 때는 1 이상의 정수를 지정하고, 생략한 선언은 순번을 지정한 선언 뒤에 둡니다. 함수 지역 변수에는 쓰지 않습니다.
+
 ---
 
 ## 3. 조건과 반복
@@ -275,24 +279,65 @@ end
 
 ## 9. 파일 나누기 (모듈화)
 
-작품이 커지면 오브젝트별로 파일을 나누어 관리할 수 있습니다. `use` 키워드는 지정한 파일의 코드를 그 자리에 그대로 붙여 넣습니다.
+`use`는 파일 내용을 그 자리에 붙여 넣습니다. 별도 실행이나 초기화 단계가 생기지 않으며, 함수의 범위도 바꾸지 않습니다. 경로는 `use`를 적은 파일이 있는 폴더를 기준으로 찾습니다.
 
-**`main.etp`**
+디컴파일러는 다음처럼 나눕니다. 내용이 없는 `var.etp`, `func.etp`, `table.etp`는 만들지 않습니다.
+
+```text
+entry.etp                     작품 정보와 파일 연결
+var.etp                       전역 변수·리스트, 원본 선언 순서 유지
+func.etp                      전역 함수
+table.etp                     테이블
+scene/게임화면.etp             장면과 오브젝트 목록
+objects/게임화면/플레이어.etp   속성·지역 변수·이벤트·오브젝트 소유 함수
+data/채보.etp                  긴 리스트 선언
+assets/                       이미지·소리 파일
+```
+
+장면이 하나면 `objects/` 아래의 장면 폴더를 생략합니다. 모양·소리 선언이 긴 오브젝트는 같은 폴더의 `<이름>.assets.etp`로 선언을 나눕니다. 이 파일도 편집 가능한 소스이며 이미지·소리 파일과는 구분됩니다. 리소스를 한 오브젝트에 묶어야 하는 함수는 해당 오브젝트에 남깁니다.
+
+**`entry.etp`**
+
+```entropy
+project:
+  title "내 게임"
+end
+
+use "var.etp"
+use "scene/게임화면.etp"
+use "func.etp"
+```
+
+**`scene/게임화면.etp`**
 
 ```entropy
 scene "게임화면":
-  use "objects/player.etp"
-  useobject "objects/enemy.etp" # useobject를 사용할 경우 파일에서 object "":...end 를 생략할 수 있습니다.
+  useobject "../objects/플레이어.etp"
+  usetext "../objects/점수판.etp"
 end
 ```
 
-**`objects/player.etp`**
+**`objects/플레이어.etp`**
 
 ```entropy
-object "플레이어":
-  x = -100
-  when start do
-    say "준비 완료!"
-  end
+x = -100
+
+when start do
+  say "준비 완료!"
 end
 ```
+
+`useobject`·`usetext`는 파일 이름을 오브젝트 이름으로 쓰고 `object`·`text` 블록을 감싸 줍니다. 파일에 직접 블록을 적고 일반 `use`로 불러와도 됩니다. 모양·소리 경로는 시작 파일의 폴더 또는 `--assets`로 지정한 폴더를 기준으로 찾습니다.
+
+`size 가로 세로`는 오브젝트에 저장된 크기를 보존합니다. 모양 파일의 크기는 `costume` 선언의 `size`로, 배율은 `size = 값`으로 지정합니다.
+
+```bash
+bun entropy decompile work.ent -o work
+bun entropy check work/entry.etp
+bun entropy build work/entry.etp -o edited.ent
+
+# 이미지·소리를 쓰지 않고 모든 소스와 리소스 선언을 읽고 싶을 때
+bun entropy decompile work.ent -o source --no-assets
+```
+
+`--no-assets`도 모양의 크기와 소리 길이, 코드 조각을 보존합니다. 이미지·소리 파일은 저장하지 않으므로 실제 재생에 쓰려면 에셋도 준비해야 합니다. 라이브러리의 `decompileProject`·`decompileEnt`는 시작 소스를 `source`, 추가 `.etp` 파일을 `files`, 미디어를 `assets`로 돌려줍니다. `{ inline: true }`이면 모든 소스를 `source`에 넣고 `files`는 비웁니다.

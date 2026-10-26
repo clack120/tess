@@ -9,3 +9,4 @@ export * from "./src/color.ts";
 export * from "./src/table-rows.ts";
 export * from "./src/save-manager.ts";
 export * from "./src/entry-block-data.ts";
+export * from "./src/project-compact.ts";

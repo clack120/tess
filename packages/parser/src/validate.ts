@@ -144,12 +144,6 @@ export function validate(
             error(member, `'${member.name}' 은(는) 글상자(text) 전용 속성입니다. object 에서는 쓸 수 없습니다.`);
           }
           break;
-        case 'BoxSize':
-          // Only text boxes have independent frame bounds; sprite size comes from its costume.
-          if (!isText) {
-            error(member, `'size 가로 세로' 는 글상자(text) 전용입니다. 모양 크기는 costume 뒤에 적으세요.`);
-          }
-          break;
         case 'Center':
           // Entry text boxes use a registration point of 0,0.
           if (isText) {
@@ -230,6 +224,9 @@ export function validate(
     switch (statement.type) {
       case 'VarDecl':
       case 'ListDecl':
+        if (ctx.inFunction && statement.order !== undefined) {
+          error(statement, '함수 지역 변수에는 order 를 쓸 수 없습니다.');
+        }
         walkExpressions(statement.value, ctx);
         ctx.scope.add(statement.name);
         return;
