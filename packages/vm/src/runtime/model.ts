@@ -701,11 +701,14 @@ export interface CompiledScript {
   blockId: string;
 }
 
-// A number yields the frame, 1 marks a promise wait, and a generator starts a nested call.
+// Numbers yield: 0 for a frame, 1 for a promise, 2 after async inputs; generators start calls.
 export type Yielded = number | CallFrame;
 
 export type CallFrame = Generator<Yielded, unknown, unknown> & {
   finishes?: boolean;
+  procedure?: boolean;
+  reenter?: () => CallFrame;
+  asynchronous?: boolean;
   liveBlock?: { id: string; sequence: string; type?: string };
   liveTrace?: import('./diagnostics.ts').GeneratedTrace;
 };
@@ -725,6 +728,7 @@ export class Thread {
   // Keep nested call frames off the JavaScript stack.
   private frames: CallFrame[];
   private waitingAsync = false;
+  private waitingInputs = false;
   get finish(): symbol {
     return FINISH;
   }
@@ -734,6 +738,9 @@ export class Thread {
   running = false;
   state: Record<string, unknown> = {};
   depth = 0;
+  suspensions = 0;
+  asyncCalls = 0;
+  waitingAnimation = false;
 
   constructor(target: Target, entity: Entity, script: CompiledScript) {
     this.target = target;
@@ -751,9 +758,13 @@ export class Thread {
     this.iterator = script.body(this.entity, this);
     this.frames = [this.iterator as CallFrame];
     this.waitingAsync = false;
+    this.waitingInputs = false;
+    this.waitingAnimation = false;
     this.failedFrames = null;
     this.state = {};
     this.depth = 0;
+    this.suspensions = 0;
+    this.asyncCalls = 0;
     this.done = false;
   }
 
@@ -763,6 +774,8 @@ export class Thread {
     for (let index = this.frames.length - 1; index >= at; index--) this.frames[index]!.return(undefined);
     this.frames.length = at;
     this.waitingAsync = false;
+    this.waitingInputs = false;
+    this.waitingAnimation = this.frames.some(frame => frame.finishes || (frame.procedure && frame.asynchronous));
     if (!this.frames.length) this.done = true;
   }
 
@@ -772,49 +785,55 @@ export class Thread {
     }
     this.running = true;
     try {
+      // Normal calls refresh their inputs on each synchronous executor update.
+      if (!this.waitingAsync && !this.waitingInputs) {
+        const refresh = this.frames.filter(frame => frame.reenter && !frame.asynchronous);
+        for (let index = refresh.length - 1; index >= 0; index--) this.frames.push(refresh[index]!.reenter!());
+      }
+      this.waitingAnimation = false;
       this.resume();
     } finally {
       this.running = false;
     }
   }
 
-  // On pause, finish frame-waiting value calls but keep promise waits pending.
-  finishValueCalls(): void {
-    if (this.done || this.running || this.waitingAsync || !this.frames.some((frame) => frame.finishes)) return;
+  reenter(frame: CallFrame, inputs: () => CallFrame): CallFrame {
+    frame.reenter = inputs;
+    return frame;
+  }
+
+  // A queued native animation callback runs once before a paused frame wait returns.
+  finishValueCalls(): boolean {
+    if (this.done || this.running || this.waitingAsync || this.waitingInputs || !this.frames.some((frame) => frame.finishes)) return false;
+    this.step();
+    if (this.done || this.waitingAsync || this.waitingInputs || !this.frames.some((frame) => frame.finishes)) return true;
     this.running = true;
     try {
       this.resume(true);
     } finally {
       this.running = false;
     }
+    return true;
   }
 
   private resume(finishingValues = false): void {
     const frames = this.frames;
     let input: unknown;
-    let thrown = false;
-    let error: unknown;
-    // Do not finish unstarted calls or interrupt a return expression already being evaluated.
-    let fresh = false;
+    let thrown = finishingValues;
+    let error: unknown = FINISH;
+    const floor = finishingValues ? frames.findLastIndex(frame => frame.finishes) : Infinity;
     const told = finishingValues ? new Set<CallFrame>() : null;
+    if (told) {
+      while (frames.length > floor + 1) frames.pop()!.return(undefined);
+      told.add(frames[floor]!);
+    }
     for (;;) {
-      if (told && !thrown) {
-        const at = frames.findLastIndex((frame) => frame.finishes && !told.has(frame));
-        if (at !== -1 && !(fresh && at === frames.length - 1)) {
-          while (frames.length > at + 1) frames.pop()!.return(undefined);
-          told.add(frames[at]!);
-          thrown = true;
-          error = FINISH;
-        }
-      }
       const frame = frames[frames.length - 1]!;
       let result: IteratorResult<Yielded, unknown>;
       try {
         result = thrown ? frame.throw(error) : frame.next(input);
         thrown = false;
-        fresh = false;
       } catch (caught) {
-        fresh = false;
         // Capture the stack at the first failing frame before callers unwind.
         if (!thrown) this.failedFrames = frames.slice();
         frames.pop();
@@ -828,6 +847,7 @@ export class Thread {
       }
       if (result.done) {
         frames.pop();
+        if ((frame.finishes || frame.procedure) && frame.asynchronous) this.asyncCalls++;
         if (!frames.length) {
           this.done = true;
           return;
@@ -837,12 +857,33 @@ export class Thread {
       }
       const value = result.value;
       if (typeof value === 'number') {
+        this.suspensions++;
         this.waitingAsync = value === 1;
-        if (told && !this.waitingAsync && frames.some((frame) => frame.finishes && !told.has(frame))) continue;
+        this.waitingInputs = value === 2;
+        let asyncChild = this.waitingAsync || this.waitingInputs;
+        this.waitingAnimation = false;
+        for (let index = frames.length - 1; index >= 0; index--) {
+          const active = frames[index]!;
+          if (active.finishes) active.asynchronous = true;
+          else if (active.procedure && asyncChild) active.asynchronous = true;
+          if ((active.finishes || active.procedure) && active.asynchronous) {
+            asyncChild = true;
+            this.waitingAnimation = true;
+          }
+        }
+        if (told && !this.waitingAsync && !this.waitingInputs) {
+          const at = frames.findLastIndex((frame, index) => index >= floor && frame.finishes && !told.has(frame));
+          if (at !== -1) {
+            while (frames.length > at + 1) frames.pop()!.return(undefined);
+            told.add(frames[at]!);
+            thrown = true;
+            error = FINISH;
+            continue;
+          }
+        }
         return;
       }
       frames.push(value);
-      fresh = true;
       input = undefined;
     }
   }

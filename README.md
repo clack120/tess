@@ -41,7 +41,7 @@ bun entropy check blocks.ent --report roundtrip.json
 bun entropy run examples/all_blocks.etp --entry
 ```
 
-되돌리기 경고나 원본과의 차이가 있으면 왕복 검사는 실패합니다. 원본 대조와 소스 안정성은 실제 실행 동등성과 구분합니다. [런타임 함정과 진단 안내](./ENTRY-RUNTIME.md)에서 비교 범위, 제외되는 정보, 알려진 VM 차이를 확인할 수 있습니다.
+되돌리기 경고나 원본과의 차이가 있으면 왕복 검사는 실패합니다. 원본 대조와 소스 안정성은 실제 실행 동등성과 구분합니다.
 
 ## 실행기와 확장
 

@@ -104,6 +104,7 @@ test('numeric kernel calls accept finite exponents and leave overflow and underf
   for (const [input, expected] of [['1e2', 101], ['-1E-2', 0.99], ['1e21', 1e21], ['1e309', Infinity], ['1e-999', 1]] as const) {
     const compiled = compileProject(`var output = 0
 function add_one(value) do
+  stop
   return value + 1
 end
 object "actor":

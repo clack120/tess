@@ -664,9 +664,9 @@ function compileFunctions(ctx: Context) {
     const returnValue = returnId ? ctx.block('get_variable', [returnId, null])
       : fn.isValue && tail ? compileValue(tail.value, ctx) : null;
     if (fn.isValue && statements.length === 0) {
-      ctx.warn(tail ?? declared, `값 함수 '${fn.name}' 의 실행 본문이 비어 있습니다. EntryJS는 반환 식을 반복 평가하고 한 틱을 양보할 수 있습니다.`, {
+      ctx.warn(tail ?? declared, `값 함수 '${fn.name}' 의 실행 본문이 비어 있습니다. EntryJS는 반환 식을 반복 평가하고 실행을 양보할 수 있습니다.`, {
         code: 'W0009',
-        help: 'EntryJS 4.0.23에서 빈 본문의 반환 식이 3번 평가되는 것을 확인했습니다. 한 번 평가하려면 return 앞에 stop을 적어 실행 본문을 명시하세요. Entropy VM만으로 검사하면 이 차이를 놓칠 수 있습니다.',
+        help: 'EntryJS 4.0.23에서 동기 반환 식은 3번 평가되며, 대기하는 반환 식은 경로에 따라 횟수가 달라집니다. 한 번 평가하려면 return 앞에 stop을 적어 실행 본문을 명시하세요.',
         related: [ctx.diagnostic(declared, '상수 초기값의 지역 변수 선언은 실행 블록을 만들지 않습니다.')],
       });
     }

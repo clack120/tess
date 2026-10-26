@@ -50,6 +50,7 @@ test('function IDs cannot escape generated kernel comments', () => {
     for (const separator of ['\n', '\r', '\u2028', '\u2029']) {
       const compiled = compileProject(`var output = 0
 function result() do
+  stop
   return 7
 end
 object "actor":

@@ -739,7 +739,7 @@ export function functionDeclarationLines(
     if (isValue && !(createBlock.statements?.[0]?.length)) {
       ctx.notice(`값 함수 '${fn.displayLabel}' 의 실행 본문이 비어 있습니다. EntryJS는 반환 식을 반복 평가할 수 있습니다.`, {
         code: 'D2001',
-        help: '원래 빈 본문을 보존했습니다. EntryJS 4.0.23에서는 반환 식 3회 평가와 틱 양보가 확인되며, Entropy VM 동작과 다를 수 있습니다.',
+        help: '원래 빈 본문을 보존했습니다. EntryJS 4.0.23은 동기 반환 식을 3번 평가하고 실행을 양보합니다. 대기하는 반환 식은 경로에 따라 평가 횟수가 달라집니다.',
       });
     }
     body = indent(blocksToLines(createBlock.statements?.[0] ?? [], ctx));

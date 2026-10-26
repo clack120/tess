@@ -556,6 +556,7 @@ export function planKernel(
       fail(block.type);
     }
     const define = findFunctionDefine(contentOf(target))?.[0];
+    if (!asValue && define?.type === 'function_create_value') return '';
     if (asValue && define?.type !== 'function_create_value') {
       fail(`${block.type} has no value`);
     }
@@ -569,6 +570,9 @@ export function planKernel(
   function statement(block: RawBlock, indent: string): string {
     const p = block.params;
     switch (block.type) {
+      case 'stop_object':
+        if (text(p[0]) !== 'thisThread') return fail(block.type);
+        return `${indent}break body;\n`;
       case 'set_variable': {
         const index = refer(p[0]);
         if (index === null || variables[index]!.isList) {
@@ -698,6 +702,10 @@ export function planKernel(
       scan.reason = 'no definition';
       return { scan, body: null };
     }
+    if (functionBody(stackBlocks!).length === 0) {
+      scan.reason = 'empty function body yields';
+      return { scan, body: null };
+    }
     params = new Map(collectParams(define.params[0]).map((name, at) => [name, at]));
     locals = new Map();
     calls = new Set();
@@ -723,7 +731,7 @@ export function planKernel(
       return {
         scan,
         body: `${JS.open(`k${index}`, params.size, fn.id)}\n` +
-          `${declarations.join('')}${body}${tail}${JS.close}\n`,
+          `${declarations.join('')}body: {\n${body}}\n${tail}${JS.close}\n`,
       };
     } catch (error) {
       scan.reason = error instanceof Fail ? error.message : String(error);

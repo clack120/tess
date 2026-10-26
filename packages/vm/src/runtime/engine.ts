@@ -275,6 +275,8 @@ export class Vm implements Project {
   private sceneById = new Map<string, Scene>();
   private lastTime: number | null = null;
   private accumulator = 0;
+  private finishPausedValues = true;
+  private readonly pendingFunctions = new Set<Thread>();
   private readonly maxCatchUp: number;
   private readonly requestedFps: number | undefined;
   private store: VariableStore | null;
@@ -987,6 +989,7 @@ export class Vm implements Project {
     this.state = 'stop';
     this.pendingMessages = [];
     this.timeouts = [];
+    this.pendingFunctions.clear();
     this.flushStore();
     for (const target of this.targets) {
       for (const thread of target.threads) {
@@ -1011,12 +1014,10 @@ export class Vm implements Project {
     if (this.state === 'run') {
       // Stop the project timer with the engine clock.
       this.state = 'pause';
+      this.finishPausedValues = finishValues;
       // Pause sounds in place rather than ending them.
       this.audio?.pause?.();
       this.speech?.pause?.();
-      for (const target of this.targets) {
-        if (finishValues) for (const thread of target.threads.slice()) this.runThread(thread, true);
-      }
     }
   }
 
@@ -1029,6 +1030,7 @@ export class Vm implements Project {
 
   private resetExecution(): void {
     this.timeouts = [];
+    this.pendingFunctions.clear();
     for (const target of this.targets) {
       for (const clone of target.clones.slice()) {
         this.renderer?.removeEntity(clone);
@@ -1055,6 +1057,11 @@ export class Vm implements Project {
   advance(timestamp: number): void {
     if (this.state !== 'run') {
       this.lastTime = timestamp;
+      try {
+        if (this.state === 'pause' && this.finishPausedValues && this.flushFunctionCalls()) this.renderer?.flush();
+      } catch (error) {
+        this.fail(error);
+      }
       return;
     }
     const step = 1000 / this.frameRate;
@@ -1068,12 +1075,13 @@ export class Vm implements Project {
     try {
       while (this.accumulator >= step && ticks < this.maxCatchUp) {
         this.accumulator -= step;
-        this.tick(0);
+        this.tick(0, false);
         ticks += 1;
         if (this.state !== 'run') {
           break;
         }
       }
+      if (this.state === 'run') this.flushFunctionCalls();
       this.renderer?.flush();
     } catch (error) {
       this.fail(error);
@@ -1091,7 +1099,8 @@ export class Vm implements Project {
     this.onError?.(record);
   }
 
-  tick(deltaMs = 1000 / this.frameRate): void {
+  // Manual ticks include one animation phase; advance flushes once after all catch-up ticks.
+  tick(deltaMs = 1000 / this.frameRate, flushFunctions = true): void {
     this.clock += deltaMs;
     this.frame += 1;
     // Auto-close table windows using engine time so pauses stop their countdown.
@@ -1118,7 +1127,7 @@ export class Vm implements Project {
           j -= 1;
           continue;
         }
-        this.runThread(thread);
+        if (!thread.waitingAnimation) this.runThread(thread);
       }
     }
     this.extras.frame();
@@ -1130,27 +1139,45 @@ export class Vm implements Project {
       else this.timeouts[remaining++] = timeout;
     }
     this.timeouts.length = remaining;
+    if (flushFunctions) this.flushFunctionCalls();
+  }
+
+  // Entry resumes asynchronous function calls once per animation frame, apart from engine ticks.
+  flushFunctionCalls(): boolean {
+    if (this.state === 'stop' || (this.state === 'pause' && !this.finishPausedValues)) return false;
+    const pending = [...this.pendingFunctions];
+    let ran = false;
+    for (const thread of pending) {
+      this.pendingFunctions.delete(thread);
+      if (thread.done || !thread.waitingAnimation) continue;
+      ran = this.runThread(thread, this.state === 'pause') || ran;
+    }
+    return ran;
   }
 
   setTimeout(callback: () => void, delay: number): void {
     this.timeouts.push({ at: this.clock + Math.max(Number(delay) || 0, 0), callback });
   }
 
-  private runThread(thread: Thread, finishingValues = false): void {
+  private runThread(thread: Thread, finishingValues = false): boolean {
     try {
-      if (finishingValues) thread.finishValueCalls();
-      else thread.step();
+      if (finishingValues) return thread.finishValueCalls();
+      thread.step();
     } catch (error) {
       thread.done = true;
       if (error instanceof ThreadStop) {
         // A script ending itself is normal control flow, not an error.
-        return;
+        return true;
       }
       const record = this.errorRecord(error, thread);
       this.errors.push(record);
       this.lastError = record;
       this.onError?.(record);
+    } finally {
+      if (thread.waitingAnimation && !thread.done) this.pendingFunctions.add(thread);
+      else this.pendingFunctions.delete(thread);
     }
+    return true;
   }
 
   private functionOf = new WeakMap<object, string>();

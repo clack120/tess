@@ -134,9 +134,9 @@ test('boolean return types are preserved through chained value functions', () =>
   project.functions.push(relay);
   condition.params[0] = { type: 'func_relay', params: [] };
   project.objects[0]!.script = JSON.stringify(stacks);
-  const expected = { out: 0, hits: 1 };
-  assert.deepEqual(run(project, 1), expected);
-  assert.deepEqual(run(roundtrip(project), 1), expected);
+  const expected = { out: 0, hits: 3 };
+  assert.deepEqual(run(project, 2), expected);
+  assert.deepEqual(run(roundtrip(project), 2), expected);
 });
 
 test('empty condition slots stay false after round-trip', () => {

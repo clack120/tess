@@ -53,6 +53,7 @@ var total = 0
 var ret = 0
 list items = [1, 2]
 function f():
+  stop
   return (text_value + items[1])
 end
 function g():
@@ -136,6 +137,7 @@ var ret = 0
 var n = 0
 list items = [${items}]
 function f():
+  stop
   return (items[1] + items[2])
 end
 object "o":
@@ -166,6 +168,7 @@ test('a root that keeps falling back rests instead of trying every call', () => 
 var ret = 0
 var x = 0
 function f():
+  stop
   return (x + 1)
 end
 object "o":

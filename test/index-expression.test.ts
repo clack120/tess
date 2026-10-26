@@ -29,7 +29,7 @@ end`;
   const project = build(source);
   for (const p of [project, build(decompileProject(project as never, [], { inline: true }).source)]) {
     const vm = new Vm({ renderer: null, audio: null, kernel: false });
-    vm.load(p as never); vm.start(); vm.tick();
+    vm.load(p as never); vm.start(); vm.tick(); vm.tick();
     assert.deepEqual(vm.errors, []);
     for (const [name, expected] of [['literal', 'b'], ['called', 'z'], ['grouped', 'b'], ['chained', 'b']]) {
       assert.equal(vm.variables.find(variable => variable.name === name)!.getValue(), expected);

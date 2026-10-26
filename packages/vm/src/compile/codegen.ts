@@ -55,6 +55,7 @@ const HAT_FILTER: Record<string, number> = {
 };
 
 const RESERVED_PARAM = /^(string|boolean)Param_/;
+const INPUT_CONTROL = new Set(['_if', 'if_else', 'repeat_basic', 'repeat_while_true', 'wait_until_true']);
 
 // Entry has no spin limit; this guard yields only as a last resort to keep the runner stoppable.
 const SPIN_LIMIT = 10_000_000;
@@ -151,6 +152,10 @@ function carriedTrick(block: RawBlock): 'continue' | 'break' | null {
   return carried;
 }
 
+function hasCall(param: unknown): boolean {
+  return isBlock(param) && (param.type.startsWith('func_') || param.params.some(hasCall));
+}
+
 export class Codegen {
   readonly trace: GeneratedTrace = { sourceId: `entropy-generated-${++nextSourceId}.js`, sites: [] };
   private readonly traceBlocks: RawBlock[] = [];
@@ -158,6 +163,7 @@ export class Codegen {
   private readonly varIndex = new Map<string, number>();
   private readonly targetIndex = new Map<string, number>();
   private readonly funcIndex = new Map<string, number>();
+  private readonly definitions = new Map<FunctionEntry, RawBlock[] | null>();
   private readonly tableIndex = new Map<string, number>();
   private readonly localVarIds = new Set<string>();
   private readonly plans: ScriptPlan[] = [];
@@ -348,6 +354,11 @@ export class Codegen {
     return `/*@entropy:${this.traceBlocks.push(block) - 1}*/`;
   }
 
+  private definition(fn: FunctionEntry): RawBlock[] | null {
+    if (!this.definitions.has(fn)) this.definitions.set(fn, findFunctionDefine(parseScript(fn.content)));
+    return this.definitions.get(fn)!;
+  }
+
   private *compileFunction(fn: FunctionEntry): Generator<void, string, unknown> {
     // Intercept the save manager's empty functions here instead of through an extension.
     const saving = pick(SAVE_FUNCTIONS, functionLabel(fn.content));
@@ -356,8 +367,7 @@ export class Codegen {
         ? 'function* (e, th, P) { yield* O.saveStoreWait(); }'
         : 'function* (e, th, P) { O.saveStore(); }';
     }
-    const content = parseScript(fn.content);
-    const stack = findFunctionDefine(content);
+    const stack = this.definition(fn);
     const define = stack?.[0];
     if (!define) {
       return 'function* () {}';
@@ -372,12 +382,21 @@ export class Codegen {
       .join(', ');
     const previousLabel = this.funcLabel;
     this.funcLabel = 'fn';
-    const body = yield* this.compileStack(functionBody(stack!), '    ', `function:${fn.id}`);
+    const statements = functionBody(stack!);
+    const body = yield* this.compileStack(statements, '    ', `function:${fn.id}`);
     this.funcLabel = previousLabel;
 
     // Beyond the depth limit, a call runs no body and produces no value.
     const returnsValue = define.type === 'function_create_value';
     const result = returnsValue ? this.liveCheck(`return:${fn.id}`, this.value(define.params[3]).code) : '';
+    // Empty native definitions execute their header before the final return slot.
+    const empty = statements.length === 0;
+    const emptyValue = empty && returnsValue
+      ? `    { const before = th.suspensions;\n    ${result};\n` +
+        `    const asynchronous = th.suspensions !== before;\n    yield asynchronous ? 2 : 0;\n` +
+        `    if (!asynchronous) { const again = th.suspensions;\n    ${result};\n` +
+        `    if (th.suspensions !== again) yield 2;\n    } }\n`
+      : '';
     // On pause, finish skips the value function body and evaluates its return expression.
     let source =
       `function* (e, th, P) {\n` +
@@ -389,18 +408,16 @@ export class Codegen {
     const liveExit = this.input.liveEditing ? ' && x !== R.liveCode.exit' : '';
     const syncEntity = this.input.liveEditing ? '  e = ctx.entity;\n' : '';
     source += returnsValue
-      ? `  try {\n  fn: {\n${body}  }\n  } catch (x) { if (x !== th.finish${liveExit}) throw x; }\n${syncEntity}  return ${result};\n`
+      ? `  try {\n  fn: {\n${emptyValue}${body}  }\n  } catch (x) { if (x !== th.finish${liveExit}) throw x; }\n${syncEntity}  return ${result};\n`
       : this.input.liveEditing
-        ? `  try {\n${body}  } catch (x) { if (x !== R.liveCode.exit) throw x; }\n`
-        : `  fn: {\n${body}  }\n`;
+        ? `  try {\n${empty ? '    yield 0;\n' : ''}${body}  } catch (x) { if (x !== R.liveCode.exit) throw x; }\n`
+        : `  fn: {\n${empty ? '    yield 0;\n' : ''}${body}  }\n`;
     source += '  } finally { th.depth -= 1; }\n}';
 
     this.paramSlots = null;
     this.loopDepth = previousLoopDepth;
     // Mark the prototype once to avoid extra work on each call.
-    return this.marker(define) + (returnsValue
-      ? `((g) => { g.prototype.finishes = true; return g; })(${source})`
-      : source);
+    return this.marker(define) + `((g) => { g.prototype.${returnsValue ? 'finishes' : 'procedure'} = true; return g; })(${source})`;
   }
 
   // Ending a function executor leaves its caller alive and still evaluates its return expression.
@@ -419,7 +436,7 @@ export class Codegen {
         this.liveTypes.set(id, block.type);
         const current = { ...block, id };
         const marker = this.marker(current);
-        const body = marker + (yield* this.statementCode(current, '  '));
+        const body = marker + (yield* this.compileStatement(current, '  '));
         this.liveBlocks.set(id, `function* (ctx, th) { let e = ctx.entity; const P = ctx.params, L = ctx.locals;\n${body}}`);
         if (++this.compiledBlocks % 32 === 0) yield;
       }
@@ -428,10 +445,18 @@ export class Codegen {
     const out: string[] = [];
     for (const block of blocks) {
       const marker = this.marker(block);
-      out.push(marker + (yield* this.statementCode(block, indent)));
+      out.push(marker + (yield* this.compileStatement(block, indent)));
       if (++this.compiledBlocks % 32 === 0) yield;
     }
     return out.join('');
+  }
+
+  private *compileStatement(block: RawBlock, ind: string): Generator<void, string, unknown> {
+    const body = yield* this.statementCode(block, ind);
+    if (!body || INPUT_CONTROL.has(block.type) || !hasCall(block)) return body;
+    return `${ind}do { const evaluation = th.asyncCalls;\n${body}` +
+      `${ind}if (th.asyncCalls !== evaluation) { const repeat = R.state === 'pause'; yield 2; if (repeat) continue; }\n` +
+      `${ind}break;\n${ind}} while (true);\n`;
   }
 
   private *statementCode(block: RawBlock, ind: string): Generator<void, string, unknown> {
@@ -556,13 +581,13 @@ export class Codegen {
         return yield* this.repeatWhile(block, ind);
       case '_if':
         return (
-          line(`if (${this.bool(p[0])}) {`) +
+          line(`if (${this.condition(p[0])}) {`) +
           (yield* this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`)) +
           line('}')
         );
       case 'if_else':
         return (
-          line(`if (${this.bool(p[0])}) {`) +
+          line(`if (${this.condition(p[0])}) {`) +
           (yield* this.compileStack(block.statements?.[0] ?? [], `${ind}  `, `${block.id}:0`)) +
           line('} else {') +
           (yield* this.compileStack(block.statements?.[1] ?? [], `${ind}  `, `${block.id}:1`)) +
@@ -574,7 +599,10 @@ export class Codegen {
         if (trick) {
           return line(this.trickCode(trick));
         }
-        return line(`while (!(${this.liveCheck(block.id, this.bool(p[0]))})) { yield 0; }`);
+        const condition = this.liveCheck(block.id, this.bool(p[0]));
+        return hasCall(p[0]) || this.input.liveEditing
+          ? line(`while (true) { const before = th.asyncCalls; const ready = ${condition}; if (th.asyncCalls !== before) { yield 2; if (ready) break; } else if (ready) break; else yield 0; }`)
+          : line(`while (!(${condition})) { yield 0; }`);
       }
       case 'stop_repeat':
         return line(this.trickCode('break'));
@@ -781,7 +809,8 @@ export class Codegen {
   }
 
   private *repeatBasic(block: RawBlock, ind: string): Generator<void, string, unknown> {
-    const count = this.num(block.params[0]);
+    const value = this.num(block.params[0]);
+    const count = hasCall(block.params[0]) ? this.inputBoundary(value) : value;
     const depth = this.loopDepth;
     const varName = `i${depth}`;
     this.loopDepth += 1;
@@ -802,13 +831,25 @@ export class Codegen {
   private *repeatWhile(block: RawBlock, ind: string): Generator<void, string, unknown> {
     const until = text(block.params[1] ?? 'until') === 'until';
     const condition = until ? `!(${this.bool(block.params[0])})` : this.bool(block.params[0]);
-    return yield* this.loop(`while (${this.liveCheck(block.id, condition)}) {`, block.statements?.[0] ?? [], ind, false, block.id);
+    const checked = this.liveCheck(block.id, condition);
+    const input = hasCall(block.params[0]) || this.input.liveEditing ? this.inputBoundary(checked) : checked;
+    return yield* this.loop(`while (${input}) {`, block.statements?.[0] ?? [], ind, false, block.id);
   }
 
   private liveCheck(id: string, expression: string): string {
     if (!this.input.liveEditing) return expression;
     this.liveChecks.set(id, `function* (ctx, th) { const e = ctx.entity, P = ctx.params, L = ctx.locals; return ${expression}; }`);
     return `(yield R.liveCode.check(${literal(id)}, ctx, th))`;
+  }
+
+  // Async conditions select a branch now and enter its blocks on the next executor update.
+  private condition(param: unknown): string {
+    const value = this.bool(param);
+    return hasCall(param) ? this.inputBoundary(value) : value;
+  }
+
+  private inputBoundary(expression: string): string {
+    return `(yield (function* () { const before = th.asyncCalls; const result = ${expression}; if (th.asyncCalls !== before) yield 2; return result; })())`;
   }
 
   private loopBody(body: string, ind: string): string {
@@ -1235,10 +1276,14 @@ export class Codegen {
       this.note(block.type);
       return { code: asValue ? 'undefined' : `${ind}${comment(`missing ${block.type}`)}\n` };
     }
+    if (!asValue && this.definition(this.input.functions[index]!)?.[0]?.type === 'function_create_value') return { code: '' };
     // Preserve empty argument slots so later arguments keep their declaration indices.
     const args = block.params.map((param) => this.raw(param));
     // Yield calls onto the thread's stack so recursion does not grow the JS stack.
-    const call = `(yield ${this.input.liveEditing ? 'R.liveCode.functions' : 'F'}[${index}](e, th, [${args.join(', ')}]))`;
+    const inputs = `[${args.join(', ')}]`;
+    const frame = `${this.input.liveEditing ? 'R.liveCode.functions' : 'F'}[${index}](e, th, ${inputs})`;
+    const refresh = !asValue && block.params.some(isBlock) ? this.liveCheck(`inputs:${block.id}`, inputs) : '';
+    const call = `(yield ${refresh ? `th.reenter(${frame}, function* () { ${refresh}; })` : frame})`;
     return { code: asValue ? call : `${ind}${call};\n` };
   }
 

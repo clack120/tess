@@ -36,7 +36,7 @@ object "o":
   end
 end`);
   assert.equal(value(vm, 'out'), 0);
-  vm.pause();
+  vm.pause(); vm.flushFunctionCalls();
   assert.equal(vm.state, 'pause');
   assert.equal(value(vm, 'out'), 10);
   assert.equal(value(vm, 'skipped'), 0);
@@ -64,13 +64,13 @@ object "o":
     g(f())
   end
 end`);
-  vm.pause();
+  vm.pause(); vm.flushFunctionCalls();
   assert.equal(value(vm, 'called'), 10);
   assert.equal(value(vm, 'after'), 0);
   assert.deepEqual(vm.errors, []);
 });
 
-test('pause completes nested value calls and evaluates a yielding return expression', () => {
+test('pause completes the inner call and leaves its promise-waiting caller paused', () => {
   const vm = machine(`
 var out = 0
 var skipped = 0
@@ -87,9 +87,9 @@ object "o":
     out = g()
   end
 end`);
-  vm.pause();
-  assert.equal(value(vm, 'out'), 12);
-  assert.equal(value(vm, 'skipped'), 0);
+  vm.pause(); vm.flushFunctionCalls();
+  assert.equal(value(vm, 'out'), 0);
+  assert.equal(value(vm, 'skipped'), 10);
   assert.deepEqual(vm.errors, []);
 });
 
@@ -107,7 +107,7 @@ object "o":
     out = f()
   end
 end`, { speech: { speak: () => reading, stop() {} } });
-  vm.pause();
+  vm.pause(); vm.flushFunctionCalls();
   assert.equal(value(vm, 'out'), 0);
   finish();
   await reading;
@@ -131,7 +131,7 @@ object "o":
   end
 end`);
   vm.stop();
-  vm.pause();
+  vm.pause(); vm.flushFunctionCalls();
   assert.equal(value(vm, 'out'), 0);
   assert.equal(vm.state, 'stop');
 });

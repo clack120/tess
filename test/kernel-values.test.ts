@@ -32,6 +32,7 @@ function inner(value) do
   return local
 end
 function outer(value) do
+  stop
   return inner(value)
 end
 object "actor":
@@ -52,9 +53,11 @@ test('judgement and boolean-value function results keep their types through nest
   ] as const) {
     const vms = pair(`var output = 0
 function check(value) do
+  stop
   return value > 0
 end
 function outer() do
+  stop
   return ${expression}
 end
 object "actor":
@@ -124,6 +127,7 @@ test('raw string zero and numeric zero differ in Entry and/or even inside kernel
     const vms = pair(`var input = ${JSON.stringify(initial)}
 var output = 0
 function check() do
+  stop
   return input and true
 end
 object "actor":
