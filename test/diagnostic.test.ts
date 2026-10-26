@@ -12,6 +12,27 @@ scene "s":
   end
 end`;
 
+test('empty native value functions explain repeated evaluation and a concrete fix', () => {
+  const empty = compileProject('function f(n):\n return n\nend');
+  const warning = empty.warnings.find(item => item.code === 'W0009')!;
+  assert.match(warning.detail!, /return n/);
+  assert.match(warning.help!, /3번.*return 앞에 stop/);
+  const explicit = compileProject('function f(n):\n stop\n return n\nend');
+  assert.deepEqual(explicit.errors, []);
+  assert.ok(explicit.warnings.every(item => item.code !== 'W0009'));
+});
+
+test('logic diagnostics explain Entry zero-string truthiness without changing evaluation', () => {
+  for (const zero of ['0', '"0"', '"00"']) {
+    const result = compileProject(work(`say ${zero} and true`));
+    const warning = result.warnings.find(item => item.code === 'W0010')!;
+    assert.match(warning.message, /참.*if\/not.*거짓/);
+    assert.match(warning.help!, /not \(not/);
+  }
+  const explicit = compileProject(work('say not (not (0)) and true'));
+  assert.ok(explicit.warnings.every(item => item.code !== 'W0010'));
+});
+
 test('compile diagnostics show the failing source for errors, warnings and notices', () => {
   const result = compileProject(work('say scor\n      costume = "absent"', 'var score = 0'));
   const error = result.errors.find(item => item.message.includes("'scor'"))!;
@@ -43,6 +64,14 @@ test('code frames align tabs and Korean text and underline only the failing rang
   assert.match(frame, /\| \t {11}\^{7}$/m);
   assert.match(codeFrame('say x\r\nend', 1, 5, '', 200), /\| {5}\^$/m);
   assert.match(codeFrame('say x', 1, 6, ''), /\| {6}\^$/m);
+});
+
+test('code frames keep a distant error visible without printing an entire packed data line', () => {
+  const source = 'x'.repeat(100_000) + ' missing ' + 'y'.repeat(100_000);
+  const frame = codeFrame(source, 1, 100_002, '', 100_009);
+  assert.match(frame, /… .*missing.* …/);
+  assert.match(frame, /\^{7}/);
+  assert.ok(frame.length < 500);
 });
 
 test('user function arity diagnostics include expected and actual counts and a signature', () => {
@@ -165,7 +194,7 @@ end
 ${work('walk(2000)')}`);
   const warning = direct.warnings.find(item => item.code === 'W0004')!;
   assert.match(warning.message, /재귀 호출.*작품 전체가 멈출/);
-  assert.match(warning.help!, /1,500.*브라우저.*기기.*환경/);
+  assert.match(warning.help!, /JavaScript.*브라우저.*기기.*함수 구조/);
   assert.match(warning.detail!, /walk\(n - 1\)/);
 
   const mutual = compileProject(`function left(n) do

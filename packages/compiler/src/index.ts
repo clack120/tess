@@ -9,7 +9,7 @@ import { compileStatements, compileStatement } from './statement.ts';
 import { compileValue } from './expression.ts';
 import { KEY_CODES, STORE_PREFIX, keyCodeOf, compactLargeProject, PROJECT_JSON_LIMIT } from '@entropy/core';
 import { didYouMean } from '@entropy/core';
-import { codeFrame, validate } from '@entropy/parser';
+import { createCodeFrame, validate } from '@entropy/parser';
 import { isAutoParamName } from '@entropy/core';
 import type {
   AssignNode, CostumeNode, EventNode, FunctionDeclNode, Expr, ListDeclNode, ObjectNode,
@@ -42,12 +42,18 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   const loaded = loadProgram({
     source, path: filePath, readFile: options.readFile, cache: options.cache, host,
   });
+  const frames = new Map<string, ReturnType<typeof createCodeFrame>>();
   const withFrames = (items: CompileDiagnostic[]): CompileDiagnostic[] => items.map(item => {
-    const text = loaded.sources.get(item.file ?? filePath) ?? source;
+    const file = item.file ?? filePath;
+    let frame = frames.get(file);
+    if (!frame) {
+      frame = createCodeFrame(loaded.sources.get(file) ?? source);
+      frames.set(file, frame);
+    }
     const length = Math.max(1, (item.endOffset ?? item.offset + 1) - item.offset);
     return {
       ...item,
-      detail: item.detail ?? codeFrame(text, item.line, item.column, '', item.column + length),
+      detail: item.detail ?? frame(item.line, item.column, '', item.column + length),
       ...(item.related ? { related: withFrames(item.related) } : {}),
     };
   });
@@ -80,6 +86,7 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   for (const list of [loaded.warnings, semantic.warnings]) for (const item of list) ctx.warnings.push(item);
 
   const program = loaded.ast;
+  reserveResourceIds(program, ctx);
   collectScenes(program, ctx);
   collectGlobals(program, ctx);
   collectObjects(program, ctx);
@@ -412,14 +419,25 @@ function collectObjects(program: ProgramNode, ctx: Context) {
   for (const object of ctx.objects) collectObjectMembers(object, ctx);
 }
 
-// Reserve forced resource IDs so generated IDs cannot collide with them.
+function reserveResourceIds(program: ProgramNode, ctx: Context) {
+  const objects = program.body.flatMap(item => item.type === 'Object' ? [item]
+    : item.type === 'Scene' ? item.body.filter((node): node is ObjectNode => node.type === 'Object') : []);
+  for (const object of objects) for (const member of object.body) {
+    if ((member.type === 'Costume' || member.type === 'Sound') && member.forceId) {
+      ctx.newId.reserve(member.forceId);
+      ctx.forcedResourceIds.add(member.forceId);
+    }
+  }
+}
+
+// Entry resources can share IDs across objects, but not within one shelf.
 function resourceId(member: CostumeNode | SoundNode, ctx: Context): string | null {
   if (!member.forceId) return ctx.newId();
-  if (ctx.newId.has(member.forceId)) {
-    return ctx.error(member, `force id "${member.forceId}" 는 이미 다른 모양·소리·오브젝트가 쓰고 있습니다.`);
+  const scope = JSON.stringify([ctx.object?.id, member.type, member.forceId]);
+  if (ctx.forcedResourceScopes.has(scope)) {
+    return ctx.error(member, `force id "${member.forceId}" 는 이미 다른 ${member.type === 'Costume' ? '모양' : '소리'}이(가) 이 오브젝트에서 쓰고 있습니다.`);
   }
-  ctx.newId.reserve(member.forceId);
-  ctx.forcedResourceIds.add(member.forceId);
+  ctx.forcedResourceScopes.add(scope);
   return member.forceId;
 }
 
@@ -512,6 +530,9 @@ function collectHandlerVariables(statements: Stmt[], object: CompiledObject, ctx
 
 function collectFunctions(program: ProgramNode, ctx: Context) {
   const register = (node: FunctionDeclNode, owner: string | null) => {
+    if (node.order !== undefined && (!Number.isSafeInteger(node.order) || node.order < 1)) {
+      ctx.error(node, '함수 order 는 1 이상의 정수여야 합니다.');
+    }
     if (ctx.functionByName.has(node.name)) {
       ctx.error(node, `'${node.name}' 함수가 이미 있습니다. 엔트리 함수는 작품 전체에서 이름이 하나여야 합니다.`);
       return;
@@ -549,6 +570,7 @@ function collectFunctions(program: ProgramNode, ctx: Context) {
       }
     }
   }
+  ctx.functions.sort((a, b) => (a.node?.order ?? Infinity) - (b.node?.order ?? Infinity));
 }
 
 function findReturns(statements: Stmt[], found: ReturnNode[] = []): ReturnNode[] {
@@ -564,10 +586,29 @@ function findReturns(statements: Stmt[], found: ReturnNode[] = []): ReturnNode[]
   return found;
 }
 
-function collectMessages(node: unknown, ctx: Context) {
+function collectMessages(program: ProgramNode, ctx: Context) {
+  const signalDeclarations = new Map<string, import('@entropy/parser').SignalDeclNode>();
+  for (const item of program.body) {
+    if (item.type !== 'SignalDecl') continue;
+    const previous = signalDeclarations.get(item.name);
+    if (previous) {
+      ctx.error(item, `신호 '${item.name}' 이(가) 이미 선언되어 있습니다.`, {
+        code: 'E0001', help: '다른 신호라면 별도의 이름을 쓰고 as로 표시 이름을 지정하세요.',
+        related: [ctx.diagnostic(previous, '처음 선언한 위치입니다.')],
+      });
+      continue;
+    }
+    signalDeclarations.set(item.name, item);
+    ctx.messageId(item.name);
+    ctx.messageByName.get(item.name)!.name = item.displayName ?? item.name;
+  }
+  collectReferencedMessages(program, ctx);
+}
+
+function collectReferencedMessages(node: unknown, ctx: Context) {
   if (node === null || typeof node !== 'object') return;
   if (Array.isArray(node)) {
-    node.forEach((child) => collectMessages(child, ctx));
+    node.forEach((child) => collectReferencedMessages(child, ctx));
     return;
   }
   const item = node as AnyNode;
@@ -576,7 +617,7 @@ function collectMessages(node: unknown, ctx: Context) {
   }
   if (item.type === 'Event' && item.event === 'signal') ctx.messageId(item.signal as string);
   for (const [key, value] of Object.entries(item)) {
-    if (key !== 'loc') collectMessages(value, ctx);
+    if (key !== 'loc') collectReferencedMessages(value, ctx);
   }
 }
 
@@ -622,10 +663,18 @@ function compileFunctions(ctx: Context) {
     if (returnId) statements.push(ctx.block('set_variable', [returnId, ctx.number(0), null]));
     const returnValue = returnId ? ctx.block('get_variable', [returnId, null])
       : fn.isValue && tail ? compileValue(tail.value, ctx) : null;
+    if (fn.isValue && statements.length === 0) {
+      ctx.warn(tail ?? declared, `값 함수 '${fn.name}' 의 실행 본문이 비어 있습니다. EntryJS는 반환 식을 반복 평가하고 한 틱을 양보할 수 있습니다.`, {
+        code: 'W0009',
+        help: 'EntryJS 4.0.23에서 빈 본문의 반환 식이 3번 평가되는 것을 확인했습니다. 한 번 평가하려면 return 앞에 stop을 적어 실행 본문을 명시하세요. Entropy VM만으로 검사하면 이 차이를 놓칠 수 있습니다.',
+        related: [ctx.diagnostic(declared, '상수 초기값의 지역 변수 선언은 실행 블록을 만들지 않습니다.')],
+      });
+    }
 
     const field = buildFunctionFields(fn, ctx);
     const params = fn.isValue ? [field, null, null, returnValue] : [field, null];
     const create = ctx.block(fn.isValue ? 'function_create_value' : 'function_create', params, [statements]);
+    ctx.applyComment(declared, create);
     create.x = 50;
     create.y = 30;
 
@@ -641,9 +690,9 @@ function compileFunctions(ctx: Context) {
   }
 }
 
-function functionLocalInitialValue(value: Expr): string | number | null {
+function functionLocalInitialValue(value: Expr): string | number | boolean | null {
   switch (value.type) {
-    case 'Number': case 'String': case 'Color': return value.value;
+    case 'Number': case 'String': case 'Color': case 'Boolean': return value.value;
     case 'Transparent': return 'transparent';
     case 'Unary': return value.operator === '-' && value.argument.type === 'Number'
       ? -value.argument.value
@@ -662,7 +711,7 @@ function buildFunctionFields(fn: CompiledFunction, ctx: Context): EntryBlock {
       : ctx.block('function_field_string', [ctx.block(fn.paramTypes.get(name)!, []), next]);
     if (!isAutoParamName(name, i)) next = ctx.block('function_field_label', [name, next]);
   }
-  return ctx.block('function_field_label', [fn.name, next]);
+  return ctx.block('function_field_label', [fn.node?.displayName ?? fn.name, next]);
 }
 
 function compileObjects(ctx: Context) {
@@ -797,7 +846,7 @@ function assemble(program: ProgramNode, ctx: Context, options: CompileOptions): 
   };
 
   const description = textField('description');
-  if (description) project.description = description;
+  if (description !== undefined) project.description = description;
   return project;
 }
 

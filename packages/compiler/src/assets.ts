@@ -119,22 +119,34 @@ export function makeAsset(
   const declared = isImage ? Boolean(width && height) : duration !== null && duration !== undefined;
   let size = width && height ? { width, height } : null;
   let seconds = duration ?? null;
-  let bytes = null;
+  let byteLength = 0;
 
   if (resolved) {
-    bytes = host(ctx).readFile(resolved);
-    if (bytes) {
+    let metadata = ctx.assetMetadata.get(resolved);
+    const needSize = isImage && !size && metadata?.size === undefined;
+    const needDuration = !isImage && seconds === null && metadata?.duration === undefined;
+    if (!metadata || needSize || needDuration) {
+      const bytes = host(ctx).readFile(resolved);
+      if (bytes) {
+        metadata ??= { length: bytes.length };
+        if (needSize) metadata.size = imageSize(bytes);
+        if (needDuration) metadata.duration = audioDuration(bytes, ext);
+        ctx.assetMetadata.set(resolved, metadata);
+      }
+    }
+    if (metadata) {
+      byteLength = metadata.length;
       const limit = isImage ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
-      if (bytes.length > limit) {
-        ctx.warn(node, `'${file}' 크기가 ${(bytes.length / 1024 / 1024).toFixed(1)}MB라 Entry의 ${isImage ? '이미지 5MB' : '오디오 10MB'} 기준을 넘습니다.`, {
+      if (byteLength > limit) {
+        ctx.warn(node, `'${file}' 크기가 ${(byteLength / 1024 / 1024).toFixed(1)}MB라 Entry의 ${isImage ? '이미지 5MB' : '오디오 10MB'} 기준을 넘습니다.`, {
           code: 'W0006',
           help: isImage
             ? '투명도가 필요하면 PNG 팔레트·해상도를 줄이고, 필요 없으면 JPEG 품질을 조정하세요.'
             : 'MP3 비트레이트를 낮추거나 소리를 나누세요. 업로드가 조용히 실패할 수 있습니다.',
         });
       }
-      if (isImage && !size) size = imageSize(bytes);
-      if (!isImage && seconds === null) seconds = audioDuration(bytes, ext);
+      if (isImage && !size) size = metadata.size ?? null;
+      if (!isImage && seconds === null) seconds = metadata.duration ?? null;
     }
   } else if (!declared) {
     const hint = isImage ? `size ${'가로'} ${'세로'}` : 'for 초';
@@ -143,7 +155,15 @@ export function makeAsset(
   if (isImage && !size) size = { width: 100, height: 100 };
 
   const savedPath = !resolved && /^temp\/[\w-]+\/[\w-]+\/(?:image|sound)\/[\w.-]+$/.test(file);
-  const filename = file === '' ? '' : savedPath ? basename(file, ext) : assetFilename(`${kind}:${file}:${bytes ? bytes.length : 0}`);
+  let filename = file === '' ? '' : savedPath ? basename(file, ext) : assetFilename(`${kind}:${file}:${byteLength}`);
+  if (file && !savedPath) {
+    const source = `${kind}:${resolved ?? file}`;
+    let salt = 1;
+    while (ctx.assetFilenameSources.has(filename) && ctx.assetFilenameSources.get(filename) !== source) {
+      filename = assetFilename(`${kind}:${file}:${byteLength}:${salt++}`);
+    }
+    ctx.assetFilenameSources.set(filename, source);
+  }
   const asset: EntryAsset = {
     id,
     name: name ?? basename(file),
@@ -161,7 +181,12 @@ export function makeAsset(
     asset.duration = seconds ?? 1;
   }
 
-  if (resolved) ctx.assetFiles.push({ source: resolved, target: asset.fileurl });
+  const collect = (source: string, target: string) => {
+    if (ctx.assetTargets.has(target)) return;
+    ctx.assetTargets.add(target);
+    ctx.assetFiles.push({ source, target });
+  };
+  if (resolved) collect(resolved, asset.fileurl);
 
   // Entry keeps vector and raster copies; the player uses the raster copy.
   if (isImage && resolved && ext === '.svg') {
@@ -169,7 +194,7 @@ export function makeAsset(
     if (host(ctx).isFile(twin)) {
       const target = fileUrlFor(kind, filename, '.png');
       asset.pngurl = target;
-      ctx.assetFiles.push({ source: twin, target });
+      collect(twin, target);
     }
   }
   return asset;

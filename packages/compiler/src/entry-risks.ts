@@ -26,9 +26,7 @@ function diagnoseRecursion(ctx: Context): void {
     graph.set(fn.name, { node: fn.node, edges });
   }
 
-  // Find strongly connected components without recursive DFS. A generated work
-  // can contain thousands of functions in a straight call chain, which should
-  // not overflow the compiler's own JavaScript stack while checking recursion.
+  // Use iterative DFS so long call chains cannot overflow the compiler.
   const finished: string[] = [];
   const visited = new Set<string>();
   for (const root of graph.keys()) {
@@ -88,8 +86,8 @@ function reportRecursiveComponent(
   const first = calls[0]?.node ?? graph.get(component[0]!)!.node;
   const ordered = component.slice().reverse();
   const cycle = ordered.length <= 6
-    ? ordered.join(' → ')
-    : `${ordered.slice(0, 6).join(' → ')} → … 외 ${ordered.length - 6}개`;
+    ? ordered.join(' · ')
+    : `${ordered.slice(0, 6).join(' · ')} · … 외 ${ordered.length - 6}개`;
   const names = component.length === 1
     ? `'${component[0]}' 함수`
     : `함수 순환(${cycle})`;
@@ -98,7 +96,7 @@ function reportRecursiveComponent(
     `${names}이(가) 재귀 호출됩니다. 깊이가 입력에 따라 커지면 Entry 원 실행기에서 작품 전체가 멈출 수 있습니다.`,
     {
       code: 'W0004',
-      help: 'EntryJS 호출 오버헤드가 포함된 JavaScript 스택이라 약 1,500단계부터 실패 가능성이 매우 높습니다. 실제 한계는 브라우저·기기·환경마다 다릅니다. 선형 재귀는 반복문·작업 분할로 바꾸고, 같은 틱 처리가 꼭 필요하면 입력을 고정한 뒤 균형 재귀로 깊이를 줄이세요.',
+      help: 'EntryJS 실행기도 JavaScript 스택을 쓰므로 실제 한계는 브라우저·기기·함수 구조마다 다릅니다. 표시된 함수들은 같은 순환 그룹이며 나열 순서가 호출 순서는 아닙니다. 선형 재귀는 반복문·작업 분할로 바꾸고, 같은 틱 처리가 꼭 필요하면 입력을 고정한 뒤 균형 재귀로 깊이를 줄이세요.',
       related: calls.slice(1, 8).map(({ from, to, node }) => (
         ctx.diagnostic(node, `'${from}' 에서 '${to}' 을(를) 호출해 재귀 순환으로 이어집니다.`)
       )),

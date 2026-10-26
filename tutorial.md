@@ -251,6 +251,10 @@ end
 
 함수의 `var`는 호출마다 독립된 지역 변수입니다. 중첩 블록에서 같은 이름으로 선언하면 그 블록에서만 바깥 변수를 가립니다. 같은 범위에서 같은 이름을 다시 선언하면 오류입니다. Entry 지역 변수의 규칙상 빈 문자열과 `false`를 지역 변수로 읽으면 0이 됩니다.
 
+`function calculate(n) as "계산하기":`처럼 코드 이름과 Entry 표시 이름을 구분할 수 있습니다. 파일 분리로 함수 순서가 바뀔 때는 디컴파일러가 `order 1` 같은 순번을 붙여 원래 순서를 보존합니다.
+
+실행 본문 없이 `return`만 있는 함수는 EntryJS에서 반환 식을 반복 평가할 수 있습니다. W0009의 안내에 따라 `return` 앞에 `stop`을 적으면 확인한 네이티브 실행에서는 한 번 평가합니다. 자세한 조건과 VM 차이는 [런타임 안내](./ENTRY-RUNTIME.md)를 보세요.
+
 ```entropy
 object "플레이어":
   # A function called as a statement.
@@ -341,3 +345,11 @@ bun entropy decompile work.ent -o source --no-assets
 ```
 
 `--no-assets`도 모양의 크기와 소리 길이, 코드 조각을 보존합니다. 이미지·소리 파일은 저장하지 않으므로 실제 재생에 쓰려면 에셋도 준비해야 합니다. 라이브러리의 `decompileProject`·`decompileEnt`는 시작 소스를 `source`, 추가 `.etp` 파일을 `files`, 미디어를 `assets`로 돌려줍니다. `{ inline: true }`이면 모든 소스를 `source`에 넣고 `files`는 비웁니다.
+
+신호는 `signal.etp`에 `signal "게임시작"`처럼 선언합니다. 선언 순서와 쓰이지 않는 신호도 보존합니다. 같은 표시 이름의 다른 신호는 `signal "첫번째" as "게임시작"`처럼 구분하며, 이벤트와 `send`에는 코드 이름을 씁니다. 새 소스에서는 선언 없이 이벤트·전송에 쓴 신호도 자동으로 만들어집니다.
+
+옮겨 놓은 변수·리스트 모니터 위치는 기본으로 보존합니다. API의 `{ positions: false }`로 생략할 수 있습니다. `diagnostics`에는 변환 문제의 원본 JSON 경로와 블록 ID, 도움말이 있습니다. `compareEntryProjects(original, rebuilt)`는 첫 왕복에서 사라진 정보도 대조하며, CLI에서는 `check work.ent --report roundtrip.json`으로 결과를 저장합니다.
+
+`fraction(x)`는 Entry 소수 부분 연산입니다. `x`와 문자 읽기 `식[위치]`의 위치는 한 번 평가합니다. 거듭제곱의 변하는 밑과 리스트 복합 대입의 위치도 한 번 고정합니다. `리스트[위치] += 값`의 위치는 숫자로 지정하세요.
+
+Entry의 숫자·영문·한글 내용 판정은 `is_number(x)`, `is_english(x)`, `is_korean(x)`입니다. `type(x) == "number"`도 계속 지원하지만, `"string"`·`"boolean"`·`"list"` 비교는 자료형 검사로 오해될 수 있어 거절합니다. 사용자 함수 `type`과 변수 `device`를 선언했다면 그 선언이 우선합니다.

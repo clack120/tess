@@ -46,6 +46,9 @@ export class Context {
   options: CompileOptions;
 
   assetFiles: Array<{ source: string; target: string }>;
+  assetMetadata = new Map<string, { length: number; size?: { width: number; height: number } | null; duration?: number | null }>();
+  assetFilenameSources = new Map<string, string>();
+  assetTargets = new Set<string>();
 
   comments: Map<string, string>;
 
@@ -64,6 +67,7 @@ export class Context {
   aiUtilizeBlocks: Set<string>;
 
   forcedResourceIds: Set<string>;
+  forcedResourceScopes = new Set<string>();
 
   scenes: EntryScene[];
 

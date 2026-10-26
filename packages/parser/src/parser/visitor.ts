@@ -13,7 +13,7 @@ import type {
   NullaryNode, NullaryStatementType, NumberNode, ObjectMember, ObjectNode,
   OrderNode, ParseRoot, PlayBgmNode, PlaySoundNode, ProgramNode, ProjectFieldNode,
   ProjectNode, PropertyNode, ReadNode, RepeatNode, ReturnNode, SayNode,
-  SceneMember, SceneNode, SendNode, ShowHideNode, SoundNode, StopNode,
+  SceneMember, SceneNode, SendNode, SignalDeclNode, ShowHideNode, SoundNode, StopNode,
   StopSoundNode, StorageScope, StringNode, Stmt, SwitchCase, SwitchNode, TableAddLineNode, TableDeclNode,
   StoreSaveNode, TableLine, TableRemoveLineNode, TableSaveNode, TextWriteNode, TopLevelItem,
   TtsSettingNode, TurnNode, UntilNode, UseNode, UseObjectNode, VarDeclNode,
@@ -300,9 +300,19 @@ export class EntropyAstVisitor extends BaseVisitor {
     return {
       type: 'FunctionDecl',
       name: this.visit(ctx.name).name,
+      ...(ctx.displayName ? { displayName: this.visit(ctx.displayName) } : {}),
+      ...(ctx.order ? { order: Number(ctx.order[0].image) } : {}),
       params: declared.map((param: CstNode) => param.name),
       booleanParams: declared.filter((param: { name: string; boolean: boolean }) => param.boolean).map((param: CstNode) => param.name),
       body: this.visit(ctx.body),
+      loc: nodeLoc(node),
+    };
+  }
+
+  signalDecl(ctx: Ctx, node: CstNode): SignalDeclNode {
+    return {
+      type: 'SignalDecl', name: decodeString(ctx.name[0].image),
+      displayName: ctx.displayName ? this.visit(ctx.displayName) : null,
       loc: nodeLoc(node),
     };
   }

@@ -1,3 +1,5 @@
+import type { ProjectReader } from './reader.ts';
+
 export interface RawBlock {
   type?: string;
   params?: any[];
@@ -57,7 +59,7 @@ export interface FunctionLocal {
   name: string;
   // Preserve display names with as when they differ from Entropy identifiers.
   entryName: string;
-  value: string | number;
+  value: string | number | boolean;
 }
 
 export interface FunctionInfo {
@@ -67,6 +69,7 @@ export interface FunctionInfo {
   params: string[];
   locals: FunctionLocal[];
   displayLabel: string;
+  order?: number;
   saveKind?: 'save' | 'async';
 }
 
@@ -83,7 +86,7 @@ export interface OwnedFunction {
 export interface DecompileOptions {
   sizes?: boolean;
   keepSvg?: boolean;
-  // Include saved monitor positions; otherwise Entry lays them out automatically.
+  // Preserve saved monitor positions by default; false lets Entry lay them out.
   positions?: boolean;
   // Keep declarations, scenes, functions and objects in one source string.
   inline?: boolean;
@@ -95,6 +98,11 @@ export interface DecompileOptions {
 }
 
 export interface DecompileContext {
+  reader: ProjectReader;
+  diagnostics: DecompileDiagnostic[];
+  currentBlock: RawBlock | null;
+  warn(message: string, details?: Partial<DecompileDiagnostic>): void;
+  notice(message: string, details?: Partial<DecompileDiagnostic>): void;
   warnings: Set<string>;
   // Entry resolves these names at runtime without losing source code.
   notices: Set<string>;
@@ -145,6 +153,7 @@ export interface DecompileContext {
 }
 
 export interface DecompileResult {
+  diagnostics: DecompileDiagnostic[];
   // The entry.etp entry point. Other .etp files are separate from media assets.
   source: string;
   files: OutputFile[];
@@ -155,4 +164,14 @@ export interface DecompileResult {
   name: string;
   // Omitted rows follow table order in the source.
   tableRows?: string[][][];
+}
+
+export interface DecompileDiagnostic {
+  code: string;
+  severity: 'warning' | 'notice';
+  message: string;
+  path?: string;
+  blockId?: string;
+  blockType?: string;
+  help?: string;
 }

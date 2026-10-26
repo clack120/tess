@@ -10,7 +10,7 @@ export interface RawBlock {
 export interface FunctionEntry {
   id: string;
   type: string;
-  localVariables: Array<{ id: string; name: string; value: string | number }>;
+  localVariables: Array<{ id: string; name: string; value: string | number | boolean }>;
   content: string | RawBlock[][];
 }
 

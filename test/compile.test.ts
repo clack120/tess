@@ -602,16 +602,16 @@ end`, { path: 'x.etp' });
   assert.match(bad.errors[0].message, /지수는 숫자로 정해져 있어야/);
 });
 
-test('random 이 든 값은 지수가 밑을 여러 번 쓸 때 막는다', () => {
-  const bad = compileProject(`scene "s":
+test('random 이 든 밑은 반복 전개 전에 한 번 평가한다', () => {
+  const captured = compileProject(`scene "s":
   object "o":
     when start do
       var a = random(1, 10) ** 3
     end
   end
 end`, { path: 'x.etp' });
-  assert.equal(bad.ok, false);
-  assert.match(bad.errors[0].message, /random/);
+  assert.deepEqual(captured.errors, []);
+  assert.equal(captured.project!.functions.length, 1);
 
   const fine = compileProject(`scene "s":
   object "o":

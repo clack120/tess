@@ -13,5 +13,7 @@ export function decompileProject(
 
 export { decompileEnt, builtinAssets } from "./src/node.ts";
 export { restoreTableRows } from "./src/index.ts";
+export { compareEntryProjects } from './src/audit.ts';
+export type { ProjectAudit, ProjectDifference, ProjectAuditOptions } from './src/audit.ts';
 export { findProjectEntry, readTar } from "./src/tar.ts";
 export type * from "./src/types.ts";

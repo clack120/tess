@@ -8,6 +8,8 @@
   "exports": {
     ".": "./index.ts",
     "./builtins": "./src/builtins.ts",
+    "./entry-values": "./src/entry-values.ts",
+    "./node-exports": "./src/node-exports.ts",
     "./strip-types": "./src/strip-types.ts"
   },
   "files": [

@@ -119,6 +119,7 @@ export class EntropyParser extends CstParser {
   declare readonly sceneNameDecl: Rule;
   declare readonly showHideStatement: Rule;
   declare readonly signalStatement: Rule;
+  declare readonly signalDecl: Rule;
   declare readonly signedNumber: Rule;
   declare readonly soundProperty: Rule;
   declare readonly soundStatement: Rule;
@@ -177,7 +178,14 @@ export class EntropyParser extends CstParser {
         { ALT: () => $.SUBRULE($.varDecl) },
         { ALT: () => $.SUBRULE($.listDecl) },
         { ALT: () => $.SUBRULE($.tableDecl) },
+        { ALT: () => $.SUBRULE($.signalDecl) },
       ]);
+    });
+
+    $.RULE('signalDecl', () => {
+      $.CONSUME(kw.signal);
+      $.CONSUME(StringLiteral, { LABEL: 'name' });
+      $.OPTION(() => $.SUBRULE($.displayName, { LABEL: 'displayName' }));
     });
 
     $.RULE('tableDecl', () => {
@@ -448,6 +456,11 @@ export class EntropyParser extends CstParser {
         DEF: () => $.SUBRULE($.functionParam, { LABEL: 'params' }),
       });
       $.CONSUME(RParen);
+      $.OPTION(() => $.SUBRULE($.displayName, { LABEL: 'displayName' }));
+      $.OPTION2(() => {
+        $.CONSUME(kw.order);
+        $.CONSUME(NumberLiteral, { LABEL: 'order' });
+      });
       $.SUBRULE($.blockOpen);
       $.SUBRULE($.block, { LABEL: 'body' });
       $.CONSUME(kw.end);
@@ -1360,7 +1373,7 @@ export class EntropyParser extends CstParser {
     const token = this.LA(1);
     if (token.tokenTypeIdx === idx(EOF)) return false;
     return [kw.project, kw.scene, kw.object, kw.text, kw.function, kw.useobject,
-      kw.usetext, kw.use, kw.var, kw.list, kw.shared, kw.realtime, kw.store, kw.table]
+      kw.usetext, kw.use, kw.var, kw.list, kw.shared, kw.realtime, kw.store, kw.table, kw.signal]
       .some((type) => token.tokenTypeIdx === idx(type));
   }
 

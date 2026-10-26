@@ -1,5 +1,5 @@
 import { KEY_CODES, STORE_FLAG_ON, STORE_FLAG_VARIABLE } from '@entropy/core';
-import { entropyNumber, entropyString, entropyLiteral, ownsResource, isExactNumber, resourceInfo } from './ident.ts';
+import { lookup, entropyNumber, entropyString, entropyLiteral, ownsResource, isExactNumber, resourceInfo } from './ident.ts';
 import { isBooleanBlock } from '../../compiler/src/expression.ts';
 import { expansionBlock } from '@entropy/core';
 import type { DecompileContext, RawBlock, ResourceInfo } from './types.ts';
@@ -77,7 +77,7 @@ export function targetName(ctx: DecompileContext, raw: unknown): string {
   if (typeof raw === 'string' && raw.startsWith('wall')) return raw;
   const object = ctx.objectsById.get(raw as string);
   if (object) return object.identifier;
-  ctx.warnings.add(
+  ctx.warn(
     `'${String(raw)}' 을(를) 가리키는 블록이 있지만 그 오브젝트가 작품에 없습니다 — 아이디를 그대로 남겼습니다.`,
   );
   return `_missing_object_${String(raw)}`;
@@ -92,16 +92,6 @@ function resourceRef(
 ): string {
   if (ctx.inFunction && byId.has(id) && !ownsResource(ctx, resourceInfo(ctx, id, byId))) return entropyString(id);
   return entropyString(nameOf(id));
-}
-
-const BARE_NAME = /^[\p{L}_][\p{L}0-9_]*$/u;
-
-// Indexing reads characters only when the name does not refer to a list or table.
-function indexableName(text: string, ctx: DecompileContext): boolean {
-  if (!BARE_NAME.test(text)) return false;
-  for (const info of ctx.varsById.values()) if (info.isList && info.identifier === text) return false;
-  for (const info of ctx.tablesById.values()) if (info.identifier === text) return false;
-  return true;
 }
 
 function isParamBlock(type: string): boolean {
@@ -120,7 +110,7 @@ const SOUND_PLAY_BLOCKS = new Set([
 // Sound probes become 1 because entropy loads all sounds before starting.
 function soundProbe(ctx: DecompileContext, block: RawBlock | undefined): string | null {
   if (!block?.type || !SOUND_PLAY_BLOCKS.has(block.type)) return null;
-  ctx.notices.add(
+  ctx.notice(
     `값 자리의 '${block.type}' 은(는) 소리가 다 준비됐는지 보는 자리라 1 로 옮겼습니다.`,
   );
   return '1';
@@ -130,7 +120,7 @@ function soundProbe(ctx: DecompileContext, block: RawBlock | undefined): string 
 function funcLocal(ctx: DecompileContext, id: string): string | null {
   const name = ctx.funcLocalName(id);
   if (name === null) {
-    ctx.notices.add(
+    ctx.notice(
       `'${id}' 은(는) 다른 함수의 지역변수입니다. 엔트리도 이 자리를 0 으로 읽으므로 그렇게 옮겼습니다.`,
     );
   }
@@ -141,7 +131,9 @@ function placeholder(ctx: DecompileContext, block: RawBlock | undefined): string
   const probe = soundProbe(ctx, block);
   if (probe !== null) return probe;
   const type = block?.type ?? '(빈 슬롯)';
-  ctx.warnings.add(`값 블록 '${type}' 은(는) 아직 옮길 수 없습니다.`);
+  ctx.warn(`값 블록 '${type}' 은(는) 아직 옮길 수 없습니다.`, {
+    code: 'D1001', help: '이 값은 표시용 문자열로 대체됩니다. 원본 블록을 확인한 뒤 지원되는 식으로 바꾸세요.',
+  });
   return `"[decompile: ${type}]"`;
 }
 
@@ -186,9 +178,15 @@ export function exprOf(block: any, ctx: DecompileContext): string {
 function immediateExpression(block: any): string | null {
   if (block === null || block === undefined) return EMPTY;
   if (typeof block === 'string') return entropyString(block);
-  if (typeof block === 'number') return entropyNumber(block);
+  if (typeof block === 'number') return numericValue(block);
+  if (typeof block === 'boolean') return block ? 'true' : 'false';
   if (typeof block !== 'object' || !block.type) return EMPTY;
   return null;
+}
+
+// Entry number fields return text; arithmetic preserves a raw numeric slot's type.
+function numericValue(value: number): string {
+  return `(${entropyNumber(value)} * 1)`;
 }
 
 function renderExpression(
@@ -196,6 +194,13 @@ function renderExpression(
   ctx: DecompileContext,
   read: (block: any) => string,
 ): string {
+  const previous = ctx.currentBlock;
+  ctx.currentBlock = block;
+  try { return renderValue(block, ctx, read); }
+  finally { ctx.currentBlock = previous; }
+}
+
+function renderValue(block: any, ctx: DecompileContext, read: (block: any) => string): string {
 
   const p = block.params ?? [];
   const at = (i: number) => p[i];
@@ -204,6 +209,8 @@ function renderExpression(
   switch (block.type) {
     // Preserve literal text such as leading zeros instead of converting it to a number.
     case 'number': case 'text': {
+      if (typeof at(0) === 'number') return numericValue(at(0));
+      if (typeof at(0) === 'boolean') return at(0) ? 'true' : 'false';
       const raw = String(at(0) ?? '');
       if (raw === 'transparent') return 'transparent';
       if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw;
@@ -216,7 +223,7 @@ function renderExpression(
 
     case 'coordinate_object': {
       const target = at(1);
-      const coordinate = REVERSE_PROPERTY_COORD[at(3)] ?? REVERSE_OBJECT_COORD[at(3)];
+      const coordinate = lookup(REVERSE_PROPERTY_COORD, at(3)) ?? lookup(REVERSE_OBJECT_COORD, at(3));
       if (!coordinate) return placeholder(ctx, block);
       if (target === 'self' || target === null) return coordinate;
       return `${coordinate}(${entropyString(targetName(ctx, target))})`;
@@ -237,12 +244,12 @@ function renderExpression(
     case 'options_for_list': return entropyString(String(at(0) ?? 'FIRST'));
 
     case 'coordinate_mouse': {
-      const coordinate = REVERSE_OBJECT_COORD[at(1)];
+      const coordinate = lookup(REVERSE_OBJECT_COORD, at(1));
       return coordinate ? `${coordinate}(${entropyString('mouse')})` : placeholder(ctx, block);
     }
 
     case 'calc_basic': {
-      const op = REVERSE_ARITHMETIC[at(1)];
+      const op = lookup(REVERSE_ARITHMETIC, at(1));
       if (!op) return placeholder(ctx, block);
       return `(${read(at(0))} ${op} ${read(at(2))})`;
     }
@@ -255,18 +262,14 @@ function renderExpression(
       const op = at(3);
       if (op === 'square') return `(${read(at(1))} ** 2)`;
       if (op === 'root') return `(${read(at(1))} ** 0.5)`;
-      // Use decimal subtraction for fractional parts; modulo introduces binary rounding errors.
-      if (op === 'unnatural') {
-        const value = `abs(${read(at(1))})`;
-        return `(${value} - floor(${value}))`;
-      }
+      if (op === 'unnatural') return `fraction(${read(at(1))})`;
       // Entry treats unknown rounding operators as round.
-      const fn = REVERSE_MATH[op as string] ?? 'round';
+      const fn = lookup(REVERSE_MATH, op) ?? 'round';
       return `${fn}(${read(at(1))})`;
     }
 
     case 'boolean_basic_operator': {
-      const op = REVERSE_COMPARE[at(1)];
+      const op = lookup(REVERSE_COMPARE, at(1));
       if (!op) return placeholder(ctx, block);
       if (isStoreFlagTest(block, ctx)) return 'can_save';
       return `(${read(at(0))} ${op} ${read(at(2))})`;
@@ -282,7 +285,10 @@ function renderExpression(
       // Keep the Boolean cast when removing paired not blocks.
       let value = at(1);
       let negate = true;
+      const seen = new Set<RawBlock>([block]);
       while (value?.type === 'boolean_not') {
+        if (seen.has(value)) throw new Error('Entry 값 블록 구조가 자기 자신을 가리킵니다.');
+        seen.add(value);
         value = value.params?.[1];
         negate = !negate;
       }
@@ -308,15 +314,15 @@ function renderExpression(
     case 'is_press_some_key': {
       // Keep unnamed key codes as numbers.
       const code = String(at(0) ?? '').trim();
-      const key = REVERSE_KEY_CODE[code] ?? (/^[0-9]{1,3}$/.test(code) ? code : null);
+      const key = lookup(REVERSE_KEY_CODE, code) ?? (/^[0-9]{1,3}$/.test(code) ? code : null);
       return key ? `key_down(${entropyString(key)})` : placeholder(ctx, block);
     }
     case 'reach_something': return `touching(${entropyString(targetName(ctx, at(1)))})`;
     case 'distance_something': return `distance(${entropyString(targetName(ctx, at(1)))})`;
     case 'is_current_device_type': return `(device == ${entropyString(at(0))})`;
     case 'is_type': {
-      const kind = at(2) === 'number' ? 'number' : 'string';
-      return `(type(${read(at(0))}) == ${entropyString(kind)})`;
+      const name = lookup({ number: 'is_number', en: 'is_english', ko: 'is_korean' }, at(2));
+      return name ? `${name}(${read(at(0))})` : placeholder(ctx, block);
     }
 
     case 'value_of_index_from_list': {
@@ -326,16 +332,9 @@ function renderExpression(
     case 'char_at': {
       const index = read(at(3));
       const target = read(at(1));
-      if (indexableName(target, ctx)) return `${target}[${index}]`;
-      const literalIndex = at(3) === null || at(3) === undefined
-        || ['number', 'text'].includes((at(3) as RawBlock | undefined)?.type ?? '');
-      if (!literalIndex) {
-        ctx.warnings.add(
-          `'${target}' 의 글자 하나를 읽는 자리는 slice 로 옮겼습니다 — 자리 번호가 두 번 계산되니, `
-          + '그 안에 무작위 수처럼 부를 때마다 달라지는 값이 있으면 결과가 달라집니다.',
-        );
-      }
-      return `slice(${target}, ${index}, ${index})`;
+      // Unary operators need grouping; other expressions already form one primary.
+      const primary = target.startsWith('not ') || target.startsWith('-') ? `(${target})` : target;
+      return `${primary}[${index}]`;
     }
     case 'length_of_list': return `length(${ctx.varName(at(1))})`;
     case 'length_of_string': return `length(${read(at(1))})`;
@@ -348,12 +347,12 @@ function renderExpression(
     case 'reverse_of_string': return `reverse(${read(at(1))})`;
     case 'change_string_case': return `${at(3) === 'toUpperCase' ? 'uppercase' : 'lowercase'}(${read(at(1))})`;
     case 'get_date': {
-      const unit = REVERSE_DATE_UNITS[at(1)];
+      const unit = lookup(REVERSE_DATE_UNITS, at(1));
       return unit ? `now(${entropyString(unit)})` : placeholder(ctx, block);
     }
     case 'change_rgb_to_hex': return `to_hex(${read(at(0))}, ${read(at(1))}, ${read(at(2))})`;
     case 'change_hex_to_rgb': {
-      const channel = REVERSE_HEX_CHANNEL[at(1)];
+      const channel = lookup(REVERSE_HEX_CHANNEL, at(1));
       return channel ? `from_hex(${read(at(0))}, ${channel})` : placeholder(ctx, block);
     }
     case 'text_read': return `text_content(${entropyString(targetName(ctx, at(0)))})`;
@@ -372,7 +371,7 @@ function renderExpression(
     case 'get_value_from_last_row':
       return `last_row(${ctx.tableName(at(0))}, ${read(at(1))})`;
     case 'calc_values_from_table': {
-      const calc = TABLE_CALCULATION_NAMES[String(at(2))];
+      const calc = lookup(TABLE_CALCULATION_NAMES, String(at(2)));
       if (!calc) return placeholder(ctx, block);
       return `${calc}(${ctx.tableName(at(0))}, ${read(at(1))})`;
     }
@@ -382,8 +381,8 @@ function renderExpression(
       return `lookup(${ctx.tableName(at(0))}, ${read(at(1))}, `
         + `${read(at(2))}, ${read(at(3))})`;
 
-    case 'get_pictures': return resourceRef(ctx, at(0), ctx.picturesById, ctx.pictureName);
-    case 'get_sounds': return resourceRef(ctx, at(0), ctx.soundsById, ctx.soundName);
+    // General value slots return the saved ID, not the resource's display name.
+    case 'get_pictures': case 'get_sounds': return entropyString(at(0) ?? '');
     case 'get_sound_duration':
       return `sound_duration(${resourceRef(ctx, at(1), ctx.soundsById, ctx.soundName)})`;
     // Both primitive color pickers hold a plain hex string.
@@ -402,7 +401,7 @@ function renderExpression(
       if (paramName) return paramName;
       // Entry treats another function's parameter as an empty slot.
       if (isParamBlock(block.type)) {
-        ctx.notices.add(
+        ctx.notice(
           `'${block.type}' 은(는) 다른 함수의 매개변수입니다. 엔트리도 이 자리를 빈 값으로 읽으므로 그렇게 옮겼습니다.`,
         );
         return block.type.startsWith('booleanParam_') ? 'false' : EMPTY;

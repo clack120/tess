@@ -168,7 +168,9 @@ export function requirePowerRefiner(ctx: Context): CompiledFunction {
     ),
   ]);
 
-  const create = ctx.block('function_create_value', [field, null, null, refined], [[]]);
+  const create = ctx.block('function_create_value', [field, null, null, refined], [
+    [ctx.block('stop_object', ['thisThread', null])],
+  ]);
   create.x = 50;
   create.y = 30;
 

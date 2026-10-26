@@ -7,12 +7,16 @@ const IDENT_START = /[\p{L}_]/u;
 const IDENT_PART = /[\p{L}0-9_]/u;
 const NEXT_SUFFIX = new WeakMap<Set<string>, Map<string, number>>();
 
+export function lookup<T>(values: Record<string, T>, key: unknown): T | undefined {
+  return (typeof key === 'string' || typeof key === 'number') && Object.hasOwn(values, key) ? values[key] : undefined;
+}
+
 export function safeIdentifier(raw: unknown, usedNames: Set<string>, fallback = 'item'): string {
   let cleaned = '';
   for (const ch of String(raw ?? '')) cleaned += IDENT_PART.test(ch) ? ch : '_';
   cleaned = cleaned.replace(/_+/g, '_').replace(/^_+|_+$/g, '');
-  if (!cleaned || !IDENT_START.test(cleaned[0]!)) cleaned = `${fallback}${cleaned ? `_${cleaned}` : ''}`;
-  cleaned = cleaned.slice(0, 40) || fallback;
+  if (!cleaned || !IDENT_START.test([...cleaned][0]!)) cleaned = `${fallback}${cleaned ? `_${cleaned}` : ''}`;
+  cleaned = [...cleaned].slice(0, 40).join('') || fallback;
   // Avoid reserved and built-in names so renamed declarations do not hide other values.
   if (UNUSABLE_AS_NAME.has(cleaned) || BUILTIN_NAMES.has(cleaned)) cleaned = `${cleaned}_`;
 
@@ -32,20 +36,9 @@ export function safeIdentifier(raw: unknown, usedNames: Set<string>, fallback = 
 // Escape all four line endings because Entry names may contain Unicode line separators.
 const LINE_BREAK = /[\n\r\u2028\u2029]/g;
 
-const STRING_ESCAPE: Record<string, string> = {
-  '\n': '\\n',
-  '\r': '\\r',
-  '\u2028': '\\u2028',
-  '\u2029': '\\u2029',
-};
-
 export function entropyString(value: unknown): string {
-  const escaped = String(value)
-    .replaceAll('\\', '\\\\')
-    .replaceAll('"', '\\"')
-    .replaceAll('\t', '\\t')
-    .replace(LINE_BREAK, (char) => STRING_ESCAPE[char]!);
-  return `"${escaped}"`;
+  // JSON escapes lone surrogates so writing UTF-8 cannot replace them with U+FFFD.
+  return JSON.stringify(String(value)).replace(/[\u2028\u2029]/g, ch => ch === '\u2028' ? '\\u2028' : '\\u2029');
 }
 
 // Escape line breaks so project text cannot end a comment and become Entropy code.

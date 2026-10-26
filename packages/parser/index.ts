@@ -1,6 +1,6 @@
 export { parse, parseOrThrow, check, validate, lineAndColumn } from "./src/parse.ts";
 export { caseValue, lineIndex } from "./src/validate.ts";
-export { codeFrame } from "./src/parser/frame.ts";
+export { codeFrame, createCodeFrame } from "./src/parser/frame.ts";
 export { KEYWORDS, UNUSABLE_AS_NAME } from "./src/parser/tokens.ts";
 export { EntropyParseError } from "./src/parse.ts";
 export type { ParseOptions } from "./src/parse.ts";

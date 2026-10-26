@@ -14,6 +14,44 @@ import { readTar } from '@entropy/decompiler';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+test('colliding asset filename seeds cannot overwrite different media', () => {
+  const first = new Uint8Array(24).fill(1), second = new Uint8Array(24).fill(2);
+  const files = new Map([['/pic232789.png', first], ['/pic429192.png', second]]);
+  const result = compileProject(`object "o":
+  costume first_ "pic232789.png" size 1 1
+  costume second_ "pic429192.png" size 1 1
+end`, { path: '/entry.etp', host: {
+    resolve: (base, file) => path.resolve(base, file),
+    isFile: file => files.has(file), readFile: file => files.get(file) ?? null,
+    readText: () => null,
+  } });
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.assets.length, 2);
+  assert.notEqual(result.assets[0]!.target, result.assets[1]!.target);
+  assert.deepEqual(result.assets.map(asset => files.get(asset.source)), [first, second]);
+});
+
+test('shared media is inspected and bundled once per compile without caching later edits', () => {
+  const dir = '/assets';
+  let width = 7, reads = 0;
+  const host = {
+    resolve: (base: string, file: string) => path.resolve(base, file),
+    isFile: (file: string) => file === `${dir}/image.svg`,
+    readFile: () => { reads++; return new TextEncoder().encode(`<svg width="${width}" height="2"></svg>`); },
+    readText: () => null,
+  };
+  const source = `object "o":\n${Array.from({ length: 100 }, (_, i) => ` costume p${i} "image.svg"`).join('\n')}\nend`;
+  const first = compileProject(source, { path: `${dir}/entry.etp`, host });
+  assert.deepEqual(first.errors, []);
+  assert.equal(reads, 1);
+  assert.equal(first.assets.length, 1);
+  assert.ok(first.project!.objects[0]!.sprite.pictures.every(picture => picture.dimension!.width === 7));
+  width = 9;
+  const second = compileProject(source, { path: `${dir}/entry.etp`, host });
+  assert.equal(reads, 2);
+  assert.ok(second.project!.objects[0]!.sprite.pictures.every(picture => picture.dimension!.width === 9));
+});
+
 test('PNG 헤더에서 원본 크기를 읽는다 (회귀)', () => {
   const bytes = fs.readFileSync(path.join(root, 'examples/cat_idle.png'));
   assert.deepEqual(imageSize(bytes), { width: 220, height: 350 });

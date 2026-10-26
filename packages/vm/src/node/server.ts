@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { stripTypes } from '@entropy/core/strip-types';
+import { coreExport } from '@entropy/core/node-exports';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import {
@@ -204,7 +205,8 @@ export async function serveVm(options: ServeOptions): Promise<RunningServer> {
       }
       const source = fs.readFileSync(file, 'utf-8');
       const code = (file.endsWith('.ts') ? stripTypes(source) : source)
-        .replace(/(\bfrom\s*)(['"])@entropy\/core\2/g, '$1$2/vm/core/index.ts$2');
+        .replace(/(\bfrom\s*|\bimport\s*\(\s*)(['"])(@entropy\/core(?:\/[^'"]+)?)\2/g,
+          (whole, head, quote, specifier) => coreExport(specifier) ? `${head}${quote}/vm/core/${coreExport(specifier)}${quote}` : whole);
       return send(response, 200, MIME['.js']!, code);
     }
 

@@ -87,7 +87,7 @@ test('project files separate code, data and media while preserving declaration a
   const object = decode(result.files.find((file) => file.path === 'objects/장면_하나/주인공.etp')!.data);
   assert.match(object, /^use "주인공.assets.etp"$/m);
   assert.match(object, /^when start do$/m);
-  assert.match(object, /^function draw\(\):$/m, 'resource-owned functions stay with their object');
+  assert.match(object, /^function draw\(\) as "draw_" order 2:$/m, 'resource-owned functions stay with their object');
   assert.doesNotMatch(object, /^costume |^default costume /m);
   const data = decode(result.files.find((file) => file.path === 'data/packed.etp')!.data);
   assert.match(data, /^list packed = \[\n/);
@@ -145,7 +145,7 @@ test('inline output contains every declaration and object with no source fragmen
   assert.deepEqual(result.files, []);
   assert.doesNotMatch(result.source, /^\s*use(?:object|text)? /m);
   assert.match(result.source, /^list packed = \[\n/m);
-  assert.match(result.source, /^function shared\(n\):$/m);
+  assert.match(result.source, /^function shared\(n\) as "shared_" order 1:$/m);
   assert.equal(compileOutput(result).project.objects.length, 2);
 });
 

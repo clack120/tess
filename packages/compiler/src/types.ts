@@ -80,7 +80,7 @@ export interface EntryTable {
 export interface FuncLocalVariable {
   id: string;
   name: string;
-  value: string | number;
+  value: string | number | boolean;
 }
 
 export interface EntryFunction {
@@ -241,9 +241,9 @@ export interface FunctionScope {
   name: string;
   params: Map<string, string>;
   // Include locals allocated by nested blocks, keyed by ID.
-  localVars: Map<string, { id: string; displayName: string; value?: string | number }>;
-  bindings: Map<string, { id: string; displayName: string; value?: string | number }>;
-  declarations: Map<VarDeclNode, { id: string; displayName: string; value: string | number }>;
+  localVars: Map<string, { id: string; displayName: string; value?: string | number | boolean }>;
+  bindings: Map<string, { id: string; displayName: string; value?: string | number | boolean }>;
+  declarations: Map<VarDeclNode, { id: string; displayName: string; value: string | number | boolean }>;
   returnId?: string;
 }
 

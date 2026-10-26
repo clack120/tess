@@ -22,7 +22,7 @@ import type {
   EntryProject,
   SourceMap,
 } from "@entropy/compiler";
-import type { DecompileResult, RawEntity, TarEntry } from '@entropy/decompiler';
+import type { DecompileDiagnostic, DecompileResult, RawEntity, TarEntry } from '@entropy/decompiler';
 import type { RunningServer as EntryServer } from "@entropy/player";
 import type { RunningServer as VmServer } from "@entropy/vm";
 
@@ -52,6 +52,7 @@ interface CliOptions {
   noAssets?: boolean;
   strict?: boolean;
   rounds?: number;
+  report?: string;
   // Reuse parsed files across watch rebuilds.
   cache?: CompileCache;
 }
@@ -95,8 +96,9 @@ const USAGE = `사용법
   --no-strict        느슨한 실행을 켭니다. 에러가 난 문장만 빼고 build/run을 계속하고,
                      '주의'를 경고로 올리지 않습니다. 기본값은 strict 입니다.
   --rounds <횟수>    .ent check 왕복 검사 횟수 (1~10, 기본 3)
-  --warnings         decompile 명령 시 변환하지 못한 부분을 콘솔에 출력하여 알려줍니다.
-                     (기본적으로는 소스 내에 '# [decompile]' 주석으로만 남깁니다.)
+  --report <파일>    .ent check의 원본 대조 결과를 JSON으로 저장합니다.
+  --warnings         decompile 진단의 원본 위치·블록 ID와 대처 방법을 표시합니다.
+                     기본 출력은 진단 개수만 요약합니다.
   --sizes            decompile 명령 시 모든 모양(costume)에 'size 가로 세로' 속성을 명시합니다.
                      (기본적으로 글상자를 제외한 모양 크기는 이미지 파일 자체의 크기를 따릅니다.)
   --keep-svg         decompile 명령 시 SVG 모양을 PNG로 대체하지 않고 원본 그대로 유지합니다.
@@ -131,6 +133,7 @@ function parseArgs(argv: string[]) {
     else if (arg === "--strict") options.strict = true;
     else if (arg === "--no-strict") options.strict = false;
     else if (arg === "--rounds") options.rounds = Number(argv[++i]);
+    else if (arg === "--report") options.report = argv[++i];
     else rest.push(arg!);
   }
   return { options, rest };
@@ -169,7 +172,7 @@ async function runEntCheck(file: string, options: CliOptions): Promise<number> {
     console.error('--rounds 는 1부터 10 사이의 정수여야 합니다.');
     return 2;
   }
-  const { decompileProject, findProjectEntry, readTar } = await import('@entropy/decompiler');
+  const { decompileProject, findProjectEntry, readTar, compareEntryProjects } = await import('@entropy/decompiler');
   const { verifyEntryProject } = await import('@entropy/compiler');
   out.begin('check', file);
   let entries: TarEntry[];
@@ -204,6 +207,7 @@ async function runEntCheck(file: string, options: CliOptions): Promise<number> {
   let previousSource: string | null = null;
   let decompileWarnings = 0;
   let decompileNotices = 0;
+  const audits: Array<{ round: number; audit: import('@entropy/decompiler').ProjectAudit }> = [];
   const sourcePath = path.resolve(file.replace(/\.ent$/i, '.etp'));
   const virtualRoot = path.dirname(sourcePath);
 
@@ -219,8 +223,10 @@ async function runEntCheck(file: string, options: CliOptions): Promise<number> {
     if (round === 1) {
       decompileWarnings = result.warnings.length;
       decompileNotices = result.notices.length;
-      for (const warning of result.warnings) out.log.warn(`되돌리기: ${warning}`);
-      for (const notice of result.notices) out.log.message(`되돌리기: ${notice}`);
+      for (const diagnostic of result.diagnostics) {
+        const write = diagnostic.severity === 'warning' ? out.log.warn : out.log.message;
+        write(formatDecompileDiagnostic(diagnostic));
+      }
     }
     if (previousSource !== null && result.source !== previousSource) {
       out.log.error(`${round}회차에 Entropy 소스가 다시 달라졌습니다. 반복 왕복 누적 변형 버그입니다.`);
@@ -257,12 +263,30 @@ async function runEntCheck(file: string, options: CliOptions): Promise<number> {
       return 1;
     }
 
-    entries = compiled.assets.flatMap((asset) => {
+    const rebuiltEntries = compiled.assets.flatMap((asset) => {
       const data = files.get(asset.source);
       return data ? [{ name: asset.target, data }] : [];
     });
+    const audit = compareEntryProjects(project, compiled.project, { beforeAssets: entries, afterAssets: rebuiltEntries });
+    audits.push({ round, audit });
+    if (round === 1) {
+      out.note(out.details(Object.entries(audit.counts).map(([kind, count]) => [kind, `${count}개`])), '원본 project.json 대조');
+      for (const difference of audit.differences.slice(0, 12)) {
+        out.log.warn(`[${difference.kind}] ${difference.path}\n${difference.before} → ${difference.after}`);
+      }
+      if (audit.unavailableAssets) out.log.warn(`자산 ${audit.unavailableAssets}쌍은 바이트가 없어 내용 보존을 확인하지 못했습니다.`);
+    }
+    entries = rebuiltEntries;
     project = compiled.project;
     previousSource = result.source;
+  }
+
+  if (options.report) {
+    const reportPath = path.resolve(options.report);
+    if (reportPath === path.resolve(file)) throw new Error('--report 출력은 입력 .ent와 다른 파일이어야 합니다.');
+    fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+    fs.writeFileSync(reportPath, JSON.stringify({ file, audits }, null, 2));
+    out.log.info(`원본 대조 보고서: ${reportPath}`);
   }
 
   out.note(out.details([
@@ -272,8 +296,9 @@ async function runEntCheck(file: string, options: CliOptions): Promise<number> {
     ['원본 스키마 주의', `${originalProblems.length}개${originalProblems.length ? ' (왕복 결과에서 정리됨)' : ''}`],
     ['Entry 스키마', '문제 없음'],
   ]), '요약');
-  if (decompileWarnings > 0) {
-    out.outro(out.red(`${path.basename(file)}: 되돌리기 경고가 있어 왕복 호환성을 보장할 수 없음`));
+  const changes = audits.reduce((sum, { audit }) => sum + Object.values(audit.counts).reduce((a, b) => a + b, 0), 0);
+  if (decompileWarnings > 0 || changes > 0) {
+    out.outro(out.red(`${path.basename(file)}: 경고 또는 원본과의 차이가 있어 확인이 필요함 (전체 실행 동등성은 별도 검사)`));
     return 1;
   }
   out.outro(`${out.green('OK')}  ${path.basename(file)}`);
@@ -577,10 +602,16 @@ function countBlocks(node: any): number {
 }
 
 // Decompile notes also appear in the source; expand the full list only on request.
+function formatDecompileDiagnostic(item: DecompileDiagnostic): string {
+  const at = item.path ? `${item.path}${item.blockId ? ` (block ${item.blockId})` : ''}: ` : '';
+  return `[${item.code}] ${at}${item.message}${item.help ? `\n도움말: ${item.help}` : ''}`;
+}
+
 function showDecompileNotes(
   warnings: string[],
   notices: string[],
   options: CliOptions,
+  diagnostics: DecompileDiagnostic[],
 ) {
   if (warnings.length + notices.length === 0) return;
   if (!options.warnings) {
@@ -593,9 +624,9 @@ function showDecompileNotes(
     return [...shown.map(paint), ...(more > 0 ? [out.dim(`… 외 ${more}개`)] : [])]
       .join("\n");
   };
-  if (warnings.length > 0) out.log.warn(listOf(warnings, String));
+  if (warnings.length > 0) out.log.warn(listOf(diagnostics.filter(item => item.severity === 'warning').map(formatDecompileDiagnostic), String));
   if (notices.length > 0) {
-    out.log.message(listOf(notices, out.grey), { symbol: out.dim("·") });
+    out.log.message(listOf(diagnostics.filter(item => item.severity === 'notice').map(formatDecompileDiagnostic), out.grey), { symbol: out.dim("·") });
   }
 }
 
@@ -649,7 +680,7 @@ async function runDecompile(
   }
   out.note(out.details(rows), "요약");
 
-  showDecompileNotes(result.warnings, result.notices, options);
+  showDecompileNotes(result.warnings, result.notices, options, result.diagnostics);
 
   if (!options.noAssets) try {
     const recheck = compileProject(result.source, {

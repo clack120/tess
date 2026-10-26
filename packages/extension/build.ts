@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { stripTypes } from '@entropy/core/strip-types';
+import { coreExport } from '@entropy/core/node-exports';
 import { fileURLToPath } from 'node:url';
 import { icon } from './icons.ts';
 import { crxIdText, packCrx, publicKeyOf, signingKey, zipDirectory } from './pack.ts';
@@ -76,8 +77,10 @@ function emitModule(file: string): string[] {
   const out = outputFor(file);
   const found: string[] = [];
   const code = read(file)
-    .replace(/(\bfrom\s*)(['"])@entropy\/core\2/g, (_match, lead: string, quote: string) => {
-      const target = path.join(CORE_ROOT, 'index.ts');
+    .replace(/(\bfrom\s*|\bimport\s*\(\s*)(['"])(@entropy\/core(?:\/[^'"]+)?)\2/g, (match, lead: string, quote: string, specifier: string) => {
+      const exported = coreExport(specifier);
+      if (!exported) return match;
+      const target = path.join(CORE_ROOT, exported);
       found.push(target);
       return `${lead}${quote}${link(out, outputFor(target))}${quote}`;
     })

@@ -30,6 +30,21 @@ function project(t: any, files: Record<string, string>) {
   return dir;
 }
 
+test('.ent check reports first-round metadata loss even when later source is stable', (t) => {
+  const dir = project(t, {});
+  const compiled = compileProject('object "o":\nend').project!;
+  (compiled as any).futureMetadata = { enabled: true };
+  const file = path.join(dir, 'metadata.ent'), report = path.join(dir, 'report.json');
+  fs.writeFileSync(file, makeTar([{ name: 'temp/project.json', data: Buffer.from(JSON.stringify(compiled)) }]));
+  const result = cli('check', file, '--report', report);
+  assert.equal(result.code, 1);
+  assert.match(result.output, /futureMetadata/);
+  const audits = JSON.parse(fs.readFileSync(report, 'utf8')).audits;
+  assert.equal(audits.length, 3);
+  assert.equal(audits[0].audit.counts.metadata, 1);
+  assert.equal(audits[1].audit.counts.metadata, 0);
+});
+
 test('check 는 문법만 맞으면 통과하는 코드도 컴파일 단계까지 검사한다', (t) => {
   const dir = project(t, {
     'main.etp': `scene "s":
@@ -126,7 +141,7 @@ test('.ent check 는 지원하지 못한 블록을 버린 왕복을 OK로 보고
   const result = cli('check', file, '--rounds', '1');
   assert.equal(result.code, 1, result.output);
   assert.match(result.output, /되돌리기 경고\s+1개/);
-  assert.match(result.output, /되돌리기 경고.*왕복 호환성을 보장할 수 없음/);
+  assert.match(result.output, /경고 또는 원본과의 차이가 있어 확인이 필요함/);
   assert.doesNotMatch(result.output, /\bOK\b/);
 });
 

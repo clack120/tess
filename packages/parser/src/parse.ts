@@ -1,6 +1,6 @@
 import { parseSource, checkSource } from './parser/index.ts';
 import type { StartRule } from './parser/index.ts';
-import { lineAndColumn, validate } from './validate.ts';
+import { lineAndColumn, lineIndex, validate } from './validate.ts';
 import type { Diagnostic, ParseResult, ParseRoot, ProgramNode } from './ast.ts';
 
 export interface ParseOptions {
@@ -26,8 +26,9 @@ export function parse(source: string, options: ParseOptions = {}): ParseResult {
   const result = parseSource(source, { startRule });
 
   if (!result.ok) {
+    const locate = lineIndex(source);
     const errors = result.errors.map((error) => ({
-      ...lineAndColumn(source, error.offset),
+      ...locate(error.offset),
       offset: error.offset,
       message: error.message,
       detail: error.detail,

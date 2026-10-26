@@ -101,7 +101,9 @@ function unsupported(
   block: RawBlock | undefined,
 ): string[] {
   const type = block?.type ?? "(알 수 없음)";
-  ctx.warnings.add(`문장 블록 '${type}' 은(는) 아직 옮길 수 없습니다.`);
+  ctx.warn(`문장 블록 '${type}' 은(는) 아직 옮길 수 없습니다.`, {
+    code: 'D1002', help: '이 문장은 주석으로 남으며 재컴파일한 작품에서 실행되지 않습니다. 원본 블록을 확인하세요.',
+  });
   const paramsText = JSON.stringify(summarizeParams(block?.params)).slice(
     0,
     200,
@@ -220,6 +222,14 @@ function discardedCall(block: any, ctx: DecompileContext): any | null {
 }
 
 function statementLines(block: any, ctx: DecompileContext): string[] {
+  const previous = ctx.currentBlock;
+  ctx.currentBlock = block;
+  try { return renderStatement(block, ctx); }
+  finally { ctx.currentBlock = previous; }
+}
+
+function renderStatement(block: any, ctx: DecompileContext): string[] {
+  if (!block || typeof block.type !== 'string') return unsupported(ctx, block);
   if (!block || typeof block !== "object" || !block.type) return [];
   const p = block.params ?? [];
   const at = (i: number) => p[i];
@@ -233,7 +243,7 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
 
   // Entry ignores text-box operations on sprites; Entropy rejects them there.
   if (ctx.spriteScripts && TEXT_BOX_STATEMENTS.has(block.type)) {
-    ctx.notices.add(`글상자 블록 '${block.type}' 이(가) 그림 오브젝트에 있어 주석으로 남겼습니다 (엔트리에서도 아무 일도 하지 않습니다).`);
+    ctx.notice(`글상자 블록 '${block.type}' 이(가) 그림 오브젝트에 있어 주석으로 남겼습니다 (엔트리에서도 아무 일도 하지 않습니다).`);
     return [entropyComment(`[decompile] 그림 오브젝트의 글상자 블록 (실행되지 않음): ${block.type}`)];
   }
 
@@ -327,7 +337,7 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
       const scene = ctx.scenesById.get(at(0));
       // Keep deleted scene targets as notes because their jumps cannot run.
       if (!scene) {
-        ctx.warnings.add(
+        ctx.warn(
           `장면 id '${at(0)}' 이(가) 작품에 없어 그 자리로 가는 'jump' 를 주석으로 남겼습니다.`,
         );
         return [
@@ -628,7 +638,7 @@ function statementLines(block: any, ctx: DecompileContext): string[] {
       const name = ctx.funcLocalName(at(0));
       if (name === null) {
         // Entry throws before writing a missing target; omit the failed assignment in Entropy.
-        ctx.notices.add(
+        ctx.notice(
           `'${at(0)}' 은(는) 다른 함수의 지역변수라 엔트리에서도 값이 들어가지 않습니다. 그 문장은 옮기지 않았습니다.`,
         );
         return [];
@@ -686,7 +696,8 @@ function resourceExpr(
   ctx: DecompileContext,
   byId: Map<string, ResourceInfo>,
 ): string {
-  const raw = literalOf(value);
+  const getter = byId === ctx.picturesById ? 'get_pictures' : 'get_sounds';
+  const raw = value?.type === getter ? value.params?.[0] : literalOf(value);
   const literal = raw === null ? null : String(raw);
   if (literal !== null && byId.has(literal)) {
     const info = resourceInfo(ctx, literal, byId)!;
@@ -697,6 +708,10 @@ function resourceExpr(
   // Resource indices can arrive as text blocks; emit numbers to avoid name lookup errors.
   if (literal !== null && isExactNumber(literal))
     return entropyNumber(Number(literal));
+  if (value?.type === getter) {
+    if (byId === ctx.picturesById) ctx.pictureName(literal ?? '');
+    else ctx.soundName(literal ?? '');
+  }
   return exprOf(value, ctx);
 }
 
@@ -712,15 +727,29 @@ export function functionDeclarationLines(
   const previousInFunction = ctx.inFunction;
   const previousOwner = ctx.functionOwnerId;
   const previousFunctionId = ctx.functionId;
+  const previousBlock = ctx.currentBlock;
   ctx.inFunction = true;
   ctx.functionOwnerId = ownerId;
   // Only the running function's parameters are in scope.
   ctx.functionId = fn.id;
-  const body = indent(blocksToLines(createBlock.statements?.[0] ?? [], ctx));
-  const returnExpr = isValue ? exprOf(p[3], ctx) : null;
-  ctx.inFunction = previousInFunction;
-  ctx.functionOwnerId = previousOwner;
-  ctx.functionId = previousFunctionId;
+  ctx.currentBlock = createBlock;
+  let body: string[];
+  let returnExpr: string | null;
+  try {
+    if (isValue && !(createBlock.statements?.[0]?.length)) {
+      ctx.notice(`값 함수 '${fn.displayLabel}' 의 실행 본문이 비어 있습니다. EntryJS는 반환 식을 반복 평가할 수 있습니다.`, {
+        code: 'D2001',
+        help: '원래 빈 본문을 보존했습니다. EntryJS 4.0.23에서는 반환 식 3회 평가와 틱 양보가 확인되며, Entropy VM 동작과 다를 수 있습니다.',
+      });
+    }
+    body = indent(blocksToLines(createBlock.statements?.[0] ?? [], ctx));
+    returnExpr = isValue ? exprOf(p[3], ctx) : null;
+  } finally {
+    ctx.inFunction = previousInFunction;
+    ctx.functionOwnerId = previousOwner;
+    ctx.functionId = previousFunctionId;
+    ctx.currentBlock = previousBlock;
+  }
 
   // Declare function locals at the start so each call initializes its own copy.
   const locals = (fn.locals ?? []).map(
@@ -730,7 +759,7 @@ export function functionDeclarationLines(
 
   const lines = [
     ...commentLines(createBlock),
-    `function ${fn.name}(${fn.params.join(", ")}):`,
+    `function ${fn.name}(${fn.params.join(", ")})${displayNamePart(fn.name, fn.displayLabel)}${fn.order === undefined ? '' : ` order ${fn.order}`}:`,
     ...indent(locals),
     ...body,
   ];

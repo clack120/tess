@@ -1,5 +1,6 @@
 // Indices are one-based, slices include both ends, and failed searches return zero.
 import { KEY_CODES, keyCodeOf } from '@entropy/core';
+import { addNum, subNum, mulNum, divNum } from '@entropy/core/entry-values';
 import { didYouMean, orHint } from '@entropy/core';
 import { requireMinMax, requirePowerRefiner, requireStoreFlag } from './runtime.ts';
 import { requireStringHelper } from './string-functions.ts';
@@ -41,6 +42,7 @@ const MATH_OPERATIONS: Record<string, string> = {
   asin: 'asin_radian', acos: 'acos_radian', atan: 'atan_radian',
   ln: 'ln', log10: 'log',
   floor: 'floor', ceil: 'ceil', round: 'round', abs: 'abs',
+  fraction: 'unnatural',
   factorial: 'factorial',
 };
 
@@ -85,6 +87,16 @@ export function compileValue(node: Expr | null | undefined, ctx: Context): Entry
 
 export function compileAnyValue(node: Expr | null | undefined, ctx: Context): EntryBlock | null {
   if (!node) return null;
+  const previous = ctx.currentNode;
+  ctx.currentNode = node;
+  try {
+    return compileExpression(node, ctx);
+  } finally {
+    ctx.currentNode = previous;
+  }
+}
+
+function compileExpression(node: Expr, ctx: Context): EntryBlock | null {
   switch (node.type) {
     case 'Number': return ctx.number(node.value);
     case 'String': return ctx.text(node.value);
@@ -205,11 +217,11 @@ export function foldConstant(node: Expr | null | undefined): number | null {
       const right = foldConstant(node.right);
       if (left === null || right === null) return null;
       switch (node.operator) {
-        case '+': return left + right;
-        case '-': return left - right;
-        case '*': return left * right;
-        case '/': return right === 0 ? null : left / right;
-        case '%': return right === 0 ? null : left % right;
+        case '+': return addNum(left, right);
+        case '-': return subNum(left, right);
+        case '*': return mulNum(left, right);
+        case '/': return right === 0 ? null : divNum(left, right);
+        case '%': return right === 0 ? null : left - right * Math.floor(left / right);
         case '//': return right === 0 ? null : Math.floor(left / right);
         case '**': return left ** right;
         default: return null;
@@ -233,55 +245,53 @@ function compilePower(node: BinaryNode, ctx: Context): EntryBlock | null {
   return buildPower(node.left, exponent, node, ctx);
 }
 
-// Power expansion repeats the base, so reject expressions with changing values.
-export function buildPower(
-  baseNode: Expr,
-  exponent: number,
-  node: Node,
-  ctx: Context,
-): EntryBlock | null {
+// Capture changing bases in a function parameter before expanding powers.
+export function buildPower(baseNode: Expr, exponent: number, node: Node, ctx: Context): EntryBlock | null {
   if (!Number.isFinite(exponent)) return ctx.error(node, '거듭제곱의 지수가 올바르지 않습니다.');
-  if (exponent === 0) return ctx.number(1);
-
-  if (exponent < 0) {
-    const positive = buildPower(baseNode, -exponent, node, ctx);
-    return positive && ctx.block('calc_basic', [ctx.number(1), 'DIVIDE', positive]);
-  }
-
+  const first = compileValue(baseNode, ctx);
+  if (!first) return null;
   let uses = 0;
-  let failed = false;
-  const base = () => {
-    uses += 1;
-    const compiled = compileValue(baseNode, ctx);
-    if (!compiled) failed = true;
-    // A placeholder lets tree building finish; the caller checks failed.
-    return compiled ?? ctx.number(1);
-  };
+  const result = powerExpression(exponent, () => {
+    uses++;
+    return uses === 1 ? first : compileValue(baseNode, ctx) ?? ctx.number(1);
+  }, ctx);
+  if (uses === 1 || (exponent !== 0 && !mayChange(baseNode, ctx))) return result;
+  if (exponent === 0 && ['Number', 'String', 'Boolean', 'Color', 'Transparent'].includes(baseNode.type)) return result;
+
+  const key = `power:${exponent}`;
+  let fn = ctx.runtimeFunctions.get(key);
+  if (!fn) {
+    const id = ctx.newId(), parameter = `stringParam_${ctx.newId()}`;
+    const name = `[Entropy] power ${exponent}`;
+    const value = powerExpression(exponent, () => ctx.block(parameter, []), ctx);
+    const field = ctx.block('function_field_label', [name,
+      ctx.block('function_field_string', [ctx.block(parameter, []), null])]);
+    const create = ctx.block('function_create_value', [field, null, null, value], [
+      [ctx.block('stop_object', ['thisThread', null])],
+    ]);
+    fn = { id, name, params: ['base'], paramTypes: new Map([['base', parameter]]),
+      isValue: true, generated: true, type: 'value', localVariables: [], content: [[create]] };
+    ctx.functions.push(fn);
+    ctx.runtimeFunctions.set(key, fn);
+  }
+  return ctx.block(`func_${fn.id}`, [first]);
+}
+
+function powerExpression(exponent: number, base: () => EntryBlock, ctx: Context): EntryBlock {
+  if (exponent === 0) return ctx.number(1);
+  if (exponent < 0) return ctx.block('calc_basic', [ctx.number(1), 'DIVIDE', powerExpression(-exponent, base, ctx)]);
   const square = (value: EntryBlock) => ctx.block('calc_operation', [null, value, null, 'square']);
   const root = (value: EntryBlock) => ctx.block('calc_operation', [null, value, null, 'root']);
   const multiply = (left: EntryBlock, right: EntryBlock) => ctx.block('calc_basic', [left, 'MULTI', right]);
-
   const whole = Math.floor(exponent);
   const { bits, exact } = fractionBits(exponent - whole);
   const wholePart = integerPower(whole, base, square, multiply);
   const fractionPart = fractionPower(bits, 0, base, root, multiply);
-
   let result = wholePart && fractionPart ? multiply(wholePart, fractionPart) : wholePart ?? fractionPart;
-
-  // Apply a Newton correction when the binary expansion leaves a remainder.
   if (result && !exact) {
     const refiner = requirePowerRefiner(ctx);
     result = ctx.block(`func_${refiner.id}`, [result, base(), ctx.number(exponent)]);
   }
-
-  if (failed) return null;
-  if (uses > 1 && containsRandom(baseNode)) {
-    return ctx.error(
-      node,
-      '이 지수는 밑을 여러 번 써야 해서 random() 이 들어간 값에는 쓸 수 없습니다. 변수에 먼저 담아 두고 쓰세요.',
-    );
-  }
-
   return result ?? ctx.number(1);
 }
 
@@ -330,28 +340,35 @@ function fractionBits(fraction: number): { bits: number[]; exact: boolean } {
   return { bits, exact: rest === 0 };
 }
 
-function containsRandom(node: unknown): boolean {
+function mayChange(node: unknown, ctx: Context): boolean {
   if (node === null || typeof node !== 'object') return false;
-  if (Array.isArray(node)) return node.some(containsRandom);
+  if (Array.isArray(node)) return node.some(child => mayChange(child, ctx));
   const call = node as { type?: string; callee?: string };
-  if (call.type === 'Call' && (call.callee === 'random' || call.callee === 'random_color')) return true;
-  return Object.entries(node).some(([key, value]) => key !== 'loc' && containsRandom(value));
+  if (call.type === 'Call' && (ctx.functionByName.has(call.callee!)
+      || call.callee === 'random' || call.callee === 'random_color' || expansionBlock(call.callee!))) return true;
+  return Object.entries(node).some(([key, value]) => key !== 'loc' && mayChange(value, ctx));
 }
 
 function compileComparison(node: BinaryNode, ctx: Context): EntryBlock | null {
   const operator = COMPARE_OPERATORS[node.operator];
 
-  const typeCheck = matchTypeCheck(node);
+  const typeCheck = ctx.functionByName.has('type') ? null : matchTypeCheck(node);
   if (typeCheck) {
-    const value = compileValue(typeCheck.value, ctx);
+    if (typeCheck.call.arguments.length !== 1) {
+      return ctx.error(typeCheck.call, `type()은 인자가 1개여야 합니다. (${typeCheck.call.arguments.length}개를 받았습니다)`, {
+        code: 'E0006', help: '숫자 모양인지는 is_number(값)으로 확인할 수 있습니다.',
+      });
+    }
+    if (typeCheck.kind !== 'number') return ctx.error(node, 'type() 비교는 "number"만 지원합니다. Entry의 언어 판정은 값의 자료형 검사가 아닙니다.', {
+      code: 'E0011', help: '숫자 모양은 is_number(값), 영문자는 is_english(값), 한글은 is_korean(값)으로 검사하세요.',
+    });
+    const value = compileValue(typeCheck.call.arguments[0], ctx);
     if (!value) return null;
-    const kind = { number: 'number', string: 'en', boolean: 'en', list: 'en' }[typeCheck.kind];
-    if (!kind) return ctx.error(node, `type() 비교값은 "number" 만 엔트리 블록으로 바꿀 수 있습니다.`);
-    const check = ctx.block('is_type', [value, null, kind, null]);
+    const check = ctx.block('is_type', [value, null, 'number', null]);
     return node.operator === '==' ? check : ctx.block('boolean_not', [null, check, null]);
   }
 
-  const deviceCheck = matchDeviceCheck(node);
+  const deviceCheck = ctx.lookupVariable('device') ? null : matchDeviceCheck(node);
   if (deviceCheck) {
     if (!['desktop', 'tablet', 'mobile'].includes(deviceCheck)) {
       return ctx.error(node, `device 는 "desktop", "tablet", "mobile" 하고만 비교할 수 있습니다.`);
@@ -366,11 +383,11 @@ function compileComparison(node: BinaryNode, ctx: Context): EntryBlock | null {
   return ctx.block('boolean_basic_operator', [left, operator, right]);
 }
 
-function matchTypeCheck(node: BinaryNode): { value: Expr; kind: string } | null {
+function matchTypeCheck(node: BinaryNode): { call: CallNode; kind: string } | null {
   if (node.operator !== '==' && node.operator !== '!=') return null;
   for (const [call, other] of [[node.left, node.right], [node.right, node.left]]) {
     if (call.type === 'Call' && call.callee === 'type' && other.type === 'String') {
-      return { value: call.arguments[0], kind: other.value };
+      return { call, kind: other.value };
     }
   }
   return null;
@@ -544,6 +561,12 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
   }
 
   switch (callee) {
+    case 'is_number': case 'is_english': case 'is_korean': {
+      if (!arity(1)) return null;
+      const argument = value(0);
+      const kind = { is_number: 'number', is_english: 'en', is_korean: 'ko' }[callee];
+      return argument && ctx.block('is_type', [argument, null, kind, null]);
+    }
     case 'trim': case 'trim_start': case 'trim_end': case 'repeat_text': case 'pad_start': case 'pad_end': {
       const pad = callee.startsWith('pad');
       if (pad) {

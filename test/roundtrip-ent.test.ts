@@ -28,7 +28,7 @@ test('.ent → .etp → .ent repeated three times reaches a stable, Entry-valid 
     const bundle = await makeEntryBundle(compiled.project!, compiled.assets);
     const decompiled = await decompileEnt(bundle, { inline: true });
     assert.deepEqual(decompiled.warnings, [], `round ${round} decompile warnings`);
-    assert.deepEqual(decompiled.notices, [], `round ${round} decompile notices`);
+    assert.ok(decompiled.diagnostics.every(item => item.code === 'D2001'), `round ${round} unexpected decompile notices`);
 
     const current = stableSource(decompiled.source);
     if (previous !== null) assert.equal(current, previous, `round ${round} source drifted`);

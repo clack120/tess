@@ -8,6 +8,7 @@ import { ASK_FIELD_STYLE } from '../web/ask-style.ts';
 import { CHART_WINDOW_STYLE } from '../web/chart-view.ts';
 import { EXTRAS_DIALOG_STYLE } from '../web/extras.ts';
 import { zipFiles, type ZipFile } from './zip.ts';
+import { coreExport } from '@entropy/core/node-exports';
 import { DEFAULT_STAGE_HEIGHT, DEFAULT_STAGE_WIDTH } from '../runtime/model.ts';
 
 const SRC_DIR = fileURLToPath(new URL('../', import.meta.url));
@@ -77,14 +78,15 @@ function collectModules(entries: string[]): Map<string, string> {
 
 function* relativeSpecifiers(code: string): Generator<string> {
   for (const match of code.matchAll(SPECIFIER)) {
-    if (match[3]!.startsWith('.') || match[3] === '@entropy/core') {
+    if (match[3]!.startsWith('.') || coreExport(match[3]!)) {
       yield match[3]!;
     }
   }
 }
 
 function resolveFrom(relative: string, specifier: string): string {
-  if (specifier === '@entropy/core') return `${CORE_PREFIX}index.ts`;
+  const core = coreExport(specifier);
+  if (core) return `${CORE_PREFIX}${core}`;
   return path.posix.normalize(path.posix.join(path.posix.dirname(relative), specifier));
 }
 
@@ -94,7 +96,7 @@ function rewriteSpecifiers(
   name: (target: string, specifier: string) => string,
 ): string {
   return code.replace(SPECIFIER, (whole, head: string, quote: string, specifier: string) =>
-    (specifier.startsWith('.') || specifier === '@entropy/core')
+    (specifier.startsWith('.') || coreExport(specifier))
       ? `${head}${quote}${name(resolveFrom(relative, specifier), specifier)}${quote}`
       : whole);
 }

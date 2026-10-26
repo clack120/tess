@@ -1856,18 +1856,18 @@ test('표는 origin 에만 자료가 있어도 줄을 그대로 옮긴다', () =
   assert.deepEqual(again.project!.tables[0].data, [['0', '1'], ['2', '3']]);
 });
 
-test('변수 상자 자리는 positions 를 켰을 때만 적는다', () => {
+test('변수 상자 자리는 기본으로 보존하고 positions: false로 생략한다', () => {
   const project = minimalProject();
   project.variables = [
     { id: 'v1', name: '점수', variableType: 'variable', value: 0, visible: true, object: null, x: -120, y: 80 },
     { id: 'v2', name: '기록', variableType: 'list', array: [], visible: true, object: null, x: 40, y: -30 },
   ];
 
-  const plain = decompileProject(project, [], { inline: true });
+  const plain = decompileProject(project, [], { inline: true, positions: false });
   assert.match(plain.source, /^var 점수 = 0 visible$/m, '기본은 자리를 적지 않습니다');
   assert.doesNotMatch(plain.source, / at /);
 
-  const placed = decompileProject(project, [], { inline: true, positions: true });
+  const placed = decompileProject(project, [], { inline: true });
   assert.match(placed.source, /^var 점수 = 0 visible at -120 80$/m);
   assert.match(placed.source, /^list 기록 = \[\] visible at 40 -30$/m);
 
@@ -2130,8 +2130,7 @@ test('변수의 글자 하나 읽기는 이름[번호] 로 되돌려 자리 번�
   assert.equal(value.params[3].type, 'calc_rand');
 });
 
-// Fractional parts need decimal subtraction; binary modulo changes digit-sensitive results.
-test('소수점 부분(unnatural) 은 10진으로 빼는 계산으로 되돌아온다', () => {
+test('소수점 부분은 원래 Entry 연산으로 되돌아온다', () => {
   const { source, warnings, blocks } = recompiledThread(valueProject([
     {
       type: 'move_x',
@@ -2141,12 +2140,10 @@ test('소수점 부분(unnatural) 은 10진으로 빼는 계산으로 되돌아�
   ]));
 
   assert.deepEqual(warnings, []);
-  assert.match(source, /^ {2}x \+= \(abs\(-1\.3\) - floor\(abs\(-1\.3\)\)\)$/m);
+  assert.match(source, /^ {2}x \+= fraction\(-1\.3\)$/m);
   const value = blocks.find((b) => b.type === 'move_x').params[0];
-  assert.equal(value.type, 'calc_basic');
-  assert.equal(value.params[1], 'MINUS');
-  assert.equal(value.params[0].params[3], 'abs');
-  assert.equal(value.params[2].params[3], 'floor');
+  assert.equal(value.type, 'calc_operation');
+  assert.equal(value.params[3], 'unnatural');
 });
 
 // Entry ignores calc_operation suffixes after the first underscore.
@@ -2589,16 +2586,17 @@ function unattachedProject(): RawEntity {
   } as RawEntity;
 }
 
-test('연결되지 않은 블록을 주석으로 남기는 것은 아무것도 알리지 않는다', () => {
+test('연결되지 않은 블록은 주석으로 남기고 구조 손실을 알린다', () => {
   const result = decompileProject(unattachedProject(), []);
   const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
 
   assert.match(fragment, /^# forward 10$/m);
-  assert.deepEqual(result.warnings, []);
+  assert.equal(result.diagnostics[0]!.code, 'D1003');
+  assert.equal(result.diagnostics[0]!.path, 'objects[0].script[1][0]');
   assert.deepEqual(result.notices, []);
 });
 
-test('워크스페이스에 떨어져 있던 블록은 옮기지 못했다고 알리지 않는다', () => {
+test('워크스페이스에 떨어진 값 블록도 구조 손실을 알린다', () => {
   const project = unattachedProject();
   const object = (project as any).objects[0];
   object.script = JSON.stringify([
@@ -2608,7 +2606,7 @@ test('워크스페이스에 떨어져 있던 블록은 옮기지 못했다고 �
   ]);
 
   const result = decompileProject(project, [], { inline: true });
-  assert.deepEqual(result.warnings, []);
+  assert.equal(result.diagnostics[0]!.code, 'D1003');
   assert.deepEqual(result.notices, []);
 });
 

@@ -169,9 +169,17 @@ export interface SoundNode extends Base {
 export interface FunctionDeclNode extends Base {
   type: 'FunctionDecl';
   name: string;
+  displayName?: string;
+  order?: number;
   params: string[];
   booleanParams: string[];
   body: Stmt[];
+}
+
+export interface SignalDeclNode extends Base {
+  type: 'SignalDecl';
+  name: string;
+  displayName: string | null;
 }
 
 export interface TableDeclNode extends Base {
@@ -575,6 +583,7 @@ export type SceneMember = ObjectNode | UseObjectNode | UseNode | PropertyNode;
 
 export type TopLevelItem =
   | ProjectNode
+  | SignalDeclNode
   | SceneNode
   | ObjectNode
   | FunctionDeclNode

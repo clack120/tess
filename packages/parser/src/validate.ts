@@ -308,6 +308,15 @@ export function validate(
     }
 
     const node = value as AnyNode;
+    if (node.type === 'Binary' && (node.operator === 'and' || node.operator === 'or')) {
+      for (const side of [node.left, node.right] as Expr[]) {
+        const raw = side.type === 'Number' ? String(side.value) : side.type === 'String' ? side.value : null;
+        if (raw === null || raw === '' || Number(raw) !== 0) continue;
+        const item = warn(side, `'${node.operator}' 에서는 이 값이 참입니다. Entry의 if/not 조건에서는 같은 값이 거짓입니다.`);
+        item.code = 'W0010';
+        item.help = 'Entry 숫자 블록도 문자열 "0"을 반환할 수 있습니다. 조건과 같은 변환이 필요하면 not (not (값))으로 명시하거나 값 != 0처럼 비교하세요.';
+      }
+    }
     if (node.type === 'Binary' && (node.operator === 'and' || node.operator === 'or') && mayRunOrFail(node.right)) {
       const item = warn(node.right as Node, `'${node.operator}' 는 왼쪽 결과와 관계없이 오른쪽 식도 평가합니다. 범위 검사 뒤의 접근이나 함수 호출도 실행됩니다.`);
       item.code = 'W0001';

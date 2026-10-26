@@ -967,16 +967,36 @@ function compileListElementAssign(node: AssignNode, ctx: Context): EntryBlock[] 
       : [];
   }
 
+  if (target.index.type === 'String' && !Number.isFinite(Number(target.index.value))) {
+    return blocksOf([ctx.error(target.index, '리스트 복합 대입에는 숫자 위치를 쓰세요.', {
+      code: 'E0010', help: 'FIRST는 1, LAST는 length(리스트), RANDOM은 random(1, length(리스트))으로 위치를 한 번 정하세요.',
+    })]);
+  }
+  // Freeze the position before reading the old value or evaluating the right side.
+  const literal = target.index.type === 'Number' || target.index.type === 'String';
+  const local = ctx.funcScope;
+  const id = literal ? null : local ? `${local.id}_${ctx.newId()}` : ctx.newId();
+  const prefix: EntryBlock[] = [];
+  const position = () => id ? ctx.block(local ? 'get_func_variable' : 'get_variable', [id, null])
+    : compileValue(target.index, ctx)!;
+  if (id) {
+    const name = '[Entropy] list index';
+    if (local) local.localVars.set(id, { id, displayName: name, value: 0 });
+    else ctx.variables.push({ id, name, value: 0, visible: false, variableType: 'variable',
+      isCloud: false, isRealTime: false, cloudDate: false, object: ctx.object?.id ?? null, x: 0, y: 0 });
+    const numeric = ctx.block('calc_basic', [index, 'MULTI', ctx.number(1)]);
+    prefix.push(ctx.block(local ? 'set_func_variable' : 'set_variable', [id, numeric, null]));
+  }
   const current = ctx.block("value_of_index_from_list", [
     null,
     list.id,
     null,
-    compileValue(target.index, ctx),
+    position(),
     null,
   ]);
   const combined = combine(current, node.operator, node.value, ctx);
   return combined
-    ? [ctx.block("change_value_list_index", [list.id, index, combined, null])]
+    ? [...prefix, ctx.block("change_value_list_index", [list.id, position(), combined, null])]
     : [];
 }
 

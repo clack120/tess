@@ -1,7 +1,8 @@
+import { ProjectReader } from './reader.ts';
 import { imageSize } from '../../compiler/src/assets.ts';
 import { append, safeIdentifier, entropyString, entropyNumber, entropyLiteral, entropyComment, displayNamePart, resourceInfo } from './ident.ts';
 import {
-  autoParamName, KEY_CODES, parseEntryBlockData, STORE_PREFIX, STORE_SAVE_ASYNC_FUNCTION,
+  autoParamName, KEY_CODES, STORE_PREFIX, STORE_SAVE_ASYNC_FUNCTION,
   STORE_SAVE_FUNCTION, tableRowCells, tableRows,
 } from '@entropy/core';
 import { blocksToLines, commentLines, indent, functionDeclarationLines, colorExpr } from './stmt.ts';
@@ -169,6 +170,11 @@ function decompileProjectUnchecked(
   }
   section('var.etp', variables);
 
+  section('signal.etp', (project.messages ?? []).map((message: RawEntity) => {
+    const name = ctx.messagesById.get(message.id)!;
+    return `signal ${entropyString(name)}${displayNamePart(name, message.name)}`;
+  }));
+
   const withRows = options.tableRows !== false;
   const heldRows: string[][][] = [];
   const tables: string[] = [];
@@ -181,7 +187,7 @@ function decompileProjectUnchecked(
 
   lines.push('project:');
   lines.push(`  title ${entropyString(project.name ?? 'Entropy 작품')}`);
-  if (project.description) lines.push(`  description ${entropyString(project.description)}`);
+  if (project.description !== undefined) lines.push(`  description ${entropyString(project.description)}`);
   lines.push(`  fps ${entropyNumber(project.speed ?? 60)}`);
   lines.push('end');
   lines.push('');
@@ -199,19 +205,25 @@ function decompileProjectUnchecked(
     // Save manager stubs become save statements and need no declarations.
     if (entry.saveKind) continue;
     try {
-      const content = parseEntryBlockData<RawBlock>(fn.content ?? []);
+      const content = ctx.reader.read(fn);
       const createBlock = functionCreateBlock(content);
-      if (!createBlock) continue;
+      if (!createBlock) {
+        ctx.warn(`함수 '${entry.name}' 의 정의 블록이 없어 함수를 옮기지 못했습니다.`, {
+          code: 'D1004', path: ctx.reader.location(fn), help: '원본 Entry에서 함수 정의를 복구한 뒤 다시 디컴파일하세요.',
+        });
+        continue;
+      }
       append(functions, functionDeclarationLines(entry, createBlock, ctx));
       functions.push('');
     } catch (error) {
-      ctx.warnings.add(`함수 '${entry.name}' 을(를) 읽지 못했습니다: ${(error as Error).message}`);
+      ctx.warn(`함수 '${entry.name}' 을(를) 읽지 못했습니다: ${(error as Error).message}`);
     }
   }
   section('func.etp', functions);
 
   const strict = options.strict === true;
   return {
+    diagnostics: ctx.diagnostics.map(item => strict && item.severity === 'notice' ? { ...item, severity: 'warning' as const } : item),
     source: `${lines.join('\n').trimEnd()}\n`,
     files: ctx.sourceFiles,
     warnings: strict ? [...ctx.warnings, ...ctx.notices] : [...ctx.warnings],
@@ -234,76 +246,17 @@ export function restoreTableRows(project: { tables?: Array<{ data?: unknown }> }
   });
 }
 
-const ID_HOLDING_BLOCKS = new Set(['text', 'number', 'get_pictures', 'get_sounds']);
-
 function collectHardcodedIds(node: unknown, ctx: DecompileContext) {
   for (const id of resourceIdsIn(node, ctx)) ctx.forcedIds.add(id);
 }
 
-function resourceIdsIn(node: unknown, ctx: DecompileContext, found = new Set<string>()): Set<string> {
-  const pending = [node];
-  while (pending.length) {
-    const value = pending.pop();
-    if (Array.isArray(value)) {
-      pending.push(...value);
-      continue;
-    }
-    if (!value || typeof value !== 'object') continue;
-    const block = value as RawBlock;
-    if (block.type !== undefined && ID_HOLDING_BLOCKS.has(block.type) && typeof block.params?.[0] === 'string') {
-      const raw = block.params[0];
-      if (ctx.picturesById.has(raw) || ctx.soundsById.has(raw)) found.add(raw);
-    }
-    pending.push(...(block.params ?? []), ...(block.statements ?? []));
-  }
-  return found;
-}
-
-interface VariableIds {
-  variables: Set<string>;
-  lists: Set<string>;
-}
-
-// Match Entry's VARIABLE and LIST parameter positions.
-const VARIABLE_SLOTS = new Map([
-  ['get_variable', 0], ['set_variable', 0], ['change_variable', 0],
-  ['show_variable', 0], ['hide_variable', 0],
-]);
-const LIST_SLOTS = new Map([
-  ['show_list', 0], ['hide_list', 0], ['change_value_list_index', 0],
-  ['value_of_index_from_list', 1], ['length_of_list', 1], ['is_included_in_list', 1],
-  ['add_value_to_list', 1], ['remove_value_from_list', 1], ['insert_value_to_list', 1],
-]);
-
-function variableIdsIn(
-  node: unknown,
-  found: VariableIds = { variables: new Set(), lists: new Set() },
-): VariableIds {
-  const pending = [node];
-  while (pending.length) {
-    const value = pending.pop();
-    if (Array.isArray(value)) {
-      pending.push(...value);
-      continue;
-    }
-    if (!value || typeof value !== 'object') continue;
-    const block = value as RawBlock;
-    const buckets: Array<[Map<string, number>, Set<string>]> = [
-      [VARIABLE_SLOTS, found.variables], [LIST_SLOTS, found.lists],
-    ];
-    for (const [slots, bucket] of buckets) {
-      const index = slots.get(block.type ?? '');
-      if (index === undefined) continue;
-      const id = block.params?.[index];
-      if (typeof id === 'string' && id) bucket.add(id);
-    }
-    pending.push(...(block.params ?? []), ...(block.statements ?? []));
-  }
-  return found;
+function resourceIdsIn(node: unknown, ctx: DecompileContext): Set<string> {
+  const values = ctx.reader.references(node).resourceValues;
+  return new Set([...values].filter(id => ctx.picturesById.has(id) || ctx.soundsById.has(id)));
 }
 
 function touchedVariableNames(content: unknown, ctx: DecompileContext): Set<string> {
-  const found = variableIdsIn(content);
+  const found = ctx.reader.references(content);
   const names = new Set<string>();
   for (const id of [...found.variables, ...found.lists]) {
     const info = ctx.varsById.get(id);
@@ -314,12 +267,16 @@ function touchedVariableNames(content: unknown, ctx: DecompileContext): Set<stri
 
 // Declare placeholders for deleted variables so their remaining references still compile.
 function reviveDanglingVariables(project: RawEntity, ctx: DecompileContext, usedNames: Set<string>) {
-  const found: VariableIds = { variables: new Set(), lists: new Set() };
-  const scan = (data: unknown) => {
-    try { variableIdsIn(parseEntryBlockData<RawBlock>(data ?? []), found); } catch { }
+  const found = { variables: new Set<string>(), lists: new Set<string>() };
+  const scan = (owner: RawEntity) => {
+    try {
+      const refs = ctx.reader.references(ctx.reader.read(owner));
+      for (const id of refs.variables) found.variables.add(id);
+      for (const id of refs.lists) found.lists.add(id);
+    } catch { }
   };
-  for (const object of project.objects ?? []) scan(object.script);
-  for (const fn of project.functions ?? []) scan(fn.content);
+  for (const object of project.objects ?? []) scan(object);
+  for (const fn of project.functions ?? []) scan(fn);
 
   const kinds: Array<[Set<string>, boolean]> = [[found.variables, false], [found.lists, true]];
   for (const [ids, isList] of kinds) {
@@ -330,7 +287,7 @@ function reviveDanglingVariables(project: RawEntity, ctx: DecompileContext, used
       const info = { identifier, isList, objectId: null, source };
       ctx.varsById.set(id, info);
       ctx.globalVars.push(info);
-      ctx.warnings.add(`변수/리스트 id '${id}' 가 작품에 없어 '${identifier}' 로 새로 선언했습니다.`);
+      ctx.warn(`변수/리스트 id '${id}' 가 작품에 없어 '${identifier}' 로 새로 선언했습니다.`);
     }
   }
 }
@@ -342,7 +299,7 @@ function soleFunctionOwner(content: unknown, ctx: DecompileContext): string | nu
     for (const owner of ctx.resourceOwnersById.get(id) ?? []) owners.add(owner);
     if (owners.size > 1) return null;
   }
-  const variables = variableIdsIn(content);
+  const variables = ctx.reader.references(content);
   for (const id of [...variables.variables, ...variables.lists]) {
     const owner = ctx.varsById.get(id)?.objectId;
     if (owner) owners.add(owner);
@@ -367,7 +324,10 @@ function functionCreateBlock(content: unknown): RawBlock | null {
 function readFunctionFields(create: RawBlock | null): FunctionField[] {
   const fields: FunctionField[] = [];
   let node = create?.params?.[0] as RawBlock | undefined;
+  const seen = new Set<RawBlock>();
   while (node && typeof node === 'object') {
+    if (seen.has(node)) throw new Error('함수 머리말 블록이 자기 자신을 가리킵니다.');
+    seen.add(node);
     if (node.type === 'function_field_label') {
       fields.push({ kind: 'label', text: String(node.params?.[0] ?? '') });
     } else if (node.type === 'function_field_string' || node.type === 'function_field_boolean') {
@@ -393,10 +353,15 @@ function buildContext(
   const entriesByPath = new Map(entries.map((e) => [e.name, e.data]));
 
   const ctx: DecompileContext = {
+    reader: new ProjectReader(project),
+    diagnostics: [],
+    currentBlock: null,
+    warn(message, details = {}) { report('warning', message, details); },
+    notice(message, details = {}) { report('notice', message, details); },
     warnings: new Set(),
     notices: new Set(),
     allSizes: options.sizes === true,
-    positions: options.positions === true,
+    positions: options.positions !== false,
     keepSvg: options.keepSvg === true,
     varsById: new Map(),
     globalVars: [],
@@ -431,7 +396,7 @@ function buildContext(
     varName(id: string) {
       const info = ctx.varsById.get(id);
       if (info) return info.identifier;
-      ctx.warnings.add(`변수/리스트 id '${id}' 를 찾지 못했습니다.`);
+      ctx.warn(`변수/리스트 id '${id}' 를 찾지 못했습니다.`);
       return `_missing_var_${id}`;
     },
     // Only locals declared by the running function exist in Entry's executor.
@@ -439,7 +404,7 @@ function buildContext(
       const name = ctx.funcLocalsById.get(ctx.functionId ?? '')?.get(id);
       if (name !== undefined) return name;
       if (!declaresLocal(ctx, id)) {
-        ctx.warnings.add(`함수 지역변수 id '${id}' 를 찾지 못했습니다.`);
+        ctx.warn(`함수 지역변수 id '${id}' 를 찾지 못했습니다.`);
       }
       return null;
     },
@@ -453,13 +418,13 @@ function buildContext(
       const info = resourceInfo(ctx, id, ctx.picturesById);
       if (info) return info.identifier;
       // Entry resolves resource IDs, names, then positions at runtime.
-      ctx.notices.add(`모양 id '${id}' 가 작품에 없어 그대로 남겼습니다. 실행할 때 이름으로 찾습니다.`);
+      ctx.notice(`모양 id '${id}' 가 작품에 없어 그대로 남겼습니다. 실행할 때 이름으로 찾습니다.`);
       return String(id);
     },
     soundName(id: string) {
       const info = resourceInfo(ctx, id, ctx.soundsById);
       if (info) return info.identifier;
-      ctx.notices.add(`소리 id '${id}' 가 작품에 없어 그대로 남겼습니다. 실행할 때 이름으로 찾습니다.`);
+      ctx.notice(`소리 id '${id}' 가 작품에 없어 그대로 남겼습니다. 실행할 때 이름으로 찾습니다.`);
       return String(id);
     },
     messageName(id: string) {
@@ -471,7 +436,48 @@ function buildContext(
     funcLocalsById: new Map(),
   };
 
-  for (const message of project.messages ?? []) ctx.messagesById.set(message.id, message.name);
+  function report(severity: 'warning' | 'notice', message: string, details: Partial<import('./types.ts').DecompileDiagnostic>) {
+    const owner = ctx.inFunction
+      ? (project.functions ?? []).find((fn: RawEntity) => fn.id === ctx.functionId)
+      : (project.objects ?? []).find((object: RawEntity) => object.id === ctx.objectId);
+    const block = ctx.currentBlock;
+    const path = details.path ?? ctx.reader.location(owner, block);
+    const diagnostic = {
+      code: severity === 'warning' ? 'D0001' : 'D0002', severity, message, path,
+      ...(block?.id ? { blockId: String(block.id) } : {}),
+      ...(block?.type ? { blockType: block.type } : {}),
+      ...details,
+    };
+    const bucket = severity === 'warning' ? ctx.warnings : ctx.notices;
+    const formatted = `${path ? `${path}${block?.id ? ` (block ${block.id})` : ''}: ` : ''}${message}`;
+    if (bucket.has(formatted)) return;
+    bucket.add(formatted);
+    ctx.diagnostics.push(diagnostic);
+  }
+
+  for (const kind of ['scenes', 'objects', 'variables', 'messages', 'functions', 'tables']) {
+    const ids = new Set<string>();
+    (project[kind] ?? []).forEach((item: RawEntity, index: number) => {
+      if (ids.has(item.id)) ctx.warn(`중복 ID '${item.id}' 때문에 참조 대상을 구분할 수 없습니다.`, {
+        code: 'D1004', path: `${kind}[${index}].id`, help: '원본의 같은 ID를 가진 선언과 참조 블록을 확인하세요. 재컴파일하면 참조 의미가 달라질 수 있습니다.',
+      });
+      ids.add(item.id);
+    });
+  }
+
+  const messageNames = new Set<string>((project.messages ?? []).map((message: RawEntity) => String(message.name)));
+  const declaredMessages = new Set<string>();
+  for (const message of project.messages ?? []) {
+    let name = String(message.name);
+    if (declaredMessages.has(name)) {
+      let suffix = 2;
+      while (messageNames.has(`${name}_${suffix}`)) suffix++;
+      name = `${name}_${suffix}`;
+      messageNames.add(name);
+    }
+    declaredMessages.add(name);
+    ctx.messagesById.set(message.id, name);
+  }
 
   for (const table of project.tables ?? []) {
     const identifier = safeIdentifier(table.name, usedNames, 'table');
@@ -484,6 +490,9 @@ function buildContext(
   }
 
   for (const object of project.objects ?? []) {
+    if (!ctx.scenesById.has(object.scene)) ctx.warn(`오브젝트 '${object.name}' 의 장면 '${object.scene}' 이(가) 없어 소스에 넣지 못했습니다.`, {
+      code: 'D1004', path: ctx.reader.location(object), help: 'Entry에서 이 오브젝트를 유효한 장면에 배치한 뒤 다시 디컴파일하세요.',
+    });
     const identifier = safeIdentifier(object.name, usedNames, 'object');
     ctx.objectsById.set(object.id, {
       identifier, displayName: object.name, kind: object.objectType, sceneId: object.scene,
@@ -524,7 +533,7 @@ function buildContext(
     // Preserve locals from deleted objects as globals rather than dropping them.
     const owned = entry.object && ctx.objectsById.has(entry.object);
     if (entry.object && !owned) {
-      ctx.warnings.add(`'${entry.name}' 은(는) 작품에 없는 오브젝트의 지역 변수라 전역으로 옮겼습니다.`);
+      ctx.warn(`'${entry.name}' 은(는) 작품에 없는 오브젝트의 지역 변수라 전역으로 옮겼습니다.`);
     }
     const info = { identifier, isList, objectId: owned ? entry.object : null, source: entry, store };
     ctx.varsById.set(entry.id, info);
@@ -540,7 +549,7 @@ function buildContext(
     let fields: FunctionField[] = [];
     let content: unknown = [];
     try {
-      content = parseEntryBlockData<RawBlock>(fn.content ?? []);
+      content = ctx.reader.read(fn);
       fields = readFunctionFields(functionCreateBlock(content));
     } catch { /* Fall back to the function ID if its header cannot be read. */ }
 
@@ -597,7 +606,7 @@ function buildContext(
   // Keep global resource IDs; functions owned by one object can use resource names instead.
   for (const fn of project.functions ?? []) {
     let content = null;
-    try { content = parseEntryBlockData<RawBlock>(fn.content ?? []); } catch { }
+    try { content = ctx.reader.read(fn); } catch { }
     if (!content) continue;
 
     const ownerId = soleFunctionOwner(content, ctx);
@@ -611,6 +620,16 @@ function buildContext(
     }
     collectHardcodedIds(content, ctx);
   }
+
+  const emittedFunctions = [
+    ...objectsInOrder.flatMap((object: RawEntity) => (ctx.functionsByOwner.get(object.id) ?? []).map(fn => fn.id)),
+    ...(project.functions ?? []).filter((fn: RawEntity) => !ctx.functionOwnerById.has(fn.id)).map((fn: RawEntity) => fn.id),
+  ];
+  if ((project.functions ?? []).some((fn: RawEntity, index: number) => fn.id !== emittedFunctions[index])) {
+    (project.functions ?? []).forEach((fn: RawEntity, index: number) => { ctx.functionsById.get(fn.id)!.order = index + 1; });
+  }
+
+  preserveDataIds(project, ctx);
 
   // Include object and scene names in asset paths to avoid collisions between resources.
   const assetTargets = new Map<string, string | null>();
@@ -691,6 +710,38 @@ function buildContext(
   return ctx;
 }
 
+function preserveDataIds(project: RawEntity, ctx: DecompileContext): void {
+  const otherIds = new Set<string>(['scenes', 'objects', 'variables', 'messages', 'functions', 'tables']
+    .flatMap(kind => (project[kind] ?? []).map((item: RawEntity) => item.id)));
+  const inspect = (value: unknown, path: string, block?: RawBlock) => {
+    if (typeof value !== 'string' && typeof value !== 'number') return;
+    const id = String(value);
+    if (ctx.picturesById.has(id) || ctx.soundsById.has(id)) ctx.forcedIds.add(id);
+    else if (typeof value === 'string' && otherIds.has(value)) ctx.notice(`문자열 '${value}' 이(가) 선언의 ID와 같습니다. ID가 재생성되면 동적 참조가 달라질 수 있습니다.`, {
+      code: 'D2002', path, blockId: block?.id, blockType: block?.type,
+      help: '이 값이 일반 글자인지 실제 ID 참조인지 확인하세요. 변수·신호·장면·오브젝트·함수 ID를 데이터로 사용하는 경로는 네이티브 실행으로 확인해야 합니다.',
+    });
+  };
+  (project.variables ?? []).forEach((variable: RawEntity, index: number) => {
+    inspect(variable.value, `variables[${index}].value`);
+    (variable.array ?? []).forEach((item: RawEntity, row: number) => inspect(item.data, `variables[${index}].array[${row}].data`));
+  });
+  (project.tables ?? []).forEach((table: RawEntity, index: number) => {
+    tableRows(table).forEach((row, r) => row.forEach((cell, c) => inspect(cell, `tables[${index}].data[${r}][${c}]`)));
+  });
+  for (const [kind, field] of [['objects', 'script'], ['functions', 'content']] as const) {
+    (project[kind] ?? []).forEach((owner: RawEntity, index: number) => {
+      if (kind === 'functions') (owner.localVariables ?? []).forEach((local: RawEntity, at: number) => inspect(local.value, `functions[${index}].localVariables[${at}].value`));
+      try {
+        for (const [value, block] of ctx.reader.references(ctx.reader.read(owner)).dataValues) {
+          if (ctx.picturesById.has(value) || ctx.soundsById.has(value)) ctx.forcedIds.add(value);
+          else if (otherIds.has(value)) inspect(value, ctx.reader.location(owner, block) ?? `${kind}[${index}].${field}`, block);
+        }
+      } catch { /* Malformed scripts are reported when rendered. */ }
+    });
+  }
+}
+
 // Convert zero-based Entry chart columns to one-based Entropy columns.
 function chartLine(chart: RawEntity): string {
   const column = (value: unknown) => Number(value ?? -1) + 1;
@@ -736,7 +787,7 @@ function declarationLine(info: VarInfo, indentLevel = 0, positions = false): str
   const named = displayNamePart(info.identifier, entryName);
   const shown = source.visible ? ' visible' : '';
   const order = info.order === undefined ? '' : ` order ${info.order}`;
-  const at = positions
+  const at = positions && (source.x || source.y)
     ? ` at ${entropyNumber(Number(source.x) || 0)} ${entropyNumber(Number(source.y) || 0)}`
     : '';
   if (info.isList) {
@@ -747,7 +798,8 @@ function declarationLine(info: VarInfo, indentLevel = 0, positions = false): str
     const size = width !== 100 || height !== 120 ? ` size ${entropyNumber(width)} ${entropyNumber(height)}` : '';
     const head = `${pad}${scope}list ${info.identifier}${named} = [`;
     const tail = `]${shown}${at}${size}${order}`;
-    if (head.length + items.join(', ').length + tail.length <= 100) {
+    const itemWidth = items.reduce((width: number, item: string) => width + item.length, 0) + Math.max(0, items.length - 1) * 2;
+    if (head.length + itemWidth + tail.length <= 100) {
       return [`${head}${items.join(', ')}${tail}`];
     }
     // Wrap at item boundaries; splitting packed strings would change their data.
@@ -866,9 +918,9 @@ function objectFragmentLines(object: RawEntity, ctx: DecompileContext, isText: b
 
   let threads: RawBlock[][] = [];
   try {
-    threads = parseEntryBlockData<RawBlock>(object.script ?? []);
+    threads = ctx.reader.read(object);
   } catch (error) {
-    ctx.warnings.add(`오브젝트 '${info.displayName}' 의 스크립트를 읽지 못했습니다: ${(error as Error).message}`);
+    ctx.warn(`오브젝트 '${info.displayName}' 의 스크립트를 읽지 못했습니다: ${(error as Error).message}`);
   }
   // Legacy size blocks use the object's saved scale.
   ctx.objectScale = ctx.scaleById.get(String(object.id)) ?? savedScale(object);
@@ -917,7 +969,7 @@ function scalePercent(ratio: number): number {
     const candidate = Number(exact.toFixed(digits));
     if (candidate / 100 === ratio) return candidate;
   }
-  return Number(exact.toPrecision(12));
+  return exact;
 }
 
 function objectPropertyLines(object: RawEntity, isText: boolean, indentLevel: number): string[] {
@@ -1021,15 +1073,24 @@ function eventLines(thread: RawBlock[] | undefined, ctx: DecompileContext, inden
     return [...text.split(/\r?\n/).map((line) => `${pad}# ${line}`.trimEnd()), ''];
   }
 
-  // Keep detached stacks as comments and discard their new notices because Entry never runs them.
+  // Detached stacks remain readable, but their block structure cannot be restored.
   const hadWarnings = new Set(ctx.warnings);
   const hadNotices = new Set(ctx.notices);
+  const diagnosticCount = ctx.diagnostics.length;
   const raw = blocksToLines(thread, ctx);
   keepOnly(ctx.warnings, hadWarnings);
   keepOnly(ctx.notices, hadNotices);
+  ctx.diagnostics.length = diagnosticCount;
+  const owner = (ctx.objectsById.get(ctx.objectId ?? '')?.displayName ?? ctx.objectId);
+  ctx.currentBlock = hat ?? null;
+  ctx.warn(`오브젝트 '${owner}' 의 '${hat?.type}' 스택을 주석으로 옮겼습니다.`, {
+    code: 'D1003',
+    help: '분리된 블록이나 지원하지 않는 이벤트의 원래 블록 구조는 재컴파일에서 복원되지 않습니다. 원본을 보관하고 이 스택을 확인하세요.',
+  });
+  ctx.currentBlock = null;
   const commented = raw.map((line: string) => (line.trim() ? `${pad}${entropyComment(line)}` : ''));
   return [
-    `${pad}# [decompile] 아래는 엔트리 원본에서 어디에도 연결돼 있지 않던 블록입니다 (실행되지 않음):`,
+    `${pad}# [decompile] Detached or unsupported stack; review before rebuilding.`,
     ...commented,
     '',
   ];

@@ -34,11 +34,14 @@ bun entropy check blocks.ent
 # 필요하면 왕복 횟수를 1~10회로 조정
 bun entropy check blocks.ent --rounds 6
 
+# 첫 변환에서 달라진 데이터·코드·메타데이터까지 기록
+bun entropy check blocks.ent --report roundtrip.json
+
 # 컴파일 결과를 실제 EntryJS 실행기로 확인
 bun entropy run examples/all_blocks.etp --entry
 ```
 
-되돌리기 경고가 있으면 왕복 검사는 실패합니다. 이 검사는 구조와 정보 보존을 확인하며, 실제 실행까지 같다는 뜻은 아닙니다. 중요한 작품은 `--entry`로도 확인하세요.
+되돌리기 경고나 원본과의 차이가 있으면 왕복 검사는 실패합니다. 원본 대조와 소스 안정성은 실제 실행 동등성과 구분합니다. [런타임 함정과 진단 안내](./ENTRY-RUNTIME.md)에서 비교 범위, 제외되는 정보, 알려진 VM 차이를 확인할 수 있습니다.
 
 ## 실행기와 확장
 
