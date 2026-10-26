@@ -2,6 +2,7 @@ import type { MountedPlayer } from "./page/player.ts";
 import { mountPlayer } from "./page/player.ts";
 import { readWork, writeWork, type StoredValue } from "./store-db.ts";
 import { clearAssetCache } from "../../vm/src/web/fetch-retry.ts";
+import { positionPlayerParent } from "./player-parent.ts";
 
 declare const ENTROPY_PLAYER_CSS: string;
 
@@ -11,7 +12,7 @@ interface HeldFrame {
   id: string;
   host: HTMLElement | null;
   player: MountedPlayer | null;
-  positioned: HTMLElement | null;
+  releasePosition: (() => void) | null;
 }
 
 function startUserscript(): void {
@@ -104,17 +105,15 @@ function startUserscript(): void {
 
     const idOf = (src: string) => /\/iframe\/([^/?#]+)/.exec(src)?.[1] ?? null;
 
-    const release = (item: HeldFrame) => {
+    const release = (item: HeldFrame, restoreSource = true) => {
       item.player?.dispose();
       item.player = null;
       item.host?.remove();
       item.host = null;
-      if (item.positioned) {
-        item.positioned.style.removeProperty("position");
-        item.positioned = null;
-      }
+      item.releasePosition?.();
+      item.releasePosition = null;
       item.frame.style.removeProperty("visibility");
-      if (item.frame.getAttribute("src") !== item.src)
+      if (restoreSource && item.frame.getAttribute("src") !== item.src)
         item.frame.setAttribute("src", item.src);
     };
 
@@ -122,15 +121,20 @@ function startUserscript(): void {
       item.frame.style.visibility = "hidden";
       if (item.frame.getAttribute("src") !== "about:blank")
         item.frame.setAttribute("src", "about:blank");
-      if (item.host?.isConnected && item.player?.isConnected) return;
-      item.player?.dispose();
-      item.host?.remove();
       const parent = item.frame.parentElement;
       if (!parent) return;
-      if (getComputedStyle(parent).position === "static") {
-        parent.style.position = "relative";
-        item.positioned = parent;
+      if (item.host?.isConnected && item.player?.isConnected) {
+        if (item.host.parentElement !== parent) {
+          item.releasePosition?.();
+          item.releasePosition = positionPlayerParent(parent);
+          item.frame.after(item.host);
+        }
+        return;
       }
+      item.player?.dispose();
+      item.host?.remove();
+      item.releasePosition?.();
+      item.releasePosition = positionPlayerParent(parent);
       const host = document.createElement("div");
       host.className = "entropy-host";
       item.host = host;
@@ -153,21 +157,22 @@ function startUserscript(): void {
     const hold = (frame: HTMLIFrameElement) => {
       const src = frame.getAttribute("src") ?? "";
       let item = held.find((current) => current.frame === frame);
-      if (src === "about:blank" && item) return;
+      if (src === "about:blank" && item) { mount(item); return; }
       const id = idOf(src);
       if (!id) {
         if (item) {
-          release(item);
+          release(item, false);
           held.splice(held.indexOf(item), 1);
         }
         return;
       }
       if (item && (item.src !== src || item.id !== id)) {
-        release(item);
-        item = undefined;
+        release(item, false);
+        item.src = src;
+        item.id = id;
       }
       if (!item) {
-        item = { frame, src, id, host: null, player: null, positioned: null };
+        item = { frame, src, id, host: null, player: null, releasePosition: null };
         held.push(item);
       }
       mount(item);
@@ -190,7 +195,10 @@ function startUserscript(): void {
       }
       for (let index = held.length - 1; index >= 0; index--) {
         const item = held[index]!;
-        if (item.frame.isConnected) continue;
+        if (item.frame.isConnected) {
+          if (!item.host?.isConnected || !item.player?.isConnected) mount(item);
+          continue;
+        }
         release(item);
         held.splice(index, 1);
       }

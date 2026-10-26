@@ -1,5 +1,6 @@
 // Blank the original iframe before loading, but keep its layout box for the replacement player.
 import { api, readSettings, ENABLED_KEY, SVG_KEY, CACHE_KEY, CACHE_SIZE_KEY, CACHE_CLEAR_KEY, ESCAPE_KEY } from './browser.ts';
+import { positionPlayerParent } from './player-parent.ts';
 
 const IFRAME_MARK = '/iframe/';
 
@@ -10,7 +11,7 @@ interface Held {
   id: string;
   host: HTMLElement | null;
   // Remember positioning changes so removing the player can restore the parent.
-  positioned: HTMLElement | null;
+  releasePosition: (() => void) | null;
 }
 
 let enabled: boolean | null = null;
@@ -60,16 +61,20 @@ function capture(item: Held): void {
 
 function mount(item: Held): void {
   capture(item);
+  const parent = item.frame.parentElement;
+  if (!parent) return;
   if (item.host?.isConnected) {
+    if (item.host.parentElement !== parent) {
+      item.releasePosition?.();
+      item.releasePosition = positionPlayerParent(parent);
+      item.frame.after(item.host);
+    }
     // A page update can clear the player while leaving its host attached.
     if (!item.host.firstChild) window.postMessage({ __entropy: 'scan' }, location.origin);
     return;
   }
-  const parent = item.frame.parentElement;
-  if (parent && getComputedStyle(parent).position === 'static') {
-    parent.style.position = 'relative';
-    item.positioned = parent;
-  }
+  item.releasePosition?.();
+  item.releasePosition = positionPlayerParent(parent);
   const host = document.createElement('div');
   item.host = host;
   host.className = 'entropy-host';
@@ -89,10 +94,8 @@ function mount(item: Held): void {
 function removeHost(item: Held): void {
   item.host?.remove();
   item.host = null;
-  if (item.positioned) {
-    item.positioned.style.removeProperty('position');
-    item.positioned = null;
-  }
+  item.releasePosition?.();
+  item.releasePosition = null;
 }
 
 function release(item: Held): void {
@@ -150,7 +153,7 @@ function hold(frame: HTMLIFrameElement): void {
     item.src = src;
     item.id = id;
   } else {
-    item = { frame, src, id, host: null, positioned: null };
+    item = { frame, src, id, host: null, releasePosition: null };
     held.push(item);
   }
   if (enabled === null) {

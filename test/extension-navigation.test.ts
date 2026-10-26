@@ -7,7 +7,7 @@ import { stripTypes } from '@entropy/core/strip-types';
 // bun's vm gives jsdom a window that is not its own global, so window.addEventListener throws there.
 const test = 'Bun' in globalThis ? nodeTest.skip : nodeTest;
 
-async function setup(t: any) {
+async function setup(t: any, mode: 'extension' | 'userscript' = 'extension') {
   const dom = new JSDOM('<!doctype html><div id="wrap" style="position:static"><iframe src="/iframe/first"></iframe></div>',
     { url: 'https://example.test/project/first', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window;
@@ -32,8 +32,13 @@ async function setup(t: any) {
   w.postMessage = ((data: unknown) => w.queueMicrotask(() => w.dispatchEvent(new w.MessageEvent('message', { data, source: w as never })))) as never;
   const source = (file: string) => stripTypes(fs.readFileSync(new URL('../packages/extension/src/' + file, import.meta.url), 'utf8'))
     .replace(/^import .*;\n/gm, '');
-  w.eval(`(() => { ${source('page/main.ts')} })()`);
-  w.eval(`(() => { const ENABLED_KEY='enabled', SVG_KEY='svg', CACHE_KEY='assetCache', CACHE_SIZE_KEY='assetCacheSize', CACHE_CLEAR_KEY='assetCacheClear', ESCAPE_KEY='grabEscape'; ${source('content.ts')} })()`);
+  const positioning = source('player-parent.ts').replace(/^export /gm, '');
+  if (mode === 'extension') {
+    w.eval(`(() => { ${source('page/main.ts')} })()`);
+    w.eval(`(() => { ${positioning}\nconst ENABLED_KEY='enabled', SVG_KEY='svg', CACHE_KEY='assetCache', CACHE_SIZE_KEY='assetCacheSize', CACHE_CLEAR_KEY='assetCacheClear', ESCAPE_KEY='grabEscape'; ${source('content.ts')} })()`);
+  } else {
+    w.eval(`(() => { ${positioning}\nconst ENTROPY_PLAYER_CSS = '', clearAssetCache = async () => {}; ${source('userscript.ts')} })()`);
+  }
   const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); };
   await settle();
   t.after(() => w.close());
@@ -80,6 +85,18 @@ test('removing an Entry iframe removes its sibling host and stops its player bef
   assert.equal(w.document.querySelectorAll('.entropy-player').length, 1);
 });
 
+test('replacing an iframe in one page update keeps the new player inside its parent', async t => {
+  const { w, frame, mounted, settle, settings } = await setup(t);
+  const parent = frame.parentElement!;
+  const next = w.document.createElement('iframe'); next.src = '/iframe/second';
+  frame.replaceWith(next);
+  await settle();
+  assert.deepEqual(mounted.filter(item => !item.disposed).map(item => item.id), ['second']);
+  assert.equal(parent.style.position, 'relative');
+  settings({ enabled: { newValue: false } }, 'local'); await settle();
+  assert.equal(parent.style.position, 'static');
+});
+
 test('reusing the same iframe for another work replaces its player and restores the latest original URL', async t => {
   const { w, frame, mounted, settle, settings } = await setup(t);
   for (const id of ['second', 'first', 'second']) {
@@ -118,3 +135,69 @@ test('the page runner replaces a host whose project metadata changes and ignores
   frame.remove(); await scan();
   assert.equal(mounted.every(item => item.disposed), true);
 });
+
+for (const mode of ['extension', 'userscript'] as const) {
+  test(`${mode}: clearing a connected host replaces its player without losing parent positioning`, async t => {
+    const { w, frame, mounted, settle } = await setup(t, mode);
+    mounted[0]!.host.replaceChildren(); await settle();
+    assert.equal(mounted[0]!.disposed, true);
+    assert.equal(mounted.length, 2);
+    assert.equal(w.document.querySelectorAll('.entropy-player').length, 1);
+    assert.equal(frame.parentElement!.style.position, 'relative');
+  });
+
+  test(`${mode}: repeated page replacements retain positioning and restore the original style`, async t => {
+    const { w, frame, mounted, settle } = await setup(t, mode);
+    const parent = frame.parentElement!;
+    let current = frame;
+    for (const id of ['second', 'third', 'first']) {
+      const next = w.document.createElement('iframe'); next.src = '/iframe/' + id;
+      current.replaceWith(next); current = next; await settle();
+      assert.equal(parent.style.position, 'relative');
+      assert.deepEqual(mounted.filter(item => !item.disposed).map(item => item.id), [id]);
+      assert.equal(w.document.querySelectorAll('.entropy-host').length, 1);
+    }
+    current.remove(); await settle();
+    assert.equal(parent.style.position, 'static');
+    assert.equal(mounted.every(item => item.disposed), true);
+  });
+
+  test(`${mode}: iframe URL changes do not retain or reload the previous work`, async t => {
+    const { w, frame, mounted, settle } = await setup(t, mode);
+    for (const id of ['second', 'third', 'first']) {
+      frame.src = '/iframe/' + id; await settle();
+      assert.deepEqual(mounted.filter(item => !item.disposed).map(item => item.id), [id]);
+    }
+    frame.src = '/unrelated'; await settle();
+    assert.equal(frame.getAttribute('src'), '/unrelated');
+    assert.equal(frame.style.visibility, '');
+    assert.equal(w.document.querySelectorAll('.entropy-host').length, 0);
+    assert.equal(mounted.every(item => item.disposed), true);
+  });
+
+  test(`${mode}: moving an iframe moves its existing player and restores both parents`, async t => {
+    const { w, frame, mounted, settle } = await setup(t, mode);
+    const original = frame.parentElement!;
+    const next = w.document.createElement('div'); next.style.position = 'static'; w.document.body.append(next);
+    next.append(frame); await settle();
+    assert.equal(mounted.length, 1);
+    assert.equal(mounted[0]!.host.parentElement, next);
+    assert.equal(original.style.position, 'static');
+    assert.equal(next.style.position, 'relative');
+    frame.remove(); await settle();
+    assert.equal(next.style.position, 'static');
+    assert.equal(mounted[0]!.disposed, true);
+  });
+
+  test(`${mode}: removing one of two players leaves their shared parent positioned`, async t => {
+    const { w, frame, mounted, settle } = await setup(t, mode);
+    const parent = frame.parentElement!;
+    const next = w.document.createElement('iframe'); next.src = '/iframe/second'; parent.append(next); await settle();
+    frame.remove(); await settle();
+    assert.equal(parent.style.position, 'relative');
+    assert.deepEqual(mounted.filter(item => !item.disposed).map(item => item.id), ['second']);
+    parent.style.position = 'fixed';
+    next.remove(); await settle();
+    assert.equal(parent.style.position, 'fixed', 'later page styles belong to the page');
+  });
+}
