@@ -10,6 +10,10 @@ import {
   clearWorks, exportAll, exportName, importAll, listWorks, removeWork, type SavedSummary,
 } from '../store-db.ts';
 
+if (typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) {
+  document.documentElement.classList.add('is-mobile');
+}
+
 const power = document.getElementById('enabled') as HTMLButtonElement;
 const svg = document.getElementById('svg') as HTMLInputElement;
 const mask = document.getElementById('mask') as HTMLInputElement;

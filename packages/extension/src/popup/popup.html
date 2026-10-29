@@ -6,6 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>tessvm</title>
   <link rel="stylesheet" href="popup.css">
+  <script>
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) {
+      document.documentElement.classList.add('is-mobile');
+    }
+  </script>
 </head>
 
 <body>

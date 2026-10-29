@@ -14,9 +14,12 @@ export { crc32 } from '@tess/vm';
 import { zipFiles } from '@tess/vm';
 
 /** Every file under `dir`, as zip-style paths relative to it. */
-function walk(dir: string, prefix = ''): string[] {
+function walk(dir: string, prefix = '', exclude: string[] = []): string[] {
   const found: string[] = [];
   for (const item of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (exclude.includes(item.name)) {
+      continue;
+    }
     const name = prefix ? `${prefix}/${item.name}` : item.name;
     if (item.isDirectory()) {
       found.push(...walk(path.join(dir, item.name), name));
@@ -28,10 +31,10 @@ function walk(dir: string, prefix = ''): string[] {
 }
 
 /** Zips everything under `dir` into `target`, with paths relative to `dir`. */
-export function zipDirectory(dir: string, target: string): void {
+export function zipDirectory(dir: string, target: string, exclude: string[] = []): void {
   fs.writeFileSync(
     target,
-    zipFiles(walk(dir).map((name) => ({ name, data: fs.readFileSync(path.join(dir, name)) }))),
+    zipFiles(walk(dir, '', exclude).map((name) => ({ name, data: fs.readFileSync(path.join(dir, name)) }))),
   );
 }
 

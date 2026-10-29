@@ -23,6 +23,7 @@ const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const SRC = path.join(ROOT, 'src');
 const VM_SRC = path.resolve(ROOT, '../tessvm/src');
 const DIST = path.join(ROOT, 'dist');
+const DIST_FIREFOX = path.join(DIST, 'firefox');
 const VENDOR = path.join(DIST, 'vendor');
 const VM_OUT = path.join(VENDOR, 'tessvm');
 const PIXI_OUT = path.join(VENDOR, 'pixi.mjs');
@@ -231,8 +232,8 @@ function checkLinks(): void {
  * warning at install time — firefox refuses the whole add-on ("Extension is
  * invalid"), and chrome quietly drops the part that named it.
  */
-function checkManifest(): void {
-  const manifest = JSON.parse(fs.readFileSync(path.join(DIST, 'manifest.json'), 'utf-8'));
+function checkManifest(targetDir = DIST): void {
+  const manifest = JSON.parse(fs.readFileSync(path.join(targetDir, 'manifest.json'), 'utf-8'));
   const named: string[] = [
     ...Object.values(manifest.icons ?? {}),
     ...Object.values(manifest.action?.default_icon ?? {}),
@@ -242,17 +243,17 @@ function checkManifest(): void {
     manifest.background?.service_worker,
   ].filter((item): item is string => typeof item === 'string');
   for (const file of named) {
-    if (!fs.existsSync(path.join(DIST, file))) {
+    if (!fs.existsSync(path.join(targetDir, file))) {
       throw new Error(`manifest.json 이 없는 파일을 가리킵니다: ${file}`);
     }
   }
-  if (manifest.default_locale && !fs.existsSync(path.join(DIST, '_locales', manifest.default_locale))) {
+  if (manifest.default_locale && !fs.existsSync(path.join(targetDir, '_locales', manifest.default_locale))) {
     throw new Error(`manifest.json 의 default_locale 에 맞는 _locales 폴더가 없습니다`);
   }
   for (const group of manifest.web_accessible_resources ?? []) {
     for (const pattern of group.resources ?? []) {
       const prefix = pattern.split('*')[0];
-      const at = path.join(DIST, prefix);
+      const at = path.join(targetDir, prefix);
       const exists = fs.existsSync(at) || fs.existsSync(path.dirname(at));
       if (!exists) {
         throw new Error(`web_accessible_resources 가 없는 경로를 가리킵니다: ${pattern}`);
@@ -293,14 +294,14 @@ const rel = (file: string) => path.relative(process.cwd(), file);
  * key; chrome has no use for it and its store checks the manifest for keys it
  * does not know.
  */
-function writeManifest(target: 'chrome' | 'firefox'): void {
+function writeManifest(target: 'chrome' | 'firefox', targetDir = DIST): void {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf-8'));
   if (target === 'chrome') {
     delete manifest.browser_specific_settings;
     // Chrome runs the worker as a service worker; firefox as an event page.
     manifest.background = { service_worker: 'background.js', type: 'module' };
   }
-  fs.writeFileSync(path.join(DIST, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  fs.writeFileSync(path.join(targetDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function copy(from: string, to: string): void {
@@ -347,18 +348,25 @@ copy(path.join(SRC, 'popup', 'popup.css'), path.join(DIST, 'popup', 'popup.css')
 writeIcons();
 checkLinks();
 
-// The two browsers get the same files under a manifest of their own, so the
-// build writes one, packs it, then writes the other over it.
-writeManifest('firefox');
-checkManifest();
-zipDirectory(DIST, ZIP);
-// `dist` is left as the chrome build — that is the one loaded unpacked.
-writeManifest('chrome');
-checkManifest();
-zipDirectory(DIST, CHROME_ZIP);
+// Copy common compiled files to the dedicated Firefox dist directory before manifest generation
+fs.mkdirSync(DIST_FIREFOX, { recursive: true });
+for (const item of fs.readdirSync(DIST)) {
+  if (item === 'firefox') continue;
+  fs.cpSync(path.join(DIST, item), path.join(DIST_FIREFOX, item), { recursive: true });
+}
+
+// Firefox build: unpacked into dist/firefox, packed as ZIP
+writeManifest('firefox', DIST_FIREFOX);
+checkManifest(DIST_FIREFOX);
+zipDirectory(DIST_FIREFOX, ZIP);
+
+// Chrome build: unpacked in dist (excluding firefox/), packed as CHROME_ZIP
+writeManifest('chrome', DIST);
+checkManifest(DIST);
+zipDirectory(DIST, CHROME_ZIP, ['firefox']);
 
 const lines = [
-  `확장을 만들었습니다: ${rel(DIST)} (모듈 ${modules.size}개 · 내용 스크립트 ${flattened}개)`,
+  `확장을 만들었습니다: ${rel(DIST)} (크롬용) · ${rel(DIST_FIREFOX)} (파이어폭스용) (모듈 ${modules.size}개 · 내용 스크립트 ${flattened}개)`,
   `파이어폭스용 묶음: ${rel(ZIP)}`,
   `크롬용 묶음: ${rel(CHROME_ZIP)} (웹스토어에 올리는 것은 이 zip 입니다)`,
 ];
