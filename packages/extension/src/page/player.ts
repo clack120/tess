@@ -375,28 +375,72 @@ export function mountPlayer(
     reportDropped(built.dropped);
     status.textContent = "실행기를 준비하는 중…";
 
-    const entryVarsByName = new Map<string, any>();
+    const entryVarsByKey = new Map<string, any>();
     for (const v of work.variables ?? []) {
-        entryVarsByName.set(String(v.name), v);
+      const type = v.variableType === "list" ? "list" : "variable";
+      entryVarsByKey.set(`${type}:${v.name}`, v);
+      entryVarsByKey.set(String(v.name), v);
     }
-    
+
     const tessIdToEntryId = new Map<string, string>();
     const entryIdToTessId = new Map<string, string>();
     const variableMongoIds = new Map<string, string>();
-    
+
     for (const v of built.project.variables) {
       if (v.isCloud || v.isRealTime) {
-        const entryVar = entryVarsByName.get(String(v.name));
+        const isList = v.variableType === "list" || Boolean((v as any).isList);
+        const type = isList ? "list" : "variable";
+        const entryVar =
+          entryVarsByKey.get(`${type}:${v.name}`) ?? entryVarsByKey.get(String(v.name));
         if (entryVar) {
           tessIdToEntryId.set(String(v.id), String(entryVar.id));
           entryIdToTessId.set(String(entryVar.id), String(v.id));
-          variableMongoIds.set(String(v.id), String(entryVar._id));
+          if (entryVar._id) {
+            variableMongoIds.set(String(v.id), String(entryVar._id));
+            entryIdToTessId.set(String(entryVar._id), String(v.id));
+          }
         }
       }
     }
-    const csrfToken = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
-    const cloud = new CloudClient(projectId, csrfToken, work.variables ?? [], tessIdToEntryId, entryIdToTessId, variableMongoIds);
+
+    // Bidirectional fallback mapping for all real-time/cloud variables in work
+    for (const entryVar of work.variables ?? []) {
+      if (entryVar.isCloud || entryVar.isRealTime) {
+        const entryType = entryVar.variableType === "list" ? "list" : "variable";
+        const matched = built.project.variables.find((v) => {
+          const vType =
+            v.variableType === "list" || Boolean((v as any).isList) ? "list" : "variable";
+          return vType === entryType && v.name === entryVar.name;
+        });
+        if (matched) {
+          tessIdToEntryId.set(String(matched.id), String(entryVar.id));
+          entryIdToTessId.set(String(entryVar.id), String(matched.id));
+          if (entryVar._id) {
+            variableMongoIds.set(String(matched.id), String(entryVar._id));
+            entryIdToTessId.set(String(entryVar._id), String(matched.id));
+          }
+        }
+      }
+    }
+
+    const csrfToken =
+      document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ??
+      window.parent?.document?.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ??
+      (window as any).__NEXT_DATA__?.props?.initialProps?.csrfToken ??
+      (window.parent as any)?.__NEXT_DATA__?.props?.initialProps?.csrfToken ??
+      "";
+    const cloud = new CloudClient(
+      projectId,
+      csrfToken,
+      work.variables ?? [],
+      tessIdToEntryId,
+      entryIdToTessId,
+      variableMongoIds,
+    );
     cloudStore = cloud;
+    cloud.setChangeListener(() => {
+      handle?.vm.readStore();
+    });
     await cloud.connect();
 
     try {
@@ -420,18 +464,19 @@ export function mountPlayer(
             : "불러오는 중…";
         },
       });
-      cloud.setChangeListener(() => {
-        handle?.vm.readStore();
-      });
-
+      handle.vm.readStore();
     } catch (error) {
       status.textContent = "";
       showError(error instanceof Error ? error.message : String(error));
+      cloudStore?.dispose();
+      cloudStore = null;
       return;
     }
     if (disposed) {
       handle.dispose();
       handle = null;
+      cloudStore?.dispose();
+      cloudStore = null;
       return;
     }
     status.textContent = "";
