@@ -51,15 +51,18 @@
   place-items: center;
   width: 100%;
   height: 100%;
+  touch-action: none;
 }
 
 .tessvm-player .tessvm-frame {
   position: relative;
   line-height: 0;
+  touch-action: none;
 }
 
 .tessvm-player .tessvm-stage canvas {
   display: block;
+  touch-action: none;
 }
 
 /* ------------------------------------------------------- the start screen */
