@@ -1516,13 +1516,13 @@ export function createOps(vm: Vm) {
     },
 
     isType(value: string, type: string): boolean {
-      if (type === 'number') {
+      if (type === 'number' || type === '숫자') {
         return cast.isNumber(value);
       }
-      if (type === 'en') {
+      if (type === 'en' || type === '영어' || type === '영문') {
         return /^[a-zA-Z]+$/.test(value);
       }
-      if (type === 'ko') {
+      if (type === 'ko' || type === '한글') {
         return /^[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]+$/.test(value);
       }
       return false;

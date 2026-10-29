@@ -3247,3 +3247,31 @@ test('그림 오브젝트의 글상자 블록은 주석으로 남겨 컴파일�
   const compiled = compileProject(result.source, { path: 'main.tess' });
   assert.deepEqual(compiled.errors.map((error) => error.message), []);
 });
+
+test('is_type 블록을 type() == ... 으로 되돌린다', () => {
+  const project = minimalProject(1);
+  project.objects[0].script = JSON.stringify([[
+    { type: 'when_run_button_click', params: [null], statements: [] },
+    {
+      type: '_if',
+      params: [{ type: 'is_type', params: [{ type: 'text', params: ['hello'] }, null, 'en', null], statements: [] }, null],
+      statements: [[{ type: 'move_direction', params: [{ type: 'number', params: ['10'] }, null], statements: [] }]],
+    },
+    {
+      type: '_if',
+      params: [{ type: 'is_type', params: [{ type: 'text', params: ['가나다'] }, null, 'ko', null], statements: [] }, null],
+      statements: [[{ type: 'move_direction', params: [{ type: 'number', params: ['10'] }, null], statements: [] }]],
+    },
+    {
+      type: '_if',
+      params: [{ type: 'is_type', params: [{ type: 'number', params: ['10'] }, null, 'number', null], statements: [] }, null],
+      statements: [[{ type: 'move_direction', params: [{ type: 'number', params: ['10'] }, null], statements: [] }]],
+    },
+  ]]);
+  const result = decompileProject(project, [], { inline: true });
+  assert.match(result.source, /if \(type\("hello"\) == "en"\):/);
+  assert.match(result.source, /if \(type\("가나다"\) == "ko"\):/);
+  assert.match(result.source, /if \(type\(10\) == "number"\):/);
+  const compiled = compileProject(result.source, { path: 'main.tess' });
+  assert.deepEqual(compiled.errors.map((error) => error.message), []);
+});

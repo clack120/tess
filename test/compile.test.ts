@@ -1252,3 +1252,37 @@ end`;
   assert.equal(second.params[0].type, 'boolean_not');
   assert.equal(second.params[0].params[1].type, 'continue_repeat');
 });
+
+test('type(x) == ... 는 엔트리의 is_type 블록이 된다', () => {
+  const { thread: threadNum } = compileScript('if type(x) == "number":\n  x += 1\nend');
+  const ifNum = threadNum.find((b: any) => b.type === '_if');
+  assert.equal(ifNum.params[0].type, 'is_type');
+  assert.equal(ifNum.params[0].params[2], 'number');
+
+  const { thread: threadKo } = compileScript('if type(x) == "ko":\n  x += 1\nend');
+  const ifKo = threadKo.find((b: any) => b.type === '_if');
+  assert.equal(ifKo.params[0].type, 'is_type');
+  assert.equal(ifKo.params[0].params[2], 'ko');
+
+  const { thread: threadEn } = compileScript('if type(x) == "en":\n  x += 1\nend');
+  const ifEn = threadEn.find((b: any) => b.type === '_if');
+  assert.equal(ifEn.params[0].type, 'is_type');
+  assert.equal(ifEn.params[0].params[2], 'en');
+
+  // 한글 별칭도 컴파일된다
+  const { thread: threadKoAlias } = compileScript('if type(x) == "한글":\n  x += 1\nend');
+  assert.equal(threadKoAlias.find((b: any) => b.type === '_if').params[0].params[2], 'ko');
+
+  const { thread: threadEnAlias } = compileScript('if type(x) == "영어":\n  x += 1\nend');
+  assert.equal(threadEnAlias.find((b: any) => b.type === '_if').params[0].params[2], 'en');
+
+  const { thread: threadNumAlias } = compileScript('if type(x) == "숫자":\n  x += 1\nend');
+  assert.equal(threadNumAlias.find((b: any) => b.type === '_if').params[0].params[2], 'number');
+
+  // != 는 boolean_not 으로 감싼다
+  const { thread: threadNot } = compileScript('if type(x) != "number":\n  x += 1\nend');
+  const ifNot = threadNot.find((b: any) => b.type === '_if');
+  assert.equal(ifNot.params[0].type, 'boolean_not');
+  assert.equal(ifNot.params[0].params[1].type, 'is_type');
+  assert.equal(ifNot.params[0].params[1].params[2], 'number');
+});

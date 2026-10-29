@@ -352,7 +352,8 @@ export function exprOf(block: any, ctx: DecompileContext): string {
     case 'distance_something': return `distance(${tessString(targetName(ctx, at(1)))})`;
     case 'is_current_device_type': return `(device == ${tessString(at(0))})`;
     case 'is_type': {
-      const kind = at(2) === 'number' ? 'number' : 'string';
+      const type = at(2);
+      const kind = type === 'ko' ? 'ko' : type === 'en' ? 'en' : 'number';
       return `(type(${exprOf(at(0), ctx)}) == ${tessString(kind)})`;
     }
 

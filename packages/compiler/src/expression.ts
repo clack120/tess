@@ -486,13 +486,29 @@ function containsRandom(node: unknown): boolean {
 function compileComparison(node: BinaryNode, ctx: Context): EntryBlock | null {
   const operator = COMPARE_OPERATORS[node.operator];
 
-  // type(x) == "number" -> 엔트리의 "~이 숫자인가?" 판단 블록
+  // type(x) == "ko" | "number" | "en" -> Entry is_type block
   const typeCheck = matchTypeCheck(node);
   if (typeCheck) {
     const value = compileValue(typeCheck.value, ctx);
     if (!value) return null;
-    const kind = { number: 'number', string: 'en', boolean: 'en', list: 'en' }[typeCheck.kind];
-    if (!kind) return ctx.error(node, `type() 비교값은 "number" 만 엔트리 블록으로 바꿀 수 있습니다.`);
+    const TYPE_MAP: Record<string, string> = {
+      number: 'number',
+      숫자: 'number',
+      ko: 'ko',
+      korean: 'ko',
+      hangul: 'ko',
+      한글: 'ko',
+      en: 'en',
+      english: 'en',
+      영문: 'en',
+      영어: 'en',
+      string: 'en',
+      문자: 'en',
+    };
+    const kind = TYPE_MAP[typeCheck.kind];
+    if (!kind) {
+      return ctx.error(node, `type() 비교값은 "한글", "숫자", "영어"("ko", "number", "en") 중 하나여야 합니다.`);
+    }
     const check = ctx.block('is_type', [value, null, kind, null]);
     return node.operator === '==' ? check : ctx.block('boolean_not', [null, check, null]);
   }
@@ -760,7 +776,7 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
     }
 
     case 'type':
-      return ctx.error(node, 'type() 은 == "number" 처럼 비교해서만 쓸 수 있습니다.');
+      return ctx.error(node, 'type() 은 == "number", == "ko", == "en" 처럼 비교해서만 쓸 수 있습니다.');
 
     case 'distance': {
       if (!arity(1)) return null;

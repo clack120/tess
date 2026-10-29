@@ -2709,3 +2709,27 @@ test('tessvm - 시작 장면을 정하면 그 장면에서 실행을 시작한�
   vm.start();
   assert.equal(vm.currentSceneId, project.scenes[0]!.id);
 });
+
+test('tessvm - is_type(type() == ...) 블록이 한글·숫자·영어를 정확히 판별한다', () => {
+  const vm = runVm(
+    wrap(`
+var r_ko = 0
+var r_en = 0
+var r_num = 0
+
+if type("한글입니다") == "ko":
+  r_ko = 1
+end
+if type("English") == "en":
+  r_en = 1
+end
+if type(12345) == "number":
+  r_num = 1
+end
+`)
+  );
+  vm.tick();
+  assert.equal(valueOf(vm, 'r_ko'), 1);
+  assert.equal(valueOf(vm, 'r_en'), 1);
+  assert.equal(valueOf(vm, 'r_num'), 1);
+});

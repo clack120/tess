@@ -7,6 +7,7 @@ import { specsOf } from '../packages/tessblock/src/blocks/spec.ts';
 import { EXPANSION_BLOCKS } from '../packages/core/src/expansion.ts';
 import { compileProject } from '../packages/compiler/src/index.ts';
 import '../packages/tessblock/src/blocks/catalog/expansion.ts';
+import '../packages/tessblock/src/blocks/catalog/judge.ts';
 
 test('tessblock - 이름을 Tess 식별자로 옮긴다', () => {
   assert.equal(safeIdent('점수'), '점수');
@@ -84,4 +85,22 @@ test('tessblock - 확장 블록이 쓴 글이 그대로 컴파일된다', () => 
     'emergencyActionGuidelines', 'festival', 'weather',
   ]);
   assert.deepEqual(result.project?.aiUtilizeBlocks, ['translate']);
+});
+
+test('tessblock - judge_type 블록이 엔트리의 <( ) 이가 [한글/숫자/영어] 인가> 블록으로 동작한다', () => {
+  const specs = specsOf('judge');
+  const judgeType = specs.find((s) => s.type === 'judge_type');
+  assert.ok(judgeType, 'judge_type 블록이 있어야 한다');
+  assert.equal(judgeType.message, '%1 이(가) %2 인가?');
+  const typeArg = judgeType.args.find((a) => a.name === 'TYPE');
+  assert.ok(typeArg && typeArg.type === 'dropdown');
+  assert.deepEqual(typeArg.options, [['한글', 'ko'], ['숫자', 'number'], ['영어', 'en']]);
+
+  // 각 옵션의 코드 생성을 확인한다
+  const [codeKo] = judgeType.code({ VALUE: '10', TYPE: 'ko' }, null as never, null as never) as [string, number];
+  assert.equal(codeKo, 'type(10) == "ko"');
+  const [codeNum] = judgeType.code({ VALUE: '10', TYPE: 'number' }, null as never, null as never) as [string, number];
+  assert.equal(codeNum, 'type(10) == "number"');
+  const [codeEn] = judgeType.code({ VALUE: '10', TYPE: 'en' }, null as never, null as never) as [string, number];
+  assert.equal(codeEn, 'type(10) == "en"');
 });

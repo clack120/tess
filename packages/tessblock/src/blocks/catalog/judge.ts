@@ -132,8 +132,8 @@ define(
   {
     type: 'judge_type',
     category: 'judge',
-    message: '%1 의 자료형이 %2 인가?',
-    args: [textIn('VALUE', '10'), menu('TYPE', [['숫자', 'number'], ['문자', 'string'], ['판단', 'boolean']])],
+    message: '%1 이(가) %2 인가?',
+    args: [textIn('VALUE', '10'), menu('TYPE', [['한글', 'ko'], ['숫자', 'number'], ['영어', 'en']])],
     shape: 'boolean',
     order: Order.COMPARE,
     code: (a) => [`type(${a.VALUE}) == ${quote(a.TYPE)}`, Order.COMPARE],
