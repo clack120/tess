@@ -52,4 +52,6 @@ bun entropy run examples/all_blocks.etp --entry
 
 Entropy 는 [GNU AGPL v3](./LICENSE)(3.0 이후 버전)로 배포합니다.
 
+업스트림 프로젝트에서는 이 포크의 변경분을 [MIT No Attribution (MIT-0)](./LICENSE-MIT-0)에 따라 사용할 수 있습니다. 제3자 코드에는 해당 코드의 라이선스가 적용됩니다.
+
 Based on Tess by ddtt786 — https://github.com/ddtt786/tess (MIT License). Tess 에서 온 부분의 MIT 고지는 [LICENSE-TESS](./LICENSE-TESS)에 있습니다.

@@ -21,9 +21,14 @@
   }
 }
 
+html {
+  width: 296px;
+}
+
 body {
   margin: 0;
-  width: 296px;
+  width: 100%;
+  box-sizing: border-box;
   background: var(--paper);
   color: var(--ink);
   font:

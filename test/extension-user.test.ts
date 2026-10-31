@@ -35,8 +35,8 @@ const wrap = (user: unknown) =>
   JSON.stringify({ props: { pageProps: { initialState: { common: { user } } } } });
 
 test('로그인한 사람의 아이디와 닉네임을 읽는다', () => {
-  const read = readerFor(wrap({ username: 'ddtt786', nickname: '치로', role: 'member' }));
-  assert.deepEqual(read(), { id: 'ddtt786', nickname: '치로' });
+  const read = readerFor(wrap({ username: 'sample_user', nickname: '별이', role: 'member' }));
+  assert.deepEqual(read(), { id: 'sample_user', nickname: '별이' });
 });
 
 test('로그인하지 않았으면 아무도 아니다', () => {
@@ -53,7 +53,7 @@ test('페이지가 넘겨준 것이 없거나 읽을 수 없으면 아무도 아
 });
 
 test('아이디나 닉네임 한쪽만 있어도 로그인한 것으로 본다', () => {
-  assert.deepEqual(readerFor(wrap({ username: 'ddtt786' }))(), { id: 'ddtt786', nickname: '' });
-  assert.deepEqual(readerFor(wrap({ nickname: '치로' }))(), { id: '', nickname: '치로' });
+  assert.deepEqual(readerFor(wrap({ username: 'sample_user' }))(), { id: 'sample_user', nickname: '' });
+  assert.deepEqual(readerFor(wrap({ nickname: '별이' }))(), { id: '', nickname: '별이' });
   assert.equal(readerFor(wrap({ username: 7, nickname: null }))(), null);
 });

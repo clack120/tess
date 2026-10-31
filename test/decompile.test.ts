@@ -1230,7 +1230,7 @@ function samePictureNameProject(sceneCount = 1) {
     functions: [],
     aiUtilizeBlocks: [],
     objects: [
-      object('obj1', '치로', 'scene1', 'temp/aa/bb/image/aaa.png'),
+      object('obj1', '별이', 'scene1', 'temp/aa/bb/image/aaa.png'),
       object('obj2', '엔트리봇', sceneCount === 1 ? 'scene1' : 'scene2', 'temp/cc/dd/image/ccc.png'),
     ],
   };
@@ -1247,15 +1247,15 @@ test('모양 이름이 겹쳐도 오브젝트 이름을 붙여서 파일이 안 
   const result = decompileProject(project, fakeEntries(project));
 
   const images = result.assets.filter((a) => a.path.startsWith('assets/image/')).map((a) => a.path);
-  assert.deepEqual(images.sort(), ['assets/image/엔트리봇_새그림.png', 'assets/image/치로_새그림.png']);
+  assert.deepEqual(images.sort(), ['assets/image/별이_새그림.png', 'assets/image/엔트리봇_새그림.png']);
 
   const contents = result.assets
     .filter((a) => a.path.startsWith('assets/image/'))
     .map((a) => utf8(a.data));
   assert.equal(new Set(contents).size, 2);
 
-  const chiro = utf8(result.files.find((a) => a.path === 'objects/치로.etp')!.data);
-  assert.match(chiro, /"assets\/image\/치로_새그림\.png"/);
+  const chiro = utf8(result.files.find((a) => a.path === 'objects/별이.etp')!.data);
+  assert.match(chiro, /"assets\/image\/별이_새그림\.png"/);
 });
 
 test('장면이 여러 개면 리소스도 장면별 폴더로 나눈다', () => {
@@ -1264,9 +1264,9 @@ test('장면이 여러 개면 리소스도 장면별 폴더로 나눈다', () =>
 
   const paths = result.assets.map((a) => a.path).filter((p) => p.startsWith('assets/'));
   assert.deepEqual(paths.sort(), [
-    'assets/image/장면_1/치로_새그림.png',
+    'assets/image/장면_1/별이_새그림.png',
     'assets/image/장면_2/엔트리봇_새그림.png',
-    'assets/sound/장면_1/치로_소리.mp3',
+    'assets/sound/장면_1/별이_소리.mp3',
     'assets/sound/장면_2/엔트리봇_소리.mp3',
   ]);
 });
@@ -1278,7 +1278,7 @@ test('여러 모양이 같은 파일을 쓰면 한 번만 저장한다', () => {
 
   const images = result.assets.filter((a) => a.path.startsWith('assets/image/'));
   assert.equal(images.length, 1);
-  for (const name of ['치로', '엔트리봇']) {
+  for (const name of ['별이', '엔트리봇']) {
     const fragment = utf8(result.files.find((a) => a.path === `objects/${name}.etp`)!.data);
     assert.match(fragment, new RegExp(images[0].path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
@@ -1287,7 +1287,7 @@ test('여러 모양이 같은 파일을 쓰면 한 번만 저장한다', () => {
 test('경로가 그래도 겹치면 뒤에 번호를 붙인다', () => {
   // Exercise filename collision handling even after object names are made unique.
   const project = samePictureNameProject(1);
-  project.objects[1].name = '치로';
+  project.objects[1].name = '별이';
   const result = decompileProject(project, fakeEntries(project));
 
   const images = result.assets.filter((a) => a.path.startsWith('assets/image/')).map((a) => a.path);

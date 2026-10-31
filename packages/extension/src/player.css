@@ -150,6 +150,7 @@
 
 .entropy-player .entropy-stage canvas {
   display: block;
+  touch-action: none;
 }
 
 /* Keep the cover above the canvas even though the canvas is inserted later. */

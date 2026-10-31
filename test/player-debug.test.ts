@@ -16,7 +16,7 @@ const preactDist = () => findPreactDir();
 
 async function mountDebugPanel(t: any) {
   const html = playerPage({
-    name: '치로', base: '/lib', summary: { scenes: 1, objects: 1, blocks: 1 }, entName: 'a.ent', reload: false,
+    name: '별이', base: '/lib', summary: { scenes: 1, objects: 1, blocks: 1 }, entName: 'a.ent', reload: false,
   });
   const shell = html.slice(0, html.indexOf('<script')) + '</body></html>';
   const dom = new JSDOM(shell, { runScripts: 'outside-only', pretendToBeVisual: true });
@@ -79,7 +79,7 @@ async function mountDebugPanel(t: any) {
   };
   const stageObject = {
     id: 'o1',
-    name: '치로',
+    name: '별이',
     rotateMethod: 'free',
     pictures: [{ id: 'p1', name: '기본' }, { id: 'p2', name: '점프' }],
     entity,
@@ -245,7 +245,7 @@ test('부스트 모드 · 기기 · 터치를 디버그 창에서 정한 값으�
 
 const dataProject = {
   scenes: [{ id: 's1', name: '장면 1' }],
-  objects: [{ id: 'o1', name: '치로', scene: 's1', script: '[]' }],
+  objects: [{ id: 'o1', name: '별이', scene: 's1', script: '[]' }],
   variables: [
     { id: 'v1', name: '점수', value: 0 },
     { id: 'l1', name: '기록', variableType: 'list', array: [] },
@@ -721,14 +721,14 @@ test('고르기를 켜고 무대에 마우스를 대면 그 오브젝트가 디�
     ...dataProject,
     objects: [
       { id: 'o0', name: '다른', scene: 's1', script: '[]' },
-      { id: 'o1', name: '치로', scene: 's1', script: '[]' },
+      { id: 'o1', name: '별이', scene: 's1', script: '[]' },
     ],
   });
   ui.tab('objects');
   await ui.settle();
   assert.equal(ui.byId('object-info-name')!.textContent, '— 다른');
 
-  const { canvas, center } = withStage(ui, [stageActor('o1', '치로')]);
+  const { canvas, center } = withStage(ui, [stageActor('o1', '별이')]);
   overStage(ui, canvas, 'pointermove', center.clientX, center.clientY);
   await ui.settle();
   assert.equal(ui.byId('object-info-name')!.textContent, '— 다른');
@@ -737,7 +737,7 @@ test('고르기를 켜고 무대에 마우스를 대면 그 오브젝트가 디�
   overStage(ui, canvas, 'pointermove', center.clientX, center.clientY);
   await ui.settle();
 
-  assert.equal(ui.byId('object-info-name')!.textContent, '— 치로');
+  assert.equal(ui.byId('object-info-name')!.textContent, '— 별이');
   assert.equal(ui.byId('tab-objects')!.hidden, false);
 });
 
@@ -747,14 +747,14 @@ test('마우스를 옮길 때마다 그 자리의 오브젝트로 계속 따라�
   ui.window.entropyRenderProjectDebug({
     ...dataProject,
     objects: [
-      { id: 'o1', name: '치로', scene: 's1', script: '[]' },
+      { id: 'o1', name: '별이', scene: 's1', script: '[]' },
       { id: 'o2', name: '엔트리봇', scene: 's1', script: '[]' },
     ],
   });
   ui.tab('objects');
   await ui.settle();
 
-  const { canvas } = withStage(ui, [stageActor('o2', '엔트리봇', 0, 100), stageActor('o1', '치로')]);
+  const { canvas } = withStage(ui, [stageActor('o2', '엔트리봇', 0, 100), stageActor('o1', '별이')]);
   armInspector(ui);
 
   const picked = [];
@@ -763,7 +763,7 @@ test('마우스를 옮길 때마다 그 자리의 오브젝트로 계속 따라�
     await ui.settle();
     picked.push(ui.byId('object-info-name')!.textContent);
   }
-  assert.deepEqual(picked, ['— 엔트리봇', '— 치로', '— 엔트리봇', '— 치로']);
+  assert.deepEqual(picked, ['— 엔트리봇', '— 별이', '— 엔트리봇', '— 별이']);
 });
 
 test('누르면 그 오브젝트에 붙박고, 한 번 더 누르면 다시 따라간다', async (t) => {
@@ -772,14 +772,14 @@ test('누르면 그 오브젝트에 붙박고, 한 번 더 누르면 다시 따�
   ui.window.entropyRenderProjectDebug({
     ...dataProject,
     objects: [
-      { id: 'o1', name: '치로', scene: 's1', script: '[]' },
+      { id: 'o1', name: '별이', scene: 's1', script: '[]' },
       { id: 'o2', name: '엔트리봇', scene: 's1', script: '[]' },
     ],
   });
   ui.tab('objects');
   await ui.settle();
 
-  const { canvas } = withStage(ui, [stageActor('o2', '엔트리봇', 0, 100), stageActor('o1', '치로')]);
+  const { canvas } = withStage(ui, [stageActor('o2', '엔트리봇', 0, 100), stageActor('o1', '별이')]);
   armInspector(ui);
 
   overStage(ui, canvas, 'pointermove', 340, 85);
@@ -794,7 +794,7 @@ test('누르면 그 오브젝트에 붙박고, 한 번 더 누르면 다시 따�
 
   overStage(ui, canvas, 'pointerdown', 340, 185);
   await ui.settle();
-  assert.equal(ui.byId('object-info-name')!.textContent, '— 치로');
+  assert.equal(ui.byId('object-info-name')!.textContent, '— 별이');
   overStage(ui, canvas, 'pointermove', 340, 85);
   await ui.settle();
   assert.equal(ui.byId('object-info-name')!.textContent, '— 엔트리봇');
@@ -806,14 +806,14 @@ test('고르기를 끄면 붙박은 것도 풀리고 무대를 놓아 준다', a
   ui.window.entropyRenderProjectDebug({
     ...dataProject,
     objects: [
-      { id: 'o1', name: '치로', scene: 's1', script: '[]' },
+      { id: 'o1', name: '별이', scene: 's1', script: '[]' },
       { id: 'o2', name: '엔트리봇', scene: 's1', script: '[]' },
     ],
   });
   ui.tab('objects');
   await ui.settle();
 
-  const { canvas } = withStage(ui, [stageActor('o2', '엔트리봇', 0, 100), stageActor('o1', '치로')]);
+  const { canvas } = withStage(ui, [stageActor('o2', '엔트리봇', 0, 100), stageActor('o1', '별이')]);
   armInspector(ui);
   overStage(ui, canvas, 'pointermove', 340, 85);
   overStage(ui, canvas, 'pointerdown', 340, 85);
@@ -840,7 +840,7 @@ test('모양이 비어 있는 큰 판은 그 밑의 오브젝트를 가리지 �
     ...dataProject,
     objects: [
       { id: 'o2', name: '덮개', scene: 's1', script: '[]' },
-      { id: 'o1', name: '치로', scene: 's1', script: '[]' },
+      { id: 'o1', name: '별이', scene: 's1', script: '[]' },
     ],
   });
   ui.tab('objects');
@@ -850,7 +850,7 @@ test('모양이 비어 있는 큰 판은 그 밑의 오브젝트를 가리지 �
   const cover = stageActor('o2', '덮개');
   cover.entity.getWidth = () => 960;
   cover.entity.getHeight = () => 540;
-  const objects = [cover, stageActor('o1', '치로')];
+  const objects = [cover, stageActor('o1', '별이')];
   const { canvas } = withStage(ui, objects);
 
   // Make the pixel-aware runtime reject the empty overlay at every point.
@@ -870,7 +870,7 @@ test('모양이 비어 있는 큰 판은 그 밑의 오브젝트를 가리지 �
   armInspector(ui);
   overStage(ui, canvas, 'pointermove', 340, 185);
   await ui.settle();
-  assert.equal(ui.byId('object-info-name')!.textContent, '— 치로');
+  assert.equal(ui.byId('object-info-name')!.textContent, '— 별이');
 });
 
 test('픽셀로 답하지 못하는 실행기에서는 상자로 고른다', async (t) => {
@@ -878,16 +878,16 @@ test('픽셀로 답하지 못하는 실행기에서는 상자로 고른다', asy
   await ui.settle();
   ui.window.entropyRenderProjectDebug({
     ...dataProject,
-    objects: [{ id: 'o1', name: '치로', scene: 's1', script: '[]' }],
+    objects: [{ id: 'o1', name: '별이', scene: 's1', script: '[]' }],
   });
   ui.tab('objects');
   await ui.settle();
 
-  const { canvas } = withStage(ui, [stageActor('o1', '치로')]);
+  const { canvas } = withStage(ui, [stageActor('o1', '별이')]);
   armInspector(ui);
   overStage(ui, canvas, 'pointermove', 340, 185);
   await ui.settle();
-  assert.equal(ui.byId('object-info-name')!.textContent, '— 치로');
+  assert.equal(ui.byId('object-info-name')!.textContent, '— 별이');
 });
 
 test('그냥 누른 것은 디버거가 가로채지 않는다', async (t) => {
@@ -897,13 +897,13 @@ test('그냥 누른 것은 디버거가 가로채지 않는다', async (t) => {
     ...dataProject,
     objects: [
       { id: 'o0', name: '다른', scene: 's1', script: '[]' },
-      { id: 'o1', name: '치로', scene: 's1', script: '[]' },
+      { id: 'o1', name: '별이', scene: 's1', script: '[]' },
     ],
   });
   ui.tab('objects');
   await ui.settle();
 
-  const { canvas, center } = withStage(ui, [stageActor('o1', '치로')]);
+  const { canvas, center } = withStage(ui, [stageActor('o1', '별이')]);
   const event = new ui.window.MouseEvent('pointerdown', {
     bubbles: true, cancelable: true, button: 0, ...center,
   });
@@ -921,7 +921,7 @@ test('고르는 클릭은 무대까지 내려가지 않는다', async (t) => {
   ui.tab('objects');
   await ui.settle();
 
-  const { canvas, center } = withStage(ui, [stageActor('o1', '치로')]);
+  const { canvas, center } = withStage(ui, [stageActor('o1', '별이')]);
   const reached: string[] = [];
   canvas.addEventListener('pointerdown', () => reached.push('stage'));
   canvas.addEventListener('click', () => reached.push('stage'));
@@ -989,7 +989,7 @@ test('부스트 모드처럼 캔버스가 여럿이어도 무대에서 오브젝
   overStage(ui, stage, 'pointermove', 340, 185);
   await ui.settle();
 
-  assert.equal(ui.byId('object-info-name')!.textContent, '— 치로');
+  assert.equal(ui.byId('object-info-name')!.textContent, '— 별이');
   assert.equal(ui.byId('tab-objects')!.hidden, false);
 });
 
@@ -1161,7 +1161,7 @@ test('오브젝트의 원본과 클론을 따로 골라 상태를 확인하고 �
   ui.choose('debug-object-instance', '1');
   await ui.settle();
 
-  assert.equal(ui.byId('object-info-name')!.textContent, '— 치로 · 클론 1');
+  assert.equal(ui.byId('object-info-name')!.textContent, '— 별이 · 클론 1');
   const xRow = [...ui.byId('object-info')!.querySelectorAll('li')]
     .find((row: any) => row.querySelector('.key')?.textContent === 'x 좌표')!;
   assert.equal(xRow.querySelector('.debug-edit')!.textContent, '77');
@@ -1178,14 +1178,14 @@ test('무대 고르기로 클론을 직접 선택한다', async (t) => {
   ui.tab('objects');
   await ui.settle();
 
-  const base = stageActor('o1', '치로');
+  const base = stageActor('o1', '별이');
   const { canvas } = withStage(ui, [base]);
   armInspector(ui);
   // x=120 in a 480-wide stage whose canvas starts at clientX 100.
   overStage(ui, canvas, 'pointermove', 460, 185);
   await ui.settle();
 
-  assert.equal(ui.byId('object-info-name')!.textContent, '— 치로 · 클론 1');
+  assert.equal(ui.byId('object-info-name')!.textContent, '— 별이 · 클론 1');
   assert.equal(ui.byId('debug-object-instance')!.value, '1');
 });
 

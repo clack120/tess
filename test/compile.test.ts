@@ -775,8 +775,8 @@ end`;
 
 test('useobject 는 불러온 조각을 오브젝트로 감싼다', () => {
   const files = {
-    '/p/main.etp': 'scene "무대":\n  useobject "objects/치로.etp"\n  usetext "objects/점수판.etp"\nend',
-    '/p/objects/치로.etp': 'name "치로"\ncostume 기본 "c.png" size 40 60\nx = -100\n\nwhen start do\n  say "안녕"\nend',
+    '/p/main.etp': 'scene "무대":\n  useobject "objects/별이.etp"\n  usetext "objects/점수판.etp"\nend',
+    '/p/objects/별이.etp': 'name "별이"\ncostume 기본 "c.png" size 40 60\nx = -100\n\nwhen start do\n  say "안녕"\nend',
     '/p/objects/점수판.etp': 'text_content = "점수: 0"\nfont_size = 24',
   };
   const result = compileProject(files['/p/main.etp'], {
@@ -792,7 +792,7 @@ test('useobject 는 불러온 조각을 오브젝트로 감싼다', () => {
 
   const [sprite, textBox] = result.project!.objects;
   assert.equal(sprite.objectType, 'sprite');
-  assert.equal(sprite.name, '치로');
+  assert.equal(sprite.name, '별이');
   assert.equal(sprite.entity.x, -100);
   assert.equal(JSON.parse(sprite.script).length, 1);
   assert.equal(textBox.objectType, 'textBox');
@@ -1152,7 +1152,7 @@ end
 scene "s":
   object "o":
     when start do
-      스폰("치로", x > 3)
+      스폰("별이", x > 3)
       스폰("나무", true)
     end
   end

@@ -1625,8 +1625,8 @@ end`;
 
   assert.deepEqual(read({}), { id: ' ', nickname: ' ' }, '로그인하지 않은 자리');
   assert.deepEqual(
-    read({ user: { id: 'ddtt786', nickname: '치로' } }),
-    { id: 'ddtt786', nickname: '치로' },
+    read({ user: { id: 'sample_user', nickname: '별이' } }),
+    { id: 'sample_user', nickname: '별이' },
   );
 });
 

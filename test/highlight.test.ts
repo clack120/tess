@@ -70,7 +70,7 @@ test('선언 키워드와 이름을 나눠 칠한다', () => {
   assert.match(scopeOf('function 점수_더하기(값):', '점수_더하기'), /^entity\.name\.function/);
   assert.match(scopeOf('var 점수 = 0', 'var'), /^keyword\.declaration/);
   assert.match(scopeOf('var 점수 = 0', '점수'), /^variable\.other/);
-  assert.match(scopeOf('useobject "objects/치로.etp"', 'useobject'), /^keyword\.declaration/);
+  assert.match(scopeOf('useobject "objects/별이.etp"', 'useobject'), /^keyword\.declaration/);
   assert.match(scopeOf('usetext "objects/판.etp"', 'usetext'), /^keyword\.declaration/);
 });
 

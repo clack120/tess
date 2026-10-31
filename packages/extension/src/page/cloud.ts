@@ -33,7 +33,10 @@ export class CloudClient implements VariableStore {
         const entropyId = this.entryIdToEntropyId.get(String(v.id));
         if (entropyId) {
           if (v.variableType === 'list') {
-            this.values.set(entropyId, Array.isArray(v.array) ? v.array : []);
+            this.values.set(entropyId, (Array.isArray(v.array) ? v.array : []).map((item: any) => ({
+              data: item && typeof item === 'object' && 'data' in item ? item.data : item,
+              key: item && typeof item === 'object' ? item.key || item._key || this.generateKey() : this.generateKey(),
+            })));
           } else {
             this.values.set(entropyId, v.value ?? 0);
           }
@@ -95,6 +98,8 @@ export class CloudClient implements VariableStore {
             }, packet.pingInterval);
           }
         } else if (msg === '3') {
+        } else if (msg === '2') {
+          if (this.ws?.readyState === WebSocket.OPEN) this.ws.send('3');
         } else if (msg.startsWith('4')) {
           const type = msg.charAt(1);
           if (type === '2') {
@@ -104,8 +109,15 @@ export class CloudClient implements VariableStore {
                 const arr = JSON.parse(msg.slice(bracketIdx));
                 if (arr[0] === 'welcome' && arr[1]) {
                   this.handleWelcome(arr[1]);
+                  if (arr[1].isOffline) this.dispose();
                 } else if (arr[0] === 'action' && arr[1]) {
                   this.handleAction(arr[1]);
+                } else if (arr[0] === 'reset' && arr[1]) {
+                  this.handleWelcome({ variables: arr[1] });
+                } else if (arr[0] === 'check') {
+                  if (this.ws?.readyState === WebSocket.OPEN) this.ws.send('42' + JSON.stringify(['imAlive', arr[1]]));
+                } else if (arr[0] === 'changeMode' && arr[1] === 'offline') {
+                  this.dispose();
                 }
                 
               } catch (e) {
@@ -131,20 +143,29 @@ export class CloudClient implements VariableStore {
   }
 
   private handleWelcome(payload: any) {
-    const vars = payload.variables || [];
+    const raw = payload.variables;
+    const vars: any[] = Array.isArray(raw) ? raw : raw && typeof raw === 'object'
+      ? ['variable', 'slide', 'list'].flatMap(type => Object.values(raw[type] ?? {})) : [];
     for (const v of vars) {
       const entryId = String(v.id);
-      const entropyId = this.entryIdToEntropyId.get(entryId);
+      const entropyId = this.entryIdToEntropyId.get(entryId) ?? (v._id ? this.entryIdToEntropyId.get(String(v._id)) : undefined);
       if (!entropyId) continue;
+      if (v._id) {
+        this.variableMongoIds.set(entropyId, String(v._id));
+        this.entryIdToEntropyId.set(String(v._id), entropyId);
+      }
       
       if (v.variableType === 'list') {
-        const list = (Array.isArray(v.list) ? v.list : []).map((item: any) => ({
-          data: item.data,
-          key: item.key || this.generateKey()
+        const items = Array.isArray(v.array) ? v.array : Array.isArray(v.list) ? v.list : [];
+        const list = items.map((item: any) => ({
+          data: item && typeof item === 'object' && 'data' in item ? item.data
+            : v.value && typeof v.value === 'object' && !Array.isArray(v.value) ? v.value[item] ?? item : item,
+          key: item && typeof item === 'object' ? item.key || item._key || this.generateKey()
+            : v.value && typeof v.value === 'object' && !Array.isArray(v.value) ? String(item) : this.generateKey()
         }));
         this.values.set(entropyId, list);
       } else {
-        this.values.set(entropyId, v.value);
+        this.values.set(entropyId, v.value ?? v.data ?? 0);
       }
     }
     this.onRemoteChange?.();
@@ -152,12 +173,16 @@ export class CloudClient implements VariableStore {
 
   private handleAction(action: any) {
     const entryId = String(action.id);
-    const entropyId = this.entryIdToEntropyId.get(entryId);
+    const entropyId = this.entryIdToEntropyId.get(entryId) ?? (action._id ? this.entryIdToEntropyId.get(String(action._id)) : undefined);
     if (!entropyId) return;
+    if (action._id) {
+      this.variableMongoIds.set(entropyId, String(action._id));
+      this.entryIdToEntropyId.set(String(action._id), entropyId);
+    }
     
-    if (action.variableType === 'variable') {
+    if (action.variableType === 'variable' || action.variableType === 'slide') {
       if (action.type === 'set') {
-        this.values.set(entropyId, action.data);
+        this.values.set(entropyId, action.value ?? action.data);
         this.onRemoteChange?.();
       }
     } else if (action.variableType === 'list') {
@@ -166,13 +191,18 @@ export class CloudClient implements VariableStore {
         arr = [];
         this.values.set(entropyId, arr);
       }
+      const byKey = action.key ? arr.findIndex(item => item.key === action.key) : -1;
+      const index = action.key ? byKey : action.index;
       if (action.type === 'insert') {
-        arr.splice(action.index, 0, { data: action.data, key: action.key });
+        arr.splice(action.index, 0, { data: action.data, key: action.key || this.generateKey() });
+      } else if (action.type === 'append') {
+        arr.push({ data: action.data, key: action.key || this.generateKey() });
       } else if (action.type === 'delete') {
-        arr.splice(action.index, 1);
+        if (Number.isInteger(index) && index >= 0 && index < arr.length) arr.splice(index, 1);
       } else if (action.type === 'replace') {
-        if (arr[action.index]) {
-          arr[action.index].data = action.data;
+        if (Number.isInteger(index) && index >= 0 && arr[index]) {
+          arr[index].data = action.data;
+          if (action.newKey) arr[index].key = action.newKey;
         }
       }
       this.onRemoteChange?.();
@@ -193,7 +223,7 @@ export class CloudClient implements VariableStore {
     if (!isList) {
       if (this.values.get(key) !== value) {
         this.values.set(key, value);
-        this.sendAction(key, "variable", { type: "set", data: value });
+        this.sendAction(key, "variable", { type: "set", value, data: value });
       }
       return;
     }
@@ -217,8 +247,10 @@ export class CloudClient implements VariableStore {
 
     for (let i = 0; i < replaceCount; i++) {
       const currentKey = oldArr[prefix + i].key;
-      diffs.push({ type: 'replace', index: prefix + i, data: newArr[prefix + i].data, key: currentKey });
+      const newKey = this.generateKey();
+      diffs.push({ type: 'replace', index: prefix + i, data: newArr[prefix + i].data, key: currentKey, newKey });
       oldArr[prefix + i].data = newArr[prefix + i].data;
+      oldArr[prefix + i].key = newKey;
     }
 
     const remainingDelete = deleteCount - replaceCount;
@@ -247,10 +279,10 @@ export class CloudClient implements VariableStore {
     if (this.ws?.readyState === WebSocket.OPEN) {
       const entryId = this.entropyIdToEntryId.get(entropyId);
       const _id = this.variableMongoIds.get(entropyId);
-      if (!entryId || !_id) return;
+      if (!entryId) return;
 
       const payload = '42' + (this.msgId++) + JSON.stringify(["action", {
-        _id,
+        ...(_id ? { _id } : {}),
         id: entryId,
         variableType,
         ...actionData
