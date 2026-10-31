@@ -84,8 +84,6 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
   apply.type = 'button'; apply.textContent = '실행에 적용';
   apply.title = '수정한 블록을 실행 중인 작품에 적용합니다.';
   panel.append(label, apply);
-  const host = [playground.boardView_, playground.codeView_, workspace.board.wrapper, playground.view_]
-    .find(node => node?.namespaceURI === 'http://www.w3.org/1999/xhtml') ?? playground.view_;
   const session: LiveEditing = { work, applied: false, restore };
   const signature = (code: any, type: unknown) => {
     const header = code.toJSON().find((stack: any[]) => /^function_create(?:_value)?$/.test(stack[0]?.type))?.[0];
@@ -211,7 +209,7 @@ export function beginLiveEditing(entry: any, work: EntryWork, runtime: () => Vm 
     replace(playground, 'injectCode', inject);
     if (typeof initEdit === 'function') replace(functionEditor, 'initEditView', edit);
     if (typeof endEdit === 'function') replace(functionEditor, 'endEdit', end);
-    host.append(panel);
+    playground.view_.append(panel);
     // Native function deletion/signature changes rewrite call blocks throughout
     // the project, including unopened originals. Keep those operations out of a run.
     for (const name of ['createFunction', 'removeFunction', 'appendFunctions']) guard(entry.variableContainer, name, () => true);

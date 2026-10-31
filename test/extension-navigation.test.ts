@@ -146,6 +146,30 @@ for (const mode of ['extension', 'userscript'] as const) {
     assert.equal(frame.parentElement!.style.position, 'relative');
   });
 
+  test(`${mode}: replacing the player while leaving another host child disposes the old player`, async t => {
+    const { w, mounted, settle } = await setup(t, mode);
+    const host = mounted[0]!.host;
+    const other = w.document.createElement('span'); host.append(other);
+    host.querySelector('.entropy-player')!.remove(); await settle();
+    assert.equal(mounted[0]!.disposed, true);
+    assert.equal(mounted.length, 2);
+    if (mode === 'extension') assert.equal(other.parentElement, host);
+    assert.equal(w.document.querySelectorAll('.entropy-player').length, 1);
+  });
+
+  test(`${mode}: navigation drops the old player even while its iframe remains connected`, async t => {
+    const { w, frame, mounted, settle } = await setup(t, mode);
+    w.history.pushState({}, '', '/');
+    w.document.body.append(w.document.createElement('span'));
+    await settle();
+    assert.equal(frame.isConnected, true);
+    assert.equal(mounted[0]!.disposed, true);
+    assert.equal(w.document.querySelectorAll('.entropy-player').length, 0);
+    w.history.pushState({}, '', '/project/second');
+    frame.src = '/iframe/second'; await settle();
+    assert.deepEqual(mounted.filter(item => !item.disposed).map(item => item.id), ['second']);
+  });
+
   test(`${mode}: repeated page replacements retain positioning and restore the original style`, async t => {
     const { w, frame, mounted, settle } = await setup(t, mode);
     const parent = frame.parentElement!;
@@ -201,3 +225,35 @@ for (const mode of ['extension', 'userscript'] as const) {
     assert.equal(parent.style.position, 'fixed', 'later page styles belong to the page');
   });
 }
+
+test('a player releases its timer when its root disappears or the page changes', async t => {
+  const dom = new JSDOM('<!doctype html><div id="host"></div>', { url: 'https://example.test/project/first', runScripts: 'outside-only' });
+  const w = dom.window;
+  t.after(() => w.close());
+  const timers = new Map<number, () => void>();
+  let next = 0;
+  w.setInterval = ((callback: () => void) => { timers.set(++next, callback); return next; }) as never;
+  w.clearInterval = ((id: number) => { timers.delete(id); }) as never;
+  const source = stripTypes(fs.readFileSync(new URL('../packages/extension/src/page/player.ts', import.meta.url), 'utf8'))
+    .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+  w.eval(`(() => {
+    const ASK_FIELD_STYLE='', CHART_WINDOW_STYLE='', EXTRAS_DIALOG_STYLE='';
+    const setAssetCache=()=>{}, fetchWork=()=>new Promise(()=>{});
+    ${source}
+    window.testMount=()=>mountPlayer(document.getElementById('host'), 'first');
+    window.testPlayer=window.testMount();
+  })()`);
+  const player = (w as any).testPlayer;
+  assert.equal(player.isConnected, true);
+  assert.equal(timers.size, 1);
+  w.document.querySelector('.entropy-player')!.remove();
+  for (const tick of timers.values()) tick();
+  assert.equal(player.isConnected, false);
+  assert.equal(timers.size, 0);
+  assert.equal(w.document.getElementById('host')!.isConnected, true);
+  const nextPlayer = (w as any).testMount();
+  w.history.pushState({}, '', '/');
+  for (const tick of timers.values()) tick();
+  assert.equal(nextPlayer.isConnected, false);
+  assert.equal(timers.size, 0);
+});

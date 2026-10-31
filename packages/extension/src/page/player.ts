@@ -178,6 +178,7 @@ export function mountPlayer(
   setAssetCache(cacheAssets);
   ensureStageStyle();
   const root = el("div", "entropy-player is-idle", host);
+  const pagePath = location.pathname;
   // Capture work keys only inside the player so page inputs remain usable.
   root.tabIndex = 0;
 
@@ -282,7 +283,7 @@ export function mountPlayer(
 
   // Also check whether navigation removed the player while updating the readout.
   const timer = window.setInterval(() => {
-    if (!host.isConnected) {
+    if (location.pathname !== pagePath || !root.isConnected || root.parentElement !== host) {
       dispose();
       return;
     }

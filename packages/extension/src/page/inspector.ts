@@ -4,7 +4,7 @@ import type { Entity, Target } from '../../../vm/src/runtime/model.ts';
 const HOST = '.css-hxgsd9.e1edvhig3';
 const ROW = 28;
 const STYLE = `
-.entropy-inspector { --ti-accent:#b82168; --ti-line:#20283818; --ti-soft:#b8216810; box-sizing:border-box; display:flex; flex-direction:column; width:100%; min-width:0; min-height:220px; margin:0 0 10px; border:1px solid var(--ti-line); border-radius:12px; background:linear-gradient(180deg,#fff 0,#fbfcff 100%); box-shadow:0 8px 28px #17213a18; color:#20242c; color-scheme:light; font:12px/1.45 system-ui,sans-serif; text-align:left; overflow:hidden; }
+.entropy-inspector { --ti-accent:#b82168; --ti-line:#20283818; --ti-soft:#b8216810; box-sizing:border-box; display:flex; flex-direction:column; width:100%; min-width:0; min-height:220px; max-height:calc(100vh - 16px); margin:0 0 10px; border:1px solid var(--ti-line); border-radius:12px; background:linear-gradient(180deg,#fff 0,#fbfcff 100%); box-shadow:0 8px 28px #17213a18; color:#20242c; color-scheme:light; font:12px/1.45 system-ui,sans-serif; text-align:left; overflow:hidden; }
 .entropy-inspector[hidden] { display:none!important; }
 .entropy-inspector .ti-head { position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:5px; flex:none; min-height:38px; padding:5px 7px 5px 11px; border-bottom:1px solid var(--ti-line); background:#ffffffea; backdrop-filter:blur(12px); cursor:grab; user-select:none; touch-action:none; }
 .entropy-inspector .ti-head strong { flex:1; font-size:13px; font-weight:700; letter-spacing:-.01em; }
@@ -18,18 +18,19 @@ const STYLE = `
 .entropy-inspector label { display:flex; align-items:center; gap:5px; cursor:pointer; }
 .entropy-inspector input { margin:0; }
 .entropy-inspector .ti-status { flex:none; margin:7px 1px 5px; color:#6a7280; font-size:11px; font-variant-numeric:tabular-nums; }
-.entropy-inspector .ti-tree { flex:1 1 auto; min-height:80px; overflow:auto; overscroll-behavior:contain; }
+.entropy-inspector .ti-tree { flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; }
 .entropy-inspector .ti-target { margin-left:12px; }
 .entropy-inspector .ti-target > summary { display:flex; align-items:center; gap:4px; padding:0; }
 .entropy-inspector .ti-target > summary::before { content:'▸'; width:12px; flex:none; }
 .entropy-inspector .ti-target[open] > summary::before { content:'▾'; }
 .entropy-inspector .ti-entity { flex:1; min-width:0; width:100%; height:28px; border:0; padding:3px 7px; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:transparent; }
 .entropy-inspector .ti-entity[aria-pressed=true] { background:#b8216815; box-shadow:inset 3px 0 var(--ti-accent); color:var(--ti-accent); font-weight:650; }
-.entropy-inspector .ti-clones { position:relative; max-height:224px; overflow:auto; margin-left:18px; overscroll-behavior:contain; }
+.entropy-inspector .ti-clones { position:relative; margin-left:18px; }
 .entropy-inspector .ti-clone-space { position:relative; }
 .entropy-inspector .ti-clone-space > button { position:absolute; left:0; }
-.entropy-inspector .ti-info { flex:none; margin:7px 0 0; padding:7px 3px 2px; border-top:1px solid var(--ti-line); max-height:180px; overflow:auto; color:#4d5562; font:11px/1.55 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
-.entropy-inspector .ti-resize { flex:none; height:9px; margin:0 -9px -7px; cursor:ns-resize; touch-action:none; }
+.entropy-inspector .ti-info { margin:7px 0 0; padding:7px 3px 2px; border-top:1px solid var(--ti-line); color:#4d5562; font:11px/1.55 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+.entropy-inspector .ti-resize { flex:none; height:16px; cursor:ns-resize; touch-action:none; display:grid; place-items:center; }
+.entropy-inspector .ti-resize::after { content:''; width:36px; height:3px; border-radius:2px; background:#9aa4b5; }
 .entropy-inspector .ti-resize:hover { background:#b8216824; }
 .entropy-inspector.ti-floating { position:absolute; right:8px; top:8px; z-index:20; width:min(340px,calc(100% - 16px)); margin:0; max-height:calc(100% - 16px); }
 .entropy-inspector.ti-detached { position:fixed; z-index:2147483646; width:min(340px,calc(100vw - 16px)); max-height:calc(100vh - 16px); }
@@ -40,7 +41,6 @@ interface Branch {
   target: Target;
   root: HTMLDetailsElement;
   label: HTMLButtonElement;
-  clones: HTMLDivElement;
   space: HTMLDivElement;
   rows: HTMLButtonElement[];
 }
@@ -67,19 +67,26 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
   button('진단 파일', () => live.downloadDiagnostics());
   const pickButton = button('화면에서 선택', () => setPicking(!picking));
   pickButton.setAttribute('aria-pressed', 'false');
-  const boundsLabel = document.createElement('label');
-  const bounds = document.createElement('input'); bounds.type = 'checkbox';
-  boundsLabel.append(bounds, '전체 경계'); tools.appendChild(boundsLabel);
+  let showBounds = false;
+  const bounds = button('전체 경계', () => {
+    showBounds = !showBounds;
+    bounds.setAttribute('aria-pressed', String(showBounds));
+    highlight();
+  });
+  bounds.setAttribute('aria-pressed', 'false');
   button('선택 해제', () => { selected = null; hovered = null; update(); });
   const status = document.createElement('p'); status.className = 'ti-status'; body.appendChild(status);
   const tree = document.createElement('div'); tree.className = 'ti-tree';
   tree.setAttribute('aria-label', '장면·오브젝트·클론'); body.appendChild(tree);
   const info = document.createElement('pre'); info.className = 'ti-info';
-  info.setAttribute('aria-live', 'off'); body.appendChild(info);
+  info.setAttribute('aria-live', 'off');
   const heightHandle = document.createElement('div'); heightHandle.className = 'ti-resize';
   heightHandle.setAttribute('role', 'separator'); heightHandle.setAttribute('aria-orientation', 'horizontal');
-  heightHandle.title = '드래그해서 높이 조절 · 두 번 눌러 자동 높이로 복원'; body.appendChild(heightHandle);
+  heightHandle.setAttribute('aria-label', '디버거 높이'); heightHandle.tabIndex = 0;
+  heightHandle.title = '드래그하거나 방향키로 높이 조절 · 두 번 눌러 자동 높이로 복원'; panel.appendChild(heightHandle);
   const branches: Branch[] = [];
+  const scenes = new Map<string, HTMLDetailsElement>();
+  let lastScene: string | null = null;
   const entities = new WeakMap<HTMLButtonElement, Entity>();
   let selected: Entity | null = null;
   let hovered: Entity | null = null;
@@ -122,11 +129,12 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
   const drawClones = (branch: Branch) => {
     const clones = branch.target.clones;
     const total = clones.length;
-    const height = Math.min(224, total * ROW);
-    branch.clones.style.height = `${height}px`;
     branch.space.style.height = `${total * ROW}px`;
-    const first = Math.max(0, Math.min(total - 1, Math.floor(branch.clones.scrollTop / ROW) - 2));
-    const count = Math.min(Math.max(0, total - first), Math.ceil(height / ROW) + 4);
+    const top = tree.getBoundingClientRect().top - branch.space.getBoundingClientRect().top;
+    const bottom = top + (tree.clientHeight || 224);
+    const first = Math.min(total, Math.max(0, Math.floor(top / ROW) - 2));
+    const end = Math.min(total, Math.max(first, Math.ceil(bottom / ROW) + 2));
+    const count = end - first;
     while (branch.rows.length > count) branch.rows.pop()!.remove();
     while (branch.rows.length < count) {
       const row = entityButton(); branch.rows.push(row); branch.space.appendChild(row);
@@ -134,12 +142,14 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
     branch.rows.forEach((row, index) => {
       const at = first + index;
       const clone = clones[at];
+      if (document.activeElement === row && entities.get(row) !== clone) row.blur();
       bind(row, clone, `클론 ${at + 1} · ${clone.id}${clone.visible ? '' : ' · 숨김'}`);
       row.style.top = `${at * ROW}px`;
     });
   };
   for (const scene of vm.scenes) {
     const group = document.createElement('details'); group.open = scene.id === vm.currentSceneId;
+    scenes.set(scene.id, group);
     const summary = document.createElement('summary'); text(summary, scene.name); group.appendChild(summary);
     tree.appendChild(group);
     group.addEventListener('toggle', () => { if (active) update(); });
@@ -153,15 +163,24 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
       const clones = document.createElement('div'); clones.className = 'ti-clones';
       const space = document.createElement('div'); space.className = 'ti-clone-space';
       clones.appendChild(space); root.appendChild(clones); group.appendChild(root);
-      const branch = { target, root, label, clones, space, rows: [] };
+      const branch = { target, root, label, space, rows: [] };
       branches.push(branch);
-      clones.addEventListener('scroll', () => { if (active) drawClones(branch); }, { passive: true });
       root.addEventListener('toggle', () => { if (active) update(); });
     }
   }
+  tree.appendChild(info);
+  const drawVisibleClones = () => {
+    if (!active) return;
+    for (const branch of branches) {
+      if (branch.root.open && (branch.root.parentElement as HTMLDetailsElement).open) drawClones(branch);
+    }
+  };
+  tree.addEventListener('scroll', drawVisibleClones, { passive: true });
+  const treeResize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(drawVisibleClones);
+  treeResize?.observe(tree);
 
   const highlight = () => {
-    renderer.setInspection(active ? valid(hovered) ?? valid(selected) : null, active && bounds.checked);
+    renderer.setInspection(active ? valid(hovered) ?? valid(selected) : null, showBounds);
     if (vm.state !== 'run') renderer.flush();
   };
   const entityAt = (target: EventTarget | null) => {
@@ -172,7 +191,15 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
   tree.addEventListener('pointerleave', () => { hovered = null; if (active) highlight(); });
   tree.addEventListener('focusin', event => { hovered = entityAt(event.target); if (active) highlight(); });
   tree.addEventListener('focusout', () => { hovered = null; if (active) highlight(); });
-  bounds.onchange = highlight;
+  tree.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const entity = entityAt(event.target);
+    if (!entity?.isClone) return;
+    const index = entity.target.clones.indexOf(entity);
+    const next = entity.target.clones[index + (event.key === 'ArrowDown' ? 1 : -1)];
+    if (!next || index < 0) return;
+    event.preventDefault(); reveal(next);
+  });
 
   function setPicking(on: boolean) {
     picking = on;
@@ -189,9 +216,15 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
     (branch.root.parentElement as HTMLDetailsElement).open = true;
     if (entity.isClone) {
       branch.root.open = true;
-      branch.clones.scrollTop = Math.max(0, entity.target.clones.indexOf(entity)) * ROW;
     }
     update();
+    if (entity.isClone) {
+      const index = entity.target.clones.indexOf(entity);
+      if (index < 0) return;
+      const top = branch.space.getBoundingClientRect().top - tree.getBoundingClientRect().top + index * ROW;
+      if (top < 0 || top + ROW > tree.clientHeight) tree.scrollTop += top;
+      drawClones(branch);
+    }
     const row = entity.isClone ? branch.rows.find(row => entities.get(row) === entity) : branch.label;
     row?.scrollIntoView?.({ block: 'nearest' });
     row?.focus({ preventScroll: true });
@@ -229,7 +262,7 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
     const rect = local ? player.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
     position = {
       left: Math.max(8, Math.min(left, rect.width - panel.offsetWidth - 8)),
-      top: Math.max(8, Math.min(top, rect.height - panel.offsetHeight - 8)),
+      top: Math.max(8, Math.min(top, rect.height - (title.offsetHeight || 38) - 8)),
     };
     panel.style.left = `${position.left}px`; panel.style.top = `${position.top}px`; panel.style.right = 'auto';
   }
@@ -291,9 +324,26 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
     event.preventDefault();
   });
   heightHandle.addEventListener('dblclick', () => { panel.style.height = ''; });
+  heightHandle.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    const local = panel.parentElement === player;
+    const available = local ? player.getBoundingClientRect().height : window.innerHeight;
+    const height = panel.getBoundingClientRect().height + (event.key === 'ArrowDown' ? 20 : -20);
+    panel.style.height = `${Math.max(220, Math.min(available - 16, height))}px`;
+    if (position) place(position.left, position.top);
+    event.preventDefault();
+  });
 
   function update() {
     if (!active) return;
+    if (lastScene !== vm.currentSceneId) {
+      lastScene = vm.currentSceneId;
+      const current = scenes.get(lastScene);
+      if (current) current.open = true;
+      for (const branch of branches.filter(branch => branch.target.sceneId === lastScene && branch.target.clones.length).slice(0, 3)) {
+        branch.root.open = true;
+      }
+    }
     selected = valid(selected); hovered = valid(hovered);
     let cloneCount = 0;
     for (const branch of branches) {
@@ -336,7 +386,7 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
   observer?.observe(panel);
 
   function syncHost() {
-    if (disposed) return;
+    if (disposed || !player.isConnected) return;
     const now = performance.now();
     if (now - hostAt < 1000) return;
     hostAt = now;
@@ -357,10 +407,10 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
   return {
     syncHost,
     get enabled() { return !panel.hidden; },
-    open() { panel.hidden = false; hostAt = -Infinity; syncHost(); panel.scrollIntoView?.({ block: 'nearest' }); activity(); },
+    open() { panel.hidden = false; lastScene = null; hostAt = -Infinity; syncHost(); panel.scrollIntoView?.({ block: 'nearest' }); activity(); },
     toggle() {
       panel.hidden = !panel.hidden;
-      if (!panel.hidden) { hostAt = -Infinity; syncHost(); }
+      if (!panel.hidden) { lastScene = null; hostAt = -Infinity; syncHost(); }
       activity();
     },
     dispose() {
@@ -368,6 +418,7 @@ export function mountInspector(player: HTMLElement, live: EntropyHandle) {
       disposed = true; active = false; window.clearInterval(timer);
       endDrag(); endHeight(); setPicking(false);
       observer?.disconnect();
+      treeResize?.disconnect();
       document.removeEventListener('visibilitychange', activity);
       document.removeEventListener('fullscreenchange', fullscreen);
       window.removeEventListener('resize', resize);

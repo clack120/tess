@@ -1,17 +1,13 @@
-name: Idle release
+name: Release
 
 on:
-  schedule:
-    # A two-hour poll is the cheapest practical schedule. Sleeping in a runner
-    # would consume the whole quiet period as billable Actions time.
-    - cron: "17 */2 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: idle-release
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -19,11 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Check idle time and existing release
+      - name: Check existing release
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           release_tag="build-${GITHUB_SHA:0:16}"
           echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
@@ -31,18 +26,6 @@ jobs:
             echo "This commit already has a release."
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
-          fi
-
-          if [ "$EVENT_NAME" = "schedule" ]; then
-            pushed_at="$(gh api "repos/$GITHUB_REPOSITORY" --jq .pushed_at)"
-            pushed_epoch="$(date -u -d "$pushed_at" +%s)"
-            now_epoch="$(date -u +%s)"
-            age="$((now_epoch - pushed_epoch))"
-            if [ "$age" -lt 7200 ]; then
-              echo "The last push was ${age}s ago; waiting for 7200s."
-              echo "ready=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
           fi
 
           echo "ready=true" >> "$GITHUB_OUTPUT"

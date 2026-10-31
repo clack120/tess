@@ -44,6 +44,108 @@ function setup() {
     hold: () => { held = true; }, holdUnload: () => { holdUnload = true; } };
 }
 
+test('inspection reuses unchanged bounds and redraws movement, scene changes and removals', () => {
+  const { create, context } = setup();
+  let now = 1000;
+  context.performance = { now: () => now };
+  context.entityBounds = (entity: any, out: any) => Object.assign(out, entity.rect);
+  const renderer = create();
+  const drawn: number[][] = [];
+  let clears = 0, strokes = 0;
+  const bounds = { clear() { clears++; drawn.length = 0; }, rect(...args: number[]) { drawn.push(args); }, stroke() { strokes++; } };
+  const clones = { clear() {}, rect() {}, stroke() {} };
+  const rotated = { clear() {}, moveTo() {}, lineTo() {}, closePath() {}, stroke() {} };
+  const highlight = { clear() {}, rect() {}, fill() {}, stroke() {} };
+  renderer.inspection = { entity: null, bounds, clones, rotated, highlight, all: true, at: -Infinity, rectangles: new Float64Array(0), count: 0 };
+  renderer.sceneLayers.set('scene', { visible: true });
+  const entity = { target: { sceneId: 'scene' }, removed: false, rect: { x: 10, y: 20, width: 30, height: 40 } };
+  renderer.views.set(entity, {});
+  const tick = () => { renderer.inspection.at = -Infinity; renderer.drawInspection(); };
+  tick(); assert.equal(clears, 1); assert.deepEqual(drawn, [[10, 20, 30, 40]]);
+  tick(); assert.equal(clears, 1); assert.equal(strokes, 1);
+  entity.rect.x = 11; now += 20; renderer.drawInspection(); assert.equal(clears, 1);
+  now += 15; renderer.drawInspection(); assert.equal(clears, 2); assert.deepEqual(drawn, [[11, 20, 30, 40]]);
+  entity.rect.x = 50; tick(); assert.equal(clears, 3); assert.deepEqual(drawn, [[50, 20, 30, 40]]);
+  renderer.sceneLayers.get('scene').visible = false; tick(); assert.equal(clears, 4); assert.deepEqual(drawn, []);
+  renderer.sceneLayers.get('scene').visible = true; tick(); assert.equal(clears, 5);
+  entity.removed = true; tick(); assert.equal(clears, 6); assert.deepEqual(drawn, []);
+  const first = { target: entity.target, removed: false, rect: { x: 1, y: 2, width: 3, height: 4 } };
+  const second = { target: entity.target, removed: false, rect: { x: 5, y: 6, width: 7, height: 8 } };
+  renderer.views.set(first, {}); renderer.views.set(second, {});
+  tick(); assert.deepEqual(drawn, [[1, 2, 3, 4], [5, 6, 7, 8]]);
+  second.rect.x = 9; tick(); assert.deepEqual(drawn, [[1, 2, 3, 4], [9, 6, 7, 8]]);
+  first.removed = true; tick(); assert.deepEqual(drawn, [[9, 6, 7, 8]]);
+  renderer.inspection.all = false; tick(); assert.deepEqual(drawn, []);
+  renderer.inspection.all = true; tick(); assert.deepEqual(drawn, [[9, 6, 7, 8]]);
+});
+
+test('inspection follows rotated object corners even when the enclosing bounds stay unchanged', () => {
+  const { create, context } = setup();
+  context.performance = { now: () => 1000 };
+  context.entityBounds = (entity: any, out: any) => Object.assign(out, entity.rect);
+  const renderer = create();
+  const paths: number[][] = [];
+  let clears = 0;
+  const bounds = { clear() {}, rect() {}, stroke() {} };
+  const clones = { clear() {}, rect() {}, stroke() {} };
+  const rotated = {
+    clear() { clears++; paths.length = 0; },
+    moveTo(x: number, y: number) { paths.push([x, y]); },
+    lineTo(x: number, y: number) { paths[paths.length - 1]!.push(x, y); },
+    closePath() {}, stroke() {},
+  };
+  const highlight = { clear() {}, rect() {}, fill() {}, stroke() {} };
+  renderer.inspection = { entity: null, bounds, clones, rotated, highlight, all: true, at: -Infinity, rectangles: new Float64Array(0), count: 0 };
+  renderer.sceneLayers.set('scene', { visible: true });
+  let matrix = [1, 1, -1, 1, 50, 20];
+  const entity = { target: { sceneId: 'scene' }, removed: false, rotation: 45, type: 'sprite', width: 10, height: 20,
+    lineBreak: false, textAlign: 1, rect: { x: 30, y: 20, width: 30, height: 30 },
+    worldMatrix(out: Float64Array) { out.set(matrix); return out; } };
+  renderer.views.set(entity, {});
+  const tick = () => { renderer.inspection.at = -Infinity; renderer.drawInspection(); };
+  tick(); assert.deepEqual(paths, [[50, 20, 60, 30, 40, 50, 30, 40]]);
+  tick(); assert.equal(clears, 1);
+  matrix = [1, -1, 1, 1, 30, 30]; entity.rotation = -45;
+  tick(); assert.deepEqual(paths, [[30, 30, 40, 20, 60, 40, 50, 50]]);
+  entity.type = 'textBox';
+  tick(); assert.deepEqual(paths, [[20, 20, 30, 10, 50, 30, 40, 40]]);
+  entity.rotation = 90; tick(); assert.deepEqual(paths, []);
+  tick(); assert.equal(clears, 4);
+});
+
+test('inspection separates original and clone bounds and updates their cached styles', () => {
+  const { create, context } = setup();
+  context.performance = { now: () => 1000 };
+  context.entityBounds = (entity: any, out: any) => Object.assign(out, entity.rect);
+  const renderer = create();
+  const originalRects: number[][] = [], cloneRects: number[][] = [];
+  const colors: number[] = [];
+  let clears = 0;
+  const bounds = { clear() { clears++; originalRects.length = 0; }, rect(...args: number[]) { originalRects.push(args); }, stroke(style: any) { colors.push(style.color); } };
+  const clones = { clear() { cloneRects.length = 0; }, rect(...args: number[]) { cloneRects.push(args); }, stroke(style: any) { colors.push(style.color); } };
+  const rotated = { clear() {}, moveTo() {}, lineTo() {}, closePath() {}, stroke() {} };
+  const highlight = { clear() {}, rect() {}, fill() {}, stroke() {} };
+  renderer.inspection = { entity: null, bounds, clones, rotated, highlight, all: true, at: -Infinity, rectangles: new Float64Array(0), count: 0 };
+  renderer.sceneLayers.set('scene', { visible: true });
+  const first = { target: { sceneId: 'scene' }, isClone: false, rect: { x: 1, y: 2, width: 3, height: 4 } };
+  const second = { target: first.target, isClone: true, rect: { x: 5, y: 6, width: 7, height: 8 } };
+  renderer.views.set(first, {}); renderer.views.set(second, {});
+  const tick = () => { renderer.inspection.at = -Infinity; renderer.drawInspection(); };
+  tick();
+  assert.deepEqual(originalRects, [[1, 2, 3, 4]]);
+  assert.deepEqual(cloneRects, [[5, 6, 7, 8]]);
+  assert.deepEqual(colors, [0x3488cf, 0x45b96b]);
+  tick(); assert.equal(clears, 1);
+  second.isClone = false; tick();
+  assert.deepEqual(originalRects, [[1, 2, 3, 4], [5, 6, 7, 8]]);
+  assert.deepEqual(cloneRects, []);
+  second.isClone = true; first.isClone = true; tick();
+  assert.deepEqual(originalRects, []);
+  assert.deepEqual(cloneRects, [[1, 2, 3, 4], [5, 6, 7, 8]]);
+  renderer.views.delete(first); renderer.views.delete(second); tick();
+  assert.deepEqual(cloneRects, []);
+});
+
 test('raster textures survive other runners and leave the shared cache when the last runner closes', async () => {
   const { create, picture, cache, aliases, unloads, settle } = setup();
   for (let i = 0; i < 40; i++) {
