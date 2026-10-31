@@ -53,7 +53,7 @@ test('local archives accept JSON larger than the server save limit without compa
   const project = { name: 'large', text: '한'.repeat(5_600_000), script: '[[{"readOnly":null,"params":[]}]]' };
   const entries = await readTar(await archive(project, new Map()));
   const json = entries[0]!.data;
-  assert.ok(json.length > 16_737_823);
+  assert.ok(json.length > 16_730_000);
   const restored = JSON.parse(json.toString());
   assert.equal(restored.text, project.text); assert.equal(restored.script, project.script);
 });

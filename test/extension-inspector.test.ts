@@ -38,6 +38,11 @@ function setup(t: any) {
       canvasRect: () => ({ left: 20, top: 30, width: 320, height: 180 }) },
     inspect: () => inspected++, downloadDiagnostics: () => downloaded++,
   } as never);
+  const tree = window.document.querySelector<HTMLElement>('.ti-tree')!;
+  Object.defineProperty(tree, 'clientHeight', { value: 224, configurable: true });
+  for (const space of tree.querySelectorAll<HTMLElement>('.ti-clone-space')) {
+    space.getBoundingClientRect = () => ({ top: -tree.scrollTop }) as DOMRect;
+  }
   t.after(() => { inspector.dispose(); window.close(); for (const [key, value] of previous) scope[key] = value; });
   return { window, vm, inspector, timers, calls, visibility: (visible: boolean) => visibility!([{ isIntersecting: visible }]),
     inspected: () => inspected, downloaded: () => downloaded,
@@ -53,17 +58,25 @@ test('Entry inspector preserves its host and virtualizes live clones without idl
   assert.equal(timers.size, 0);
   inspector.open();
   assert.equal(panel.hidden, false);
+  assert.equal(panel.querySelector('.ti-info')!.parentElement, panel.querySelector('.ti-tree'));
   assert.equal(timers.size, 1);
   assert.match(panel.querySelector('.ti-status')!.textContent!, /클론 2000/);
   const branch = panel.querySelector<HTMLDetailsElement>('.ti-target')!;
+  assert.equal(branch.open, true);
   branch.open = true; branch.dispatchEvent(new window.Event('toggle'));
   assert.ok(panel.querySelectorAll('.ti-clone-space button').length <= 12);
-  assert.equal(panel.querySelectorAll('.ti-entity').length, 14);
-  const list = branch.querySelector<HTMLElement>('.ti-clones')!;
+  assert.equal(panel.querySelectorAll('.ti-entity').length, 12);
+  const list = panel.querySelector<HTMLElement>('.ti-tree')!;
+  assert.equal(branch.querySelector<HTMLElement>('.ti-clone-space')!.style.height, '56000px');
   list.scrollTop = 1990 * 28; list.dispatchEvent(new window.Event('scroll'));
   const last = branch.querySelector<HTMLButtonElement>('.ti-clone-space button:last-child')!;
   assert.match(last.textContent!, /클론 2000/);
   last.click();
+  assert.equal(calls.at(-1)![0], vm.targets[0]!.clones[1999]);
+  last.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+  assert.equal(calls.at(-1)![0], vm.targets[0]!.clones[1998]);
+  const selected = branch.querySelector<HTMLButtonElement>('.ti-clone-space [aria-pressed=true]')!;
+  selected.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
   assert.equal(calls.at(-1)![0], vm.targets[0]!.clones[1999]);
   vm.targets[0]!.clones[1999].removeClone();
   for (const tick of timers.values()) tick();
@@ -98,13 +111,14 @@ test('Entry inspector highlights hover, exposes diagnostics and sleeps offscreen
   row.click();
   assert.match(panel.querySelector('.ti-info')!.textContent!, /<actor>/);
   assert.equal(panel.querySelector('actor'), null);
-  const bounds = panel.querySelector<HTMLInputElement>('input')!;
-  bounds.checked = true; bounds.dispatchEvent(new window.Event('change'));
+  const bounds = [...panel.querySelectorAll('button')].find(button => button.textContent === '전체 경계')!;
+  bounds.click();
+  assert.equal(bounds.getAttribute('aria-pressed'), 'true');
   assert.equal(calls.at(-1)![1], true);
   const tools = panel.querySelectorAll<HTMLButtonElement>('.ti-tools button');
   tools[0]!.click(); tools[1]!.click();
   assert.equal(inspected(), 1); assert.equal(downloaded(), 1);
-  visibility(false); assert.equal(timers.size, 0); assert.deepEqual(calls.at(-1), [null, false]);
+  visibility(false); assert.equal(timers.size, 0); assert.deepEqual(calls.at(-1), [null, true]);
   visibility(true); assert.equal(timers.size, 1);
   Object.defineProperty(window.document, 'hidden', { configurable: true, value: true });
   window.document.dispatchEvent(new window.Event('visibilitychange'));
@@ -114,6 +128,29 @@ test('Entry inspector highlights hover, exposes diagnostics and sleeps offscreen
   assert.equal(timers.size, 1);
   inspector.dispose();
   assert.equal(timers.size, 0); assert.equal(window.document.querySelector('.entropy-inspector'), null);
+});
+
+test('opening follows the current scene and closing keeps the bounds overlay', t => {
+  const { vm, inspector, panel, calls, timers } = setup(t);
+  vm.currentSceneId = 'other';
+  inspector.open();
+  const groups = panel.querySelectorAll<HTMLDetailsElement>('.ti-tree > details');
+  assert.equal(groups[1]!.open, true);
+  groups[1]!.open = false;
+  inspector.toggle();
+  inspector.open();
+  assert.equal(groups[1]!.open, true);
+  vm.currentSceneId = 's'; groups[0]!.open = false;
+  for (const tick of timers.values()) tick();
+  assert.equal(groups[0]!.open, true);
+  const bounds = [...panel.querySelectorAll('button')].find(button => button.textContent === '전체 경계')!;
+  bounds.click();
+  panel.querySelector<HTMLButtonElement>('[aria-label="디버그 끄기"]')!.click();
+  assert.deepEqual(calls.at(-1), [null, true]);
+  inspector.open();
+  assert.equal(bounds.getAttribute('aria-pressed'), 'true');
+  bounds.click();
+  assert.deepEqual(calls.at(-1), [null, false]);
 });
 
 test('Entry inspector follows fullscreen and falls back when the dock is replaced', t => {
@@ -135,6 +172,19 @@ test('Entry inspector follows fullscreen and falls back when the dock is replace
   assert.equal(timers.size, 1);
   inspector.dispose(); inspector.dispose();
   assert.equal(timers.size, 0);
+});
+
+test('a detached player cannot move its inspector into the next page', t => {
+  const { window, inspector, panel } = setup(t);
+  inspector.open();
+  const player = window.document.getElementById('player')!;
+  player.remove();
+  panel.remove();
+  window.document.dispatchEvent(new window.Event('fullscreenchange'));
+  assert.equal(panel.isConnected, false);
+  inspector.syncHost();
+  assert.equal(panel.isConnected, false);
+  inspector.dispose();
 });
 
 function pointer(window: any, target: EventTarget, type: string, x: number, y: number) {
@@ -193,10 +243,10 @@ test('the inspector can undock by dragging, stay onscreen, return to its host, a
   assert.equal(panel.parentElement, window.document.body);
   assert.equal(panel.style.left, '140px'); assert.equal(panel.style.top, '130px');
   pointer(window, window.document, 'pointermove', 10000, 10000);
-  assert.equal(panel.style.left, '696px'); assert.equal(panel.style.top, '560px');
+  assert.equal(panel.style.left, '696px'); assert.equal(panel.style.top, '722px');
   pointer(window, window.document, 'pointerup', 10000, 10000);
   pointer(window, window.document, 'pointermove', 0, 0);
-  assert.equal(panel.style.left, '696px');
+  assert.equal(panel.style.left, '696px'); assert.equal(panel.style.top, '722px');
   panel.querySelector<HTMLButtonElement>('[aria-label="원래 위치로"]')!.click();
   assert.equal(panel.parentElement!.className, 'css-hxgsd9 e1edvhig3');
   assert.equal(panel.parentElement!.firstElementChild, panel);
@@ -218,4 +268,8 @@ test('the inspector height can be dragged and double-clicked back to automatic',
 
   handle.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
   assert.equal(panel.style.height, '');
+  assert.equal(handle.parentElement, panel);
+  panel.getBoundingClientRect = () => ({ left: 0, top: 0, width: 320, height: 220 }) as DOMRect;
+  handle.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  assert.equal(panel.style.height, '240px');
 });

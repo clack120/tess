@@ -9,6 +9,7 @@ interface Held {
   // Restore the original iframe URL when disabling the extension.
   src: string;
   id: string;
+  path: string;
   host: HTMLElement | null;
   // Remember positioning changes so removing the player can restore the parent.
   releasePosition: (() => void) | null;
@@ -20,6 +21,7 @@ let cache = false;
 let cacheClear = 0;
 let escape = true;
 let injected = false;
+let lastPath = location.pathname;
 const held: Held[] = [];
 
 function idOf(src: string): string | null {
@@ -60,6 +62,13 @@ function capture(item: Held): void {
 }
 
 function mount(item: Held): void {
+  if (item.path !== location.pathname) {
+    if (item.host) {
+      removeHost(item);
+      window.postMessage({ __entropy: 'scan' }, location.origin);
+    }
+    return;
+  }
   capture(item);
   const parent = item.frame.parentElement;
   if (!parent) return;
@@ -70,7 +79,7 @@ function mount(item: Held): void {
       item.frame.after(item.host);
     }
     // A page update can clear the player while leaving its host attached.
-    if (!item.host.firstChild) window.postMessage({ __entropy: 'scan' }, location.origin);
+    if (!item.host.querySelector(':scope > .entropy-player')) window.postMessage({ __entropy: 'scan' }, location.origin);
     return;
   }
   item.releasePosition?.();
@@ -149,11 +158,11 @@ function hold(frame: HTMLIFrameElement): void {
     return;
   }
   if (item) {
-    if (item.src !== src || item.id !== id) removeHost(item);
+    if (item.src !== src || item.id !== id) { removeHost(item); item.path = location.pathname; }
     item.src = src;
     item.id = id;
   } else {
-    item = { frame, src, id, host: null, releasePosition: null };
+    item = { frame, src, id, path: location.pathname, host: null, releasePosition: null };
     held.push(item);
   }
   if (enabled === null) {
@@ -191,7 +200,9 @@ const observer = new MutationObserver((records) => {
     }
   }
   // Sweep removals too, before a detached iframe's sibling can cover the next work.
-  if (records.some(record => record.removedNodes.length)) applyAll();
+  const pathChanged = lastPath !== location.pathname;
+  lastPath = location.pathname;
+  if (pathChanged || records.some(record => record.removedNodes.length)) applyAll();
 });
 observer.observe(document.documentElement, {
   childList: true,

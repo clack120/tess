@@ -1,5 +1,5 @@
-// Use one byte below the measured save boundary.
-export const PROJECT_JSON_LIMIT = 16_737_824 - 1;
+// Leave room for other fields and storage overhead, which vary by project and account.
+export const PROJECT_JSON_LIMIT = 16_730_000;
 
 type JsonRecord = Record<string, unknown>;
 const record = (value: unknown): value is JsonRecord => !!value && typeof value === 'object' && !Array.isArray(value);

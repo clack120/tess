@@ -196,6 +196,22 @@ test('the apply panel stays visible while editing a function from the properties
   s.playground.changeViewMode('code'); assert.equal(panel.hidden, false);
 });
 
+test('the apply panel is independent of a hidden or replaced code view', t => {
+  const s = setup(t); s.live.restore();
+  const codeView = s.w.document.createElement('div');
+  s.playground.view_.append(codeView);
+  (s.playground as any).codeView_ = codeView;
+  const live = s.w.begin(s.entry, s.work, () => s.vm);
+  const panel = s.w.document.querySelector('.entropy-editor-live');
+  assert.equal(panel.parentElement, s.playground.view_);
+  codeView.hidden = true;
+  codeView.remove();
+  assert.equal(panel.isConnected, true);
+  assert.equal(panel.hidden, false);
+  live.restore();
+  assert.equal(panel.isConnected, false);
+});
+
 test('unsafe media tabs block mouse, keyboard and programmatic entry until stop and restore their attributes', t => {
   const s = setup(t); s.live.restore();
   let clicks = 0;
