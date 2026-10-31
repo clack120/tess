@@ -110,9 +110,9 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
       });
   }
   if (projectBytes > ENTRY_PROJECT_JSON_LIMIT) {
-    ctx.warn(program, `project.json 크기가 ${projectBytes.toLocaleString('en-US')}바이트라 Entry 저장의 실측 경계 직전값 ${ENTRY_PROJECT_JSON_LIMIT.toLocaleString('en-US')}바이트를 넘습니다.`, {
+    ctx.warn(program, `project.json 크기가 ${projectBytes.toLocaleString('en-US')}바이트라 저장 대비 기준 ${ENTRY_PROJECT_JSON_LIMIT.toLocaleString('en-US')}바이트를 넘습니다.`, {
       code: 'W0008',
-      help: '큰 정적 리스트와 반복 생성된 블록부터 줄이세요. .ent 압축 크기와 자산 크기는 이 값과 다르고, 실제 상한은 Entry 서버나 저장 경로에 따라 바뀔 수 있습니다.',
+      help: '큰 정적 리스트와 반복 생성된 블록부터 줄이세요. 저장 문서의 다른 필드와 저장 형식이 차지하는 용량은 작품과 계정마다 다르므로 이 기준 이하에서도 저장에 실패할 수 있습니다. .ent 압축 크기와 자산 크기는 별개입니다.',
     });
   }
   const verificationProblems = verifyEntryProject(project, { references: false });

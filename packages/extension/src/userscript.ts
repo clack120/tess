@@ -10,6 +10,7 @@ interface HeldFrame {
   frame: HTMLIFrameElement;
   src: string;
   id: string;
+  path: string;
   host: HTMLElement | null;
   player: MountedPlayer | null;
   releasePosition: (() => void) | null;
@@ -118,6 +119,10 @@ function startUserscript(): void {
     };
 
     const mount = (item: HeldFrame) => {
+      if (item.path !== location.pathname) {
+        if (item.player || item.host) release(item, false);
+        return;
+      }
       item.frame.style.visibility = "hidden";
       if (item.frame.getAttribute("src") !== "about:blank")
         item.frame.setAttribute("src", "about:blank");
@@ -170,9 +175,10 @@ function startUserscript(): void {
         release(item, false);
         item.src = src;
         item.id = id;
+        item.path = location.pathname;
       }
       if (!item) {
-        item = { frame, src, id, host: null, player: null, releasePosition: null };
+        item = { frame, src, id, path: location.pathname, host: null, player: null, releasePosition: null };
         held.push(item);
       }
       mount(item);
@@ -196,7 +202,7 @@ function startUserscript(): void {
       for (let index = held.length - 1; index >= 0; index--) {
         const item = held[index]!;
         if (item.frame.isConnected) {
-          if (!item.host?.isConnected || !item.player?.isConnected) mount(item);
+          if (item.path !== location.pathname || !item.host?.isConnected || !item.player?.isConnected) mount(item);
           continue;
         }
         release(item);

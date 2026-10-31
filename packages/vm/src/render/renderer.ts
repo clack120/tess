@@ -238,8 +238,11 @@ export class PixiRenderer implements Renderer {
   private readonly sceneLayers = new Map<string, Container>();
   private readonly sceneTargets = new Map<string, Target[]>();
   private readonly views = new Map<Entity, EntityView>();
-  private inspection: { entity: Entity | null; bounds: Graphics; highlight: Graphics; all: boolean; at: number } | null = null;
+  private inspection: { entity: Entity | null; bounds: Graphics; rotated: Graphics; highlight: Graphics; all: boolean; at: number;
+    rectangles: Float64Array; count: number } | null = null;
   private readonly inspectionRect: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly inspectionMatrix = new Float64Array(6);
+  private readonly inspectionCorners = new Float64Array(8);
   private readonly penDirty = new Set<Entity>();
   private readonly textures = new Map<string, Texture>();
   private readonly images = new Map<string, CanvasImageSource>();
@@ -514,16 +517,18 @@ export class PixiRenderer implements Renderer {
     if (this.inspection?.entity === entity && this.inspection.all === all) return;
     if (!entity && !all) {
       this.inspection?.bounds.destroy();
+      this.inspection?.rotated.destroy();
       this.inspection?.highlight.destroy();
       this.inspection = null;
       return;
     }
     if (!this.inspection) {
       const bounds = new Graphics();
+      const rotated = new Graphics();
       const highlight = new Graphics();
-      bounds.eventMode = highlight.eventMode = 'none';
-      this.app.stage.addChild(bounds, highlight);
-      this.inspection = { entity, bounds, highlight, all, at: -Infinity };
+      bounds.eventMode = rotated.eventMode = highlight.eventMode = 'none';
+      this.app.stage.addChild(bounds, rotated, highlight);
+      this.inspection = { entity, bounds, rotated, highlight, all, at: -Infinity, rectangles: new Float64Array(0), count: 0 };
     } else {
       this.inspection.entity = entity;
       this.inspection.all = all;
@@ -534,31 +539,91 @@ export class PixiRenderer implements Renderer {
   private drawInspection(): void {
     const inspect = this.inspection;
     if (!inspect) return;
-    const draw = (entity: Entity, graphics: Graphics, selected: boolean) => {
-      if (entity.removed || !this.sceneLayers.get(entity.target.sceneId)?.visible) return;
+    const boundsOf = (entity: Entity): Rect | null => {
+      if (entity.removed || !this.sceneLayers.get(entity.target.sceneId)?.visible) return null;
       const rect = entityBounds(entity, this.inspectionRect);
       if (!Number.isFinite(rect.x) || !Number.isFinite(rect.y)
-        || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) return;
+        || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) return null;
       if (rect.x > stage.worldWidth || rect.y > stage.worldHeight
-        || rect.x + rect.width < 0 || rect.y + rect.height < 0) return;
-      graphics.rect(rect.x, rect.y, Math.max(1, rect.width), Math.max(1, rect.height));
-      if (selected) {
-        graphics.fill({ color: 0xff4fa3, alpha: 0.2 });
-        graphics.stroke({ color: 0xff4fa3, width: 2, alpha: entity.visible ? 0.9 : 0.35 });
-      }
+        || rect.x + rect.width < 0 || rect.y + rect.height < 0) return null;
+      return rect;
     };
     const now = performance.now();
-    // Whole-scene boxes update at 10 Hz; one hovered target follows each rendered frame.
-    if (now - inspect.at >= 100) {
+    // Whole-scene boxes update at up to 30 Hz; one hovered target follows each rendered frame.
+    if (now - inspect.at >= 1000 / 30) {
       inspect.at = now;
-      inspect.bounds.clear();
+      let count = 0;
+      let changed = false;
+      let rotatedCount = 0;
+      const drawRotated = (values: Float64Array, at: number) => {
+        inspect.rotated.moveTo(values[at]!, values[at + 1]!);
+        for (let i = 2; i < 8; i += 2) inspect.rotated.lineTo(values[at + i]!, values[at + i + 1]!);
+        inspect.rotated.closePath();
+        rotatedCount++;
+      };
+      const redraw = () => {
+        inspect.bounds.clear();
+        inspect.rotated.clear();
+        for (let at = 0; at < count * 13; at += 13) {
+          inspect.bounds.rect(inspect.rectangles[at]!, inspect.rectangles[at + 1]!, inspect.rectangles[at + 2]!, inspect.rectangles[at + 3]!);
+          if (inspect.rectangles[at + 4]) drawRotated(inspect.rectangles, at + 5);
+        }
+      };
       if (inspect.all) {
-        for (const entity of this.views.keys()) draw(entity, inspect.bounds, false);
-        inspect.bounds.stroke({ color: 0x3488cf, width: 1, alpha: 0.7 });
+        for (const entity of this.views.keys()) {
+          const rect = boundsOf(entity);
+          if (!rect) continue;
+          const at = count * 13;
+          if (at + 13 > inspect.rectangles.length) {
+            const larger = new Float64Array(Math.max(64, inspect.rectangles.length * 2));
+            larger.set(inspect.rectangles); inspect.rectangles = larger;
+          }
+          const width = Math.max(1, rect.width), height = Math.max(1, rect.height);
+          const rotated = Number.isFinite(entity.rotation) && Math.abs(Math.sin(entity.rotation * Math.PI / 90)) > 1e-10;
+          const corners = this.inspectionCorners;
+          if (rotated) {
+            const m = entity.worldMatrix(this.inspectionMatrix);
+            const text = entity.type === 'textBox';
+            const offset = text && !entity.lineBreak ? (entity.textAlign === 1 ? entity.width / 2 : entity.textAlign === 2 ? -entity.width / 2 : 0) : 0;
+            const left = text ? offset - entity.width / 2 : 0, top = text ? -entity.height / 2 : 0;
+            const right = left + entity.width, bottom = top + entity.height;
+            corners[0] = m[0]! * left + m[2]! * top + m[4]!; corners[1] = m[1]! * left + m[3]! * top + m[5]!;
+            corners[2] = m[0]! * right + m[2]! * top + m[4]!; corners[3] = m[1]! * right + m[3]! * top + m[5]!;
+            corners[4] = m[0]! * right + m[2]! * bottom + m[4]!; corners[5] = m[1]! * right + m[3]! * bottom + m[5]!;
+            corners[6] = m[0]! * left + m[2]! * bottom + m[4]!; corners[7] = m[1]! * left + m[3]! * bottom + m[5]!;
+          }
+          if (!changed && (count >= inspect.count || inspect.rectangles[at] !== rect.x || inspect.rectangles[at + 1] !== rect.y
+            || inspect.rectangles[at + 2] !== width || inspect.rectangles[at + 3] !== height
+            || inspect.rectangles[at + 4] !== Number(rotated)
+            || (rotated && corners.some((value, i) => inspect.rectangles[at + 5 + i] !== value)))) {
+            changed = true;
+            redraw();
+          }
+          inspect.rectangles[at] = rect.x; inspect.rectangles[at + 1] = rect.y;
+          inspect.rectangles[at + 2] = width; inspect.rectangles[at + 3] = height;
+          inspect.rectangles[at + 4] = Number(rotated);
+          if (rotated) inspect.rectangles.set(corners, at + 5);
+          if (changed) {
+            inspect.bounds.rect(rect.x, rect.y, width, height);
+            if (rotated) drawRotated(corners, 0);
+          }
+          count++;
+        }
       }
+      if (!changed && count !== inspect.count) { changed = true; redraw(); }
+      if (changed && count) inspect.bounds.stroke({ color: 0x3488cf, width: 1, alpha: 0.7 });
+      if (changed && rotatedCount) inspect.rotated.stroke({ color: 0xffa43a, width: 1, alpha: 0.9 });
+      inspect.count = count;
     }
     inspect.highlight.clear();
-    if (inspect.entity && this.views.has(inspect.entity)) draw(inspect.entity, inspect.highlight, true);
+    if (inspect.entity && this.views.has(inspect.entity)) {
+      const rect = boundsOf(inspect.entity);
+      if (rect) {
+        inspect.highlight.rect(rect.x, rect.y, Math.max(1, rect.width), Math.max(1, rect.height));
+        inspect.highlight.fill({ color: 0xff4fa3, alpha: 0.2 });
+        inspect.highlight.stroke({ color: 0xff4fa3, width: 2, alpha: inspect.entity.visible ? 0.9 : 0.35 });
+      }
+    }
   }
 
   // Keep a flat display list because clones, strokes, and stamps can sit between other objects.

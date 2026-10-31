@@ -229,7 +229,7 @@ test('recursion analysis handles and summarizes a long function cycle without ov
 });
 
 test('Entry runtime limits and first-scene behavior have targeted diagnostics', () => {
-  assert.equal(ENTRY_PROJECT_JSON_LIMIT, 16_737_823, 'use one byte below the measured save boundary');
+  assert.equal(ENTRY_PROJECT_JSON_LIMIT, 16_730_000);
   const firstScene = compileProject(`scene "first":
   object "o":
     when scene start do
