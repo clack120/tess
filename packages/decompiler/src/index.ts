@@ -585,9 +585,10 @@ function buildContext(
     }
 
     // The save manager intercepts calls to this named function.
-    const saveKind = label === STORE_SAVE_FUNCTION
+    const emptySave = !functionCreateBlock(content)?.statements?.[0]?.length && fields.length === 1 && locals.length === 0;
+    const saveKind = emptySave && label === STORE_SAVE_FUNCTION
       ? 'save'
-      : label === STORE_SAVE_ASYNC_FUNCTION ? 'async' : undefined;
+      : emptySave && label === STORE_SAVE_ASYNC_FUNCTION ? 'async' : undefined;
     ctx.functionsById.set(fn.id, {
       id: String(fn.id), name: identifier, params, locals, displayLabel: label, saveKind,
     });

@@ -9,12 +9,18 @@ import { JSDOM } from 'jsdom';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-function readerFor(payload: string | null) {
+function readerFor(payload: string | null, live?: { getState(): unknown; legacy?: boolean }) {
   const dom = new JSDOM(
     payload === null
       ? '<!doctype html><body></body>'
       : `<!doctype html><body><script id="__NEXT_DATA__" type="application/json">${payload}</script></body>`,
   );
+  if (live) {
+    const root = dom.window.document.createElement('div'); root.id = '__next'; dom.window.document.body.append(root);
+    const current = { child: { memoizedProps: { store: live } } };
+    Object.assign(root, live.legacy ? { _reactRootContainer: { _internalRoot: { current } } }
+      : { '__reactContainer$entry': { stateNode: { current } } });
+  }
   const source = stripTypes(fs.readFileSync(path.join(root, 'packages/extension/src/page/signed-in.ts'), 'utf-8'));
   const sandbox: Record<string, unknown> = { document: dom.window.document };
   sandbox.globalThis = sandbox;
@@ -56,4 +62,19 @@ test('아이디나 닉네임 한쪽만 있어도 로그인한 것으로 본다',
   assert.deepEqual(readerFor(wrap({ username: 'sample_user' }))(), { id: 'sample_user', nickname: '' });
   assert.deepEqual(readerFor(wrap({ nickname: '별이' }))(), { id: '', nickname: '별이' });
   assert.equal(readerFor(wrap({ username: 7, nickname: null }))(), null);
+});
+
+test('현재 계정 정보를 우선하고 로그인, 이름 변경, 로그아웃을 반영한다', () => {
+  for (const legacy of [false, true]) {
+    let user: unknown = null;
+    const read = readerFor(wrap({ username: 'old', nickname: 'old' }), { legacy, getState: () => ({ common: { user } }) });
+    assert.equal(read(), null);
+    user = { username: 'first', nickname: 'one' };
+    assert.deepEqual(read(), { id: 'first', nickname: 'one' });
+    user = { username: 'first', nickname: 'two' };
+    assert.deepEqual(read(), { id: 'first', nickname: 'two' });
+    user = null; assert.equal(read(), null);
+  }
+  const fallback = readerFor(wrap({ username: 'first' }), { getState: () => { throw new Error('unavailable'); } });
+  assert.deepEqual(fallback(), { id: 'first', nickname: '' });
 });

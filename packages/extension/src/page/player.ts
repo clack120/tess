@@ -97,6 +97,7 @@ interface MenuItem {
 function mountMenu(
   root: HTMLElement,
   lines: () => Array<MenuItem | null>,
+  requiresControl: () => boolean,
 ): { close(): void; dispose(): void } {
   const menu = el("div", "entropy-menu", root);
   menu.hidden = true;
@@ -136,6 +137,7 @@ function mountMenu(
   const onContext = (event: Event) => {
     event.preventDefault();
     const pointer = event as MouseEvent;
+    if (requiresControl() && !pointer.ctrlKey) { close(); return; }
     open(pointer.clientX, pointer.clientY);
   };
   const onDown = (event: Event) => {
@@ -419,7 +421,14 @@ export function mountPlayer(
     );
   }
 
+  function syncUser(live: EntropyHandle): void {
+    const user = signedInUser();
+    if (live.vm.user?.id !== user?.id || live.vm.user?.nickname !== user?.nickname) live.vm.user = user;
+  }
+
   function ready(live: EntropyHandle): void {
+    syncUser(live);
+    let userAt = 0;
     inspector = mountInspector(root, live);
     const seen = new Set<string>();
     let shown = "";
@@ -439,6 +448,7 @@ export function mountPlayer(
       if (coords.textContent !== position) coords.textContent = position;
     };
     const start = () => {
+      syncUser(live);
       clearError();
       seen.clear();
       live.start();
@@ -527,10 +537,13 @@ export function mountPlayer(
           run: () => fullButton.click(),
         },
       ];
-    });
+    }, () => live.vm.extras.uses.mouseButtons);
 
     // Read player state from the VM because works can stop themselves.
-    onTick = () => { showState(); inspector?.syncHost(); };
+    onTick = () => {
+      if (Date.now() - userAt >= 1000) { userAt = Date.now(); syncUser(live); }
+      showState(); inspector?.syncHost();
+    };
     showState();
   }
 

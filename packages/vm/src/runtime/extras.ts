@@ -9,6 +9,7 @@ export const EXTRA_VARIABLES = {
   clipboard: ['$CLIPBOARD'],
   cursor: ['$CURSOR'],
   mouseLock: ['$MOUSE_LOCK', '$M_LOCK'],
+  mouseButtons: ['$MOUSE_BUTTONS', '$M_BUTTONS'],
   deltaX: ['$DELTA_X'],
   deltaY: ['$DELTA_Y'],
   scrollX: ['$SCROLL_X'],
@@ -43,6 +44,7 @@ export interface ExtrasUse {
   clipboard: boolean;
   cursor: boolean;
   mouseLock: boolean;
+  mouseButtons: boolean;
   scroll: boolean;
 }
 
@@ -52,11 +54,14 @@ export class Extras {
     clipboard: false,
     cursor: false,
     mouseLock: false,
+    mouseButtons: false,
     scroll: false,
   };
 
   private readonly vm: Vm;
   private readonly slots = new Map<Slot, Variable>();
+  private buttonVariables: Variable[] = [];
+  private buttons = 0;
   private scrollId: string | null = null;
   private readonly dirty = new Set<Slot>();
   private moveX = 0;
@@ -88,6 +93,9 @@ export class Extras {
     this.uses.clipboard = this.slots.has('clipboard');
     this.uses.cursor = this.slots.has('cursor');
     this.uses.mouseLock = this.slots.has('mouseLock');
+    this.buttonVariables = this.vm.variables.filter(variable => !variable.isList && variable.objectId === null && EXTRA_VARIABLES.mouseButtons.includes(variable.name as '$M_BUTTONS' | '$MOUSE_BUTTONS'));
+    this.uses.mouseButtons = this.buttonVariables.length > 0;
+    this.buttonsChanged(0);
     this.uses.scroll = this.scrollId !== null || this.slots.has('scrollX') || this.slots.has('scrollY');
     // Act on every write, even when a repeated clipboard value is unchanged.
     for (const slot of WATCHED) {
@@ -103,6 +111,7 @@ export class Extras {
 
   // Treat initial values as the baseline rather than work-triggered writes.
   started(): void {
+    this.writeButtons();
     this.locked = false;
     this.moveX = 0;
     this.moveY = 0;
@@ -113,11 +122,13 @@ export class Extras {
   }
 
   stopped(): void {
+    this.buttonsChanged(0);
     this.locked = false;
     this.host?.release();
   }
 
   frame(): void {
+    this.writeButtons();
     this.pushWheel();
     this.pushMove();
     for (const slot of WATCHED) {
@@ -126,6 +137,15 @@ export class Extras {
   }
 
   // A viewer paste is input, not a clipboard write requested by the work.
+  buttonsChanged(buttons: number): void {
+    this.buttons = buttons;
+    this.writeButtons();
+  }
+
+  private writeButtons(): void {
+    for (const variable of this.buttonVariables) if (variable.getValue() !== this.buttons) variable.setValue(this.buttons);
+  }
+
   pasted(text: string): void {
     const slot = this.slots.get('clipboard');
     if (!slot || this.vm.state !== 'run') {

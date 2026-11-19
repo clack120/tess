@@ -250,10 +250,15 @@ function createPrepared(canvas: HTMLCanvasElement, entry: Editor): Prepared {
   const observer = new ResizeObserver(layout);
   observer.observe(canvas);
   layout();
+  let userAt = 0;
   const timer = setInterval(() => {
     if (!canvas.isConnected) { if (active) void attached?.engine.toggleStop(); discard(); return; }
     if (active && !active.preparing && prepared?.handle?.vm.state === 'stop' && !prepared.busy) void attached?.engine.toggleStop();
     if (active) {
+      if (prepared?.handle && Date.now() - userAt >= 1000) {
+        userAt = Date.now();
+        prepared.handle.vm.user = signedInUser();
+      }
       layout();
       try { active.actors?.sync(); }
       catch (error) {
@@ -502,6 +507,7 @@ function attach(entry: Editor): void {
         // preparation loop, so clear this run's snapshot status here too.
         prepared.status.hidden = true;
         const handle = prepared.handle;
+        handle.vm.user = signedInUser();
         handle.vm.setStartScene(scene);
         const unknown = [...handle.vm.unknownBlocks.keys()].filter(type => !type.startsWith('variable:'));
         if (unknown.length) (window as any).Entry.toast?.alert('실행기 안내',

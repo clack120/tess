@@ -1,4 +1,4 @@
-import { KEY_CODES, STORE_FLAG_ON, STORE_FLAG_VARIABLE } from '@entropy/core';
+import { KEY_CODES, STORE_FLAG_ON, isStoreFlag } from '@entropy/core';
 import { lookup, entropyNumber, entropyString, entropyLiteral, ownsResource, isExactNumber, resourceInfo } from './ident.ts';
 import { isBooleanBlock } from '../../compiler/src/expression.ts';
 import { expansionBlock } from '@entropy/core';
@@ -35,7 +35,7 @@ function isStoreFlagTest(block: RawBlock, ctx: DecompileContext): boolean {
   const read = params[0] as RawBlock | undefined;
   if (read?.type !== 'get_variable') return false;
   const variable = ctx.varsById.get(String(read.params?.[0] ?? ''));
-  if (variable?.source.name !== STORE_FLAG_VARIABLE) return false;
+  if (!isStoreFlag(variable?.source.name)) return false;
   const value = params[2] as RawBlock | undefined;
   const literal = value?.type === 'number' || value?.type === 'text'
     ? value.params?.[0]

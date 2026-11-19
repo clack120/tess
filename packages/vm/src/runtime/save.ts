@@ -1,6 +1,7 @@
 // Keep @-prefixed globals using the Entry save-manager convention; hosts provide storage.
 import type { Variable } from './model.ts';
 import type { Vm } from './engine.ts';
+import { isStoreName, isStoreFlag } from '@entropy/core';
 
 export const STORE_PREFIX = '@';
 export const STORE_FLAG = '@확장프로그램';
@@ -35,12 +36,11 @@ export class SaveStore {
     this.kept = this.vm.variables.filter(
       (variable) =>
         variable.objectId === null &&
-        variable.name.startsWith(STORE_PREFIX) &&
-        variable.name !== STORE_FLAG,
+        isStoreName(variable.name),
     );
     this.flag =
       this.vm.variables.find(
-        (variable) => variable.objectId === null && variable.name === STORE_FLAG,
+        (variable) => variable.objectId === null && isStoreFlag(variable.name),
       ) ?? null;
     this.used = this.kept.length > 0 || this.flag !== null;
     this.values = {};
@@ -64,9 +64,10 @@ export class SaveStore {
 
   // Save waits for this promise; refused host writes are not reported as script errors.
   async write(): Promise<void> {
-    if (!this.host || !this.used) {
+    if (!this.host) {
       return;
     }
+    this.used = true;
     const values: Record<string, StoredValue> = {};
     for (const variable of this.kept) {
       values[variable.name] = variable.isList
@@ -82,7 +83,7 @@ export class SaveStore {
       return;
     }
     for (const variable of this.kept) {
-      const saved = this.values[variable.name];
+      const saved = this.values[variable.name] ?? this.values[variable.name.trim()];
       if (saved === undefined) {
         continue;
       }

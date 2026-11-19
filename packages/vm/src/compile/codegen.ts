@@ -1,5 +1,6 @@
 // Compile blocks once into generators; yield only where Entry gives up the frame.
-import { SAVE_FUNCTIONS, functionLabel } from '../runtime/save.ts';
+import { functionLabel } from '../runtime/save.ts';
+import { saveFunctionKind } from '@entropy/core';
 import { isBlock, parseScript, findFunctionDefine, functionBody, collectParams, type RawBlock, type FunctionEntry } from './blocks.ts';
 import { blockCounts } from './block-count.ts';
 import { isNumber } from '../runtime/cast.ts';
@@ -360,17 +361,16 @@ export class Codegen {
   }
 
   private *compileFunction(fn: FunctionEntry): Generator<void, string, unknown> {
-    // Intercept the save manager's empty functions here instead of through an extension.
-    const saving = pick(SAVE_FUNCTIONS, functionLabel(fn.content));
-    if (saving) {
-      return saving === 'wait'
-        ? 'function* (e, th, P) { yield* O.saveStoreWait(); }'
-        : 'function* (e, th, P) { O.saveStore(); }';
-    }
+    const saving = saveFunctionKind(functionLabel(fn.content));
     const stack = this.definition(fn);
     const define = stack?.[0];
     if (!define) {
       return 'function* () {}';
+    }
+    if (saving && functionBody(stack!).length === 0 && define.type !== 'function_create_value') {
+      return saving === 'wait'
+        ? 'function* (e, th, P) { yield* O.saveStoreWait(); }'
+        : 'function* (e, th, P) { O.saveStore(); }';
     }
     const params = collectParams(define.params[0]);
     this.paramSlots = new Map(params.map((name, index) => [name, index]));
@@ -403,6 +403,7 @@ export class Codegen {
       `  if (th.depth >= ${CALL_DEPTH_LIMIT}) throw new RangeError('함수 호출이 너무 깊습니다 (끝나지 않는 재귀)');\n` +
       `  th.depth += 1;\n` +
       `  try {\n` +
+      (saving === 'wait' ? '  yield* O.saveStoreWait();\n' : saving === 'async' ? '  O.saveStore();\n' : '') +
       `  const L = {${locals}};\n` +
       (this.input.liveEditing ? '  const ctx = { entity: e, params: P, locals: L };\n' : '');
     const liveExit = this.input.liveEditing ? ' && x !== R.liveCode.exit' : '';
@@ -410,8 +411,8 @@ export class Codegen {
     source += returnsValue
       ? `  try {\n  fn: {\n${emptyValue}${body}  }\n  } catch (x) { if (x !== th.finish${liveExit}) throw x; }\n${syncEntity}  return ${result};\n`
       : this.input.liveEditing
-        ? `  try {\n${empty ? '    yield 0;\n' : ''}${body}  } catch (x) { if (x !== R.liveCode.exit) throw x; }\n`
-        : `  fn: {\n${empty ? '    yield 0;\n' : ''}${body}  }\n`;
+        ? `  try {\n${empty && !saving ? '    yield 0;\n' : ''}${body}  } catch (x) { if (x !== R.liveCode.exit) throw x; }\n`
+        : `  fn: {\n${empty && !saving ? '    yield 0;\n' : ''}${body}  }\n`;
     source += '  } finally { th.depth -= 1; }\n}';
 
     this.paramSlots = null;

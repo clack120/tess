@@ -2,6 +2,7 @@ import {
   STORE_FLAG_VARIABLE,
   STORE_SAVE_ASYNC_FUNCTION,
   STORE_SAVE_FUNCTION,
+  isStoreFlag,
 } from '@entropy/core';
 import type { Context } from './context.ts';
 import type {
@@ -232,7 +233,7 @@ export function requireSaveFunction(async: boolean, ctx: Context): CompiledFunct
 // The save manager changes this flag to 1; without it the saved value stays 0.
 export function requireStoreFlag(ctx: Context): EntryVariable {
   const existing = ctx.variables.find(
-    (variable) => variable.name === STORE_FLAG_VARIABLE && variable.object === null,
+    (variable) => isStoreFlag(variable.name) && variable.object === null,
   );
   if (existing) return existing;
   const variable: EntryVariable = {

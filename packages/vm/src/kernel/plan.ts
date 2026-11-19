@@ -10,6 +10,8 @@ import {
 import type { Variable } from '../runtime/model.ts';
 import { isNumber, parseNumber } from '../runtime/cast.ts';
 import { scalarPlaces } from './values.ts';
+import { saveFunctionKind } from '@entropy/core';
+import { functionLabel } from '../runtime/save.ts';
 
 // Slot zero signals that the bridge must discard the kernel run.
 export const BAIL_SLOT = 0;
@@ -698,6 +700,10 @@ export function planKernel(
     const stackBlocks = findFunctionDefine(content);
     const define = stackBlocks?.[0];
     const scan: Scan = { ok: false, reason: '', calls: new Set(), valued: false };
+    if (saveFunctionKind(functionLabel(fn.content))) {
+      scan.reason = 'runtime save';
+      return { scan, body: null };
+    }
     if (!define) {
       scan.reason = 'no definition';
       return { scan, body: null };

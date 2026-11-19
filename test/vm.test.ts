@@ -2245,6 +2245,7 @@ test('$ENTROPY 이 없는 작품은 아무것도 쓰지 않는다', () => {
     clipboard: false,
     cursor: false,
     mouseLock: false,
+    mouseButtons: false,
     scroll: false,
   });
 });
