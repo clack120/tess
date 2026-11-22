@@ -44,6 +44,59 @@ function setup() {
     hold: () => { held = true; }, holdUnload: () => { holdUnload = true; } };
 }
 
+test('text boxes share their style and keep the previous color on invalid input', () => {
+  const { create, context } = setup();
+  context.TextStyle = class { constructor(options?: object) { Object.assign(this, options); } };
+  context.Color = class {
+    alpha = 1;
+    private readonly value: string;
+    constructor(value: string) {
+      if (value === 'invalid') throw new Error('Invalid color');
+      this.value = value;
+    }
+    toNumber() { return this.value === 'red' ? 0xff0000 : 0x0000ff; }
+  };
+  const renderer = create();
+  renderer.textResolution = () => 1;
+  const entity = { text: 'Sample', colour: 'red', fontFamily: 'sans-serif', fontSize: 16, width: 100, lineBreak: true };
+  const view = () => ({
+    text: { style: null as any, anchor: { set() {} }, position: { set() {} } },
+    background: { clear() {} }, decoration: { clear() {} }, colour: null,
+  });
+  const first = view(), second = view();
+  renderer.syncTextBox(entity, first);
+  renderer.syncTextBox(entity, second);
+  assert.equal(first.text.style, second.text.style);
+  renderer.syncTextBox({ ...entity, colour: 'invalid', width: 70 }, second);
+  assert.notEqual(first.text.style, second.text.style);
+  assert.equal(first.text.style.wordWrapWidth, 100);
+  assert.equal(second.text.style.wordWrapWidth, 70);
+  assert.equal(second.text.style.fill.color, 0xff0000);
+  renderer.syncTextBox({ ...entity, colour: 'blue' }, second);
+  assert.equal(second.text.style.fill.color, 0x0000ff);
+  assert.equal(first.text.style.fill.color, 0xff0000);
+});
+
+test('preload warms each texture source once and keeps later costumes within the upload budget', async () => {
+  const { create, picture } = setup();
+  const renderer = create();
+  const shared = { pixelWidth: 4000, pixelHeight: 4000 };
+  const sources = new Map([['a', shared], ['copy', shared], ['b', { ...shared }], ['c', { ...shared }]]);
+  const uploads: object[] = [];
+  renderer.app.renderer.texture = { initSource(source: object) { uploads.push(source); } };
+  renderer.setSvgBudget = () => {};
+  renderer.loadPicture = async (item: { id: string }) => {
+    renderer.textures.set(item.id, { source: sources.get(item.id) });
+  };
+  const targets = [{ pictures: ['a', 'copy', 'b', 'c'].map(id => picture(id)) }];
+  await renderer.preload(targets);
+  assert.deepEqual(uploads, []);
+  await renderer.preload(targets, undefined, undefined, false, true);
+  assert.deepEqual(uploads, [shared, sources.get('b')]);
+  await renderer.preload(targets, undefined, undefined, false, true);
+  assert.equal(uploads.length, 2);
+});
+
 test('inspection reuses unchanged bounds and redraws movement, scene changes and removals', () => {
   const { create, context } = setup();
   let now = 1000;

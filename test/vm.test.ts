@@ -2632,22 +2632,6 @@ test('끝난 획은 프레임마다 다시 자르지 않는다', () => {
   assert.match(boostBlock, /this\.fillCache = new WeakMap\(\)/, '부스트가 바뀌면 버립니다');
 });
 
-// Reuse unchanged fill objects because PIXI checks their identity and rebakes text on replacement.
-test('글상자 색은 달라질 때만 PIXI 에 넣는다', () => {
-  const source = fs.readFileSync(
-    path.join(root, 'packages/vm/src/render/renderer.ts'),
-    'utf-8',
-  );
-  const block = source.slice(
-    source.indexOf('private syncTextBox'),
-    source.indexOf('private textResolution'),
-  );
-  assert.match(block, /if \(view\.colour !== entity\.colour\) \{/, '색이 달라질 때만 넣습니다');
-  const fills = block.match(/style\.fill = \{/g) ?? [];
-  assert.equal(fills.length, 1, '넣는 자리는 그 안 한 군데뿐입니다');
-  assert.match(block, /view\.colour = entity\.colour;/, '넣은 색을 적어 둡니다');
-});
-
 // Reference-count shared rasterizations so another runner or stamp cannot lose its texture.
 test('구운 벡터 모양은 마지막으로 쥔 쪽이 놓을 때만 내린다', () => {
   const source = fs.readFileSync(

@@ -336,7 +336,7 @@ export async function boot(options: BootOptions = {}): Promise<EntropyHandle> {
       // Start both preloads regardless of whether the caller waits for them.
       beginAssetBulk();
       const costumes = renderer
-        .preload(vm.targets, vm.currentSceneId, arrived, !fullPreload)
+        .preload(vm.targets, vm.currentSceneId, arrived, !fullPreload, waitForAssets)
         .catch((error) => console.warn('[entropy] 모양을 미리 받지 못했습니다', error));
       const files = fullPreload ? audio.preload(sounds, 6, arrived)
         .catch((error) => console.warn('[entropy] 소리를 미리 받지 못했습니다', error)) : Promise.resolve();

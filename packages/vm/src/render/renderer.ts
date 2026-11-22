@@ -12,6 +12,7 @@ import {
   Sprite,
   Text,
   Texture,
+  type TextureSource,
 } from 'pixi.js';
 import { stage, type Entity, type Picture, type Stroke, type Target } from '../runtime/model.ts';
 import type { Renderer } from '../runtime/engine.ts';
@@ -106,6 +107,10 @@ function usableColor(value: unknown): Ink | null {
 }
 
 const LOAD_CONCURRENCY = 12;
+const TEXT_STYLE_LIMIT = 512;
+// Budget for eager uploads: 128 MiB of RGBA pixels before mipmaps.
+const WARMUP_PIXELS = 32 * 1024 * 1024;
+const BLACK: Ink = { color: 0, alpha: 1 };
 // Match Entry's difference between text-box reposition and WebGL offsets.
 const TEXT_BOX_TOP_OFFSET = 10 - 5.9;
 
@@ -118,8 +123,8 @@ interface EntityView {
   decoration: Graphics | null;
   filter: ColorMatrixFilter | null;
   pictureId: string | null;
-  // Reuse unchanged text fill objects to avoid rebaking text.
-  colour: string | null;
+  // Invalid input keeps the last readable text color.
+  colour: Ink | null;
   // Keep strokes and fills just below their source entity.
   brush: PenView | null;
   paint: PenView | null;
@@ -251,6 +256,8 @@ export class PixiRenderer implements Renderer {
   private readonly rasterSources = new Map<string, string>();
   private readonly rebaking = new Map<string, object>();
   private preloadVersion = 0;
+  private readonly warmedSources = new WeakSet<TextureSource>();
+  private warmedPixels = 0;
   // Cache SVG markup so resized copies do not fetch it again.
   private readonly svgTexts = new Map<string, string>();
   private readonly pictures = new Map<string, Picture>();
@@ -270,6 +277,7 @@ export class PixiRenderer implements Renderer {
   // Recheck growing vectors once at the end of flush.
   private svgScaleGrew = false;
   private readonly measureStyle = new TextStyle();
+  private readonly textStyles = new Map<string, TextStyle>();
   // Cache finished strokes because they never change; measure only the active stroke again.
   private fillCache = new WeakMap<Stroke, { boost: boolean; parts: number[][] | null }>();
 
@@ -740,6 +748,7 @@ export class PixiRenderer implements Renderer {
       view.root.destroy({ children: true, context: true });
     }
     this.views.clear();
+    this.textStyles.clear();
     for (const layer of this.sceneLayers.values()) {
       layer.destroy({ children: true, context: true });
     }
@@ -860,14 +869,10 @@ export class PixiRenderer implements Renderer {
     root.__entity = entity;
     if (entity.type === 'textBox') {
       const background = new Graphics();
+      const colour = usableColor(entity.colour) ?? BLACK;
       const text = new Text({
         text: entity.text,
-        style: {
-          fontFamily: entity.fontFamily,
-          fontSize: entity.fontSize,
-          fill: usableColor(entity.colour) ?? { color: 0x000000, alpha: 1 },
-          align: 'center',
-        },
+        style: this.textStyle(entity, colour),
         resolution: this.textResolution(entity),
       });
       text.anchor.set(0.5, 0.5);
@@ -882,7 +887,7 @@ export class PixiRenderer implements Renderer {
         decoration,
         filter: null,
         pictureId: null,
-        colour: null,
+        colour,
         brush: null,
         paint: null,
         stamps: [],
@@ -912,6 +917,7 @@ export class PixiRenderer implements Renderer {
     sceneId?: string,
     onLoaded?: (ok: boolean) => void,
     onlyCurrent = false,
+    warmTextures = false,
   ): Promise<void> {
     const version = ++this.preloadVersion;
     const current = () => !this.destroyed && this.preloadVersion === version;
@@ -950,7 +956,17 @@ export class PixiRenderer implements Renderer {
     const one = async (picture: Picture) => {
       if (!current()) return;
       await this.loadPicture(picture);
-      if (current()) onLoaded?.(this.textures.get(picture.id) !== Texture.EMPTY);
+      if (!current()) return;
+      const texture = this.textures.get(picture.id);
+      if (warmTextures && texture) {
+        try {
+          this.warmTexture(texture);
+        } catch (error) {
+          warmTextures = false;
+          console.warn('[entropy] GPU에 모양을 미리 올리지 못했습니다', error);
+        }
+      }
+      onLoaded?.(!!texture && texture !== Texture.EMPTY);
     };
     try {
       await pool(inScene, LOAD_CONCURRENCY, one);
@@ -962,6 +978,17 @@ export class PixiRenderer implements Renderer {
       for (const url of this.svgTexts.keys()) if (!urls.has(url)) this.svgTexts.delete(url);
       for (const url of this.svgPicks.keys()) if (!urls.has(url)) this.svgPicks.delete(url);
     }
+  }
+
+  private warmTexture(texture: Texture): void {
+    if (!this.ready || texture === Texture.EMPTY) return;
+    const source = texture.source;
+    const pixels = source.pixelWidth * source.pixelHeight;
+    if (this.warmedSources.has(source) || !Number.isFinite(pixels) || pixels <= 0 ||
+        this.warmedPixels + pixels > WARMUP_PIXELS) return;
+    this.app.renderer.texture.initSource(source);
+    this.warmedSources.add(source);
+    this.warmedPixels += pixels;
   }
 
   static costumeCount(targets: Target[]): number {
@@ -1234,31 +1261,11 @@ export class PixiRenderer implements Renderer {
     const text = view.text!;
     const background = view.background!;
     const decoration = view.decoration!;
-    const style = text.style;
-    const align: 'center' | 'left' | 'right' =
-      entity.textAlign === 1 ? 'left' : entity.textAlign === 2 ? 'right' : 'center';
-    // Use Entry's single font family because adding fallbacks changes measured line height.
-    style.fontFamily = entity.fontFamily;
-    style.fontSize = entity.fontSize;
-    // Ignore invalid colors and replace fill objects only on changes to avoid rebaking long text each frame.
-    if (view.colour !== entity.colour) {
-      const fill = usableColor(entity.colour);
-      if (fill !== null) {
-        style.fill = { color: fill.color, alpha: fill.alpha };
-      }
-      view.colour = entity.colour;
-    }
-    style.fontWeight = entity.fontBold ? 'bold' : 'normal';
-    style.fontStyle = entity.fontItalic ? 'italic' : 'normal';
-    style.align = align;
-    style.lineHeight = entity.fontSize + 2;
-    if (entity.lineBreak) {
-      style.wordWrap = true;
-      style.wordWrapWidth = entity.width;
-      style.breakWords = true;
-    } else {
-      style.wordWrap = false;
-    }
+    const ink = usableColor(entity.colour);
+    view.colour = ink ?? view.colour ?? BLACK;
+    const style = this.textStyle(entity, view.colour);
+    if (text.style !== style) text.style = style;
+    const align = style.align;
     if (text.text !== entity.text) {
       text.text = entity.text;
     }
@@ -1302,7 +1309,6 @@ export class PixiRenderer implements Renderer {
     }
 
     decoration.clear();
-    const ink = usableColor(entity.colour);
     if ((entity.underLine || entity.strike) && ink !== null) {
       const width = text.width;
       const left = text.x - width * text.anchor.x;
@@ -1319,6 +1325,28 @@ export class PixiRenderer implements Renderer {
           .fill({ color: ink.color, alpha: ink.alpha });
       }
     }
+  }
+
+  // Pixi shares text textures when the content, style, and resolution match.
+  private textStyle(entity: Entity, fill: Ink): TextStyle {
+    const { fontFamily, fontSize, fontBold, fontItalic, textAlign, lineBreak, width } = entity;
+    const align = textAlign === 1 ? 'left' : textAlign === 2 ? 'right' : 'center';
+    const wrapWidth = lineBreak ? width : 0;
+    const key = JSON.stringify([fontFamily, fontSize, fontBold, fontItalic, align, lineBreak, wrapWidth, fill.color, fill.alpha]);
+    let style = this.textStyles.get(key);
+    if (!style) {
+      style = new TextStyle({
+        fontFamily, fontSize, fill: { ...fill }, align, lineHeight: fontSize + 2,
+        fontWeight: fontBold ? 'bold' : 'normal',
+        fontStyle: fontItalic ? 'italic' : 'normal',
+        wordWrap: lineBreak, wordWrapWidth: wrapWidth, breakWords: lineBreak,
+      });
+      this.textStyles.set(key, style);
+      if (this.textStyles.size > TEXT_STYLE_LIMIT) {
+        this.textStyles.delete(this.textStyles.keys().next().value!);
+      }
+    }
+    return style;
   }
 
   // Include object scale and use half steps so text stays sharp without rebaking every frame.
@@ -1392,11 +1420,12 @@ export class PixiRenderer implements Renderer {
     } catch {
       return;
     }
+    if (this.destroyed) return;
     CanvasTextMetrics.clearMetrics();
+    // Fresh styles invalidate textures drawn with fallback fonts.
+    this.textStyles.clear();
     for (const [entity, view] of this.views) {
       if (entity.type === 'textBox' && view.text) {
-        // Nudge the family name to force PIXI to discard its previous measurement.
-        view.text.style.fontFamily = 'sans-serif';
         // Refresh only width because loading the font does not change the saved height.
         entity.measure(false);
         entity.dirty = true;
