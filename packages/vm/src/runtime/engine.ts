@@ -36,7 +36,7 @@ import { Table } from './table.ts';
 import { ThreadStop, createOps, type Ops } from './ops.ts';
 import { SaveStore, functionName } from './save.ts';
 import { Extras } from './extras.ts';
-import { blockOfError, snapshotVm, RuntimeBlockError, type GeneratedTrace, type RuntimeValue, type VmSnapshot } from './diagnostics.ts';
+import { blockOfError, snapshotVm, RuntimeBlockError, type GeneratedTrace, type RuntimeValue, type VmSnapshot, type RuntimeErrorCode } from './diagnostics.ts';
 
 // Entry floors the interval in milliseconds, so actual tick cadence can exceed the nominal rate.
 export const DEFAULT_FPS = 64;
@@ -89,6 +89,7 @@ export interface Renderer extends RendererLike, Partial<TextMeasurer> {
   hideQuestion?(): void;
   answerSubmitted?(): string | null;
   maskFor?(pictureId: string, width: number, height: number): AlphaMask | null;
+  textHitAt?(entity: Entity, x: number, y: number): boolean | null;
   reset?(): void;
   setScene?(sceneId: string): void;
   // Redraw when boost changes the drawing rules.
@@ -182,6 +183,7 @@ export interface VariableStore {
 
 export interface VmError {
   message: string;
+  code?: RuntimeErrorCode;
   blockId: string | null;
   targetId: string | null;
   where?: string;
@@ -318,7 +320,9 @@ export class Vm implements Project {
     this.masks = new MaskStore(
       (key, width, height) => this.renderer?.maskFor?.(key, width, height) ?? null,
     );
-    this.collision = new CollisionSystem(this.masks);
+    this.collision = new CollisionSystem(this.masks, (entity, x, y) =>
+      this.renderer?.textHitAt?.(entity, x, y) ?? null,
+    );
     this.ops = createOps(this);
   }
 
@@ -897,7 +901,7 @@ export class Vm implements Project {
       return null;
     }
     if (shared.objectId && entity.isClone) {
-      return entity.localVars?.[index] ?? shared;
+      return entity.localVars?.[index] ?? null;
     }
     return shared;
   }
@@ -1210,7 +1214,7 @@ export class Vm implements Project {
       blockType: site?.blockType ?? (error instanceof RuntimeBlockError ? error.blockType : undefined),
       targetId: target?.id ?? targetId,
       ...(thread ? { where: this.whereOf(thread, calls) } : {}),
-      ...(error instanceof RuntimeBlockError ? { inputs: error.inputs } : {}),
+      ...(error instanceof RuntimeBlockError ? { code: error.code, inputs: error.inputs } : {}),
       snapshot: snapshotVm(this),
       context: {
         frame: this.frame, clock: this.clock, sceneId,

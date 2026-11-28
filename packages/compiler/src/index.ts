@@ -86,7 +86,7 @@ export function compileProject(source: string, options: CompileOptions = {}): Co
   for (const list of [loaded.warnings, semantic.warnings]) for (const item of list) ctx.warnings.push(item);
 
   const program = loaded.ast;
-  reserveResourceIds(program, ctx);
+  reserveSavedIds(program, ctx);
   collectScenes(program, ctx);
   collectGlobals(program, ctx);
   collectObjects(program, ctx);
@@ -306,7 +306,7 @@ function makeVariable(
     isCloud: node.scope === 'shared',
     isRealTime: node.scope === 'realtime',
     cloudDate: false,
-    object: objectId,
+    object: objectId ?? node.savedObjectId ?? null,
     x: node.at ? Number(constantOf(node.at.x, ctx) ?? 0) : 0,
     y: node.at ? Number(constantOf(node.at.y, ctx) ?? 0) : 0,
   };
@@ -419,7 +419,12 @@ function collectObjects(program: ProgramNode, ctx: Context) {
   for (const object of ctx.objects) collectObjectMembers(object, ctx);
 }
 
-function reserveResourceIds(program: ProgramNode, ctx: Context) {
+function reserveSavedIds(program: ProgramNode, ctx: Context) {
+  for (const item of program.body) {
+    if ((item.type === 'VarDecl' || item.type === 'ListDecl') && item.savedObjectId) {
+      ctx.newId.reserve(item.savedObjectId);
+    }
+  }
   const objects = program.body.flatMap(item => item.type === 'Object' ? [item]
     : item.type === 'Scene' ? item.body.filter((node): node is ObjectNode => node.type === 'Object') : []);
   for (const object of objects) for (const member of object.body) {

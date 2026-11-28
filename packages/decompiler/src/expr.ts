@@ -25,8 +25,6 @@ const REVERSE_MATH: Record<string, string> = {
   sin: 'sin', cos: 'cos', tan: 'tan', asin_radian: 'asin', acos_radian: 'acos', atan_radian: 'atan',
   ln: 'ln', log: 'log10', floor: 'floor', ceil: 'ceil', round: 'round', abs: 'abs',
   factorial: 'factorial',
-  // Entry strips calc_operation suffixes, so asin and asin_radian behave alike.
-  asin: 'asin', acos: 'acos', atan: 'atan',
 };
 // The save manager sets its presence flag to 1.
 function isStoreFlagTest(block: RawBlock, ctx: DecompileContext): boolean {
@@ -207,6 +205,17 @@ function renderValue(block: any, ctx: DecompileContext, read: (block: any) => st
   const condition = (value: any) => value === null || value === undefined ? 'false' : read(value);
 
   switch (block.type) {
+    case 'message_cast':
+    case 'message_cast_wait': {
+      const type = entropyString(block.type);
+      const id = at(0);
+      if (id == null) return `entry_value(${type})`;
+      if (typeof id !== 'string') return placeholder(ctx, block);
+      if (id !== 'null' && ctx.messagesById.has(id)) {
+        return `entry_value(${type}, ${entropyString(ctx.messageName(id))})`;
+      }
+      return `entry_value(${type}, ${entropyString(id)}, "id")`;
+    }
     // Preserve literal text such as leading zeros instead of converting it to a number.
     case 'number': case 'text': {
       if (typeof at(0) === 'number') return numericValue(at(0));
@@ -263,9 +272,13 @@ function renderValue(block: any, ctx: DecompileContext, read: (block: any) => st
       if (op === 'square') return `(${read(at(1))} ** 2)`;
       if (op === 'root') return `(${read(at(1))} ** 0.5)`;
       if (op === 'unnatural') return `fraction(${read(at(1))})`;
-      // Entry treats unknown rounding operators as round.
-      const fn = lookup(REVERSE_MATH, op) ?? 'round';
-      return `${fn}(${read(at(1))})`;
+      const fn = lookup(REVERSE_MATH, op);
+      if (fn) return `${fn}(${read(at(1))})`;
+      if (op == null) return `entry_value("calc_operation", ${read(at(1))})`;
+      if (typeof op === 'string' || typeof op === 'number' || typeof op === 'boolean') {
+        return `entry_value("calc_operation", ${read(at(1))}, ${entropyLiteral(op)})`;
+      }
+      return placeholder(ctx, block);
     }
 
     case 'boolean_basic_operator': {

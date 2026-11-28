@@ -485,6 +485,10 @@ export class EntropyParser extends CstParser {
       $.CONSUME(kw.var);
       $.SUBRULE($.identifier, { LABEL: 'name' });
       $.OPTION2(() => $.SUBRULE($.displayName, { LABEL: 'displayName' }));
+      $.OPTION7(() => {
+        $.CONSUME(kw.object);
+        $.CONSUME(StringLiteral, { LABEL: 'savedObjectId' });
+      });
       $.CONSUME(Assign);
       $.SUBRULE($.expr, { LABEL: 'value' });
       $.OPTION3({ GATE: () => $.leads(kw.from), DEF: () => {
@@ -511,6 +515,10 @@ export class EntropyParser extends CstParser {
       $.CONSUME(kw.list);
       $.SUBRULE($.identifier, { LABEL: 'name' });
       $.OPTION2(() => $.SUBRULE($.displayName, { LABEL: 'displayName' }));
+      $.OPTION7(() => {
+        $.CONSUME(kw.object);
+        $.CONSUME(StringLiteral, { LABEL: 'savedObjectId' });
+      });
       $.CONSUME(Assign);
       $.SUBRULE($.listLiteral, { LABEL: 'value' });
       $.OPTION3({ GATE: () => $.leads(kw.visible), DEF: () => $.CONSUME(kw.visible, { LABEL: 'shown' }) });

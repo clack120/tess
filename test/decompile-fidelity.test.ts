@@ -25,6 +25,121 @@ function run(project: RawEntity) {
   return Object.fromEntries(vm.variables.map(variable => [variable.name, variable.getValue()]));
 }
 
+test('orphaned variables and lists keep their saved owner and references', () => {
+  const original = compile(`var points = 7
+list readings = ["first", "second"]
+var result = 0
+object "actor":
+  when start do
+    result = points + length(readings)
+  end
+end`);
+  original.variables.find(variable => variable.name === 'points')!.object = 'removed';
+  original.variables.find(variable => variable.name === 'readings')!.object = 'removed';
+  const rebuilt = roundtrip(original);
+  assert.equal(rebuilt.variables.find(variable => variable.name === 'points')!.object, 'removed');
+  assert.equal(rebuilt.variables.find(variable => variable.name === 'readings')!.object, 'removed');
+  assert.deepEqual(run(rebuilt), run(original));
+  assert.equal(run(rebuilt).result, 9);
+});
+
+test('a clone without the saved owner cannot change the original local variable', () => {
+  const project = compile(`var points object "removed" = 7
+list readings object "removed" = ["first"]
+object "actor":
+  when start do
+    clone "actor"
+  end
+  when cloned do
+    show readings
+    points = 9
+  end
+end`);
+  const vm = new Vm({ renderer: null, audio: null });
+  vm.load(project as never);
+  vm.start();
+  for (let i = 0; i < 3 && vm.errors.length === 0; i++) vm.tick();
+  assert.equal(vm.variables.find(variable => variable.name === 'readings')!.visible, true);
+  assert.equal(vm.variables.find(variable => variable.name === 'points')!.value, 7);
+  assert.equal(vm.errors[0]?.code, 'missing_variable');
+  assert.equal(vm.errors[0]?.blockType, 'set_variable');
+});
+
+test('unrecognized math menu values keep the stored field and Entry fallback through ETP', () => {
+  for (const operator of ['asin', 'atan', 'sin_unknown', null, -3, false]) {
+    const project = compile('var result = 0\nobject "o":\n when start do\n result = asin(0.8)\n end\nend');
+    const script = JSON.parse(project.objects[0]!.script);
+    script[0][1].params[1].params[3] = operator;
+    project.objects[0]!.script = JSON.stringify(script);
+    const rebuilt = roundtrip(project);
+    assert.equal(JSON.parse(rebuilt.objects[0]!.script)[0][1].params[1].params[3], operator);
+    const before = run(project);
+    assert.equal(before.result, 1);
+    assert.deepEqual(run(rebuilt), before);
+  }
+});
+
+test('value-slot signals keep their block, reference and scheduling through ETP', () => {
+  for (const type of ['message_cast', 'message_cast_wait']) {
+    const project = compile(`var result = 0
+var received = 0
+object "o":
+  when start do
+    if true:
+      result = 1
+    end
+  end
+  when signal "go" do
+    received = 1
+  end
+end`);
+    const script = JSON.parse(project.objects[0]!.script);
+    script[0][1].params[0] = { type, params: [project.messages[0]!.id, null] };
+    project.objects[0]!.script = JSON.stringify(script);
+    const rebuilt = roundtrip(project);
+    const saved = JSON.parse(rebuilt.objects[0]!.script)[0][1].params[0];
+    assert.equal(saved.type, type);
+    assert.deepEqual(saved.params, [rebuilt.messages[0]!.id, null]);
+    const before = run(project);
+    assert.equal(Number(before.result), type === 'message_cast_wait' ? 1 : 0);
+    assert.equal(Number(before.received), 1);
+    assert.deepEqual(run(rebuilt), before);
+  }
+});
+
+test('an unset or missing value-slot signal does not acquire a new declaration', () => {
+  for (const id of [null, 'removed-signal', 'null']) {
+    const project = compile('object "o":\n when start do\n wait until true\n end\nend');
+    const script = JSON.parse(project.objects[0]!.script);
+    script[0][1].params[0] = { type: 'message_cast_wait', params: [id, null] };
+    project.objects[0]!.script = JSON.stringify(script);
+    const rebuilt = roundtrip(project);
+    assert.deepEqual(rebuilt.messages, []);
+    const saved = JSON.parse(rebuilt.objects[0]!.script)[0][1].params[0];
+    assert.equal(saved.type, 'message_cast_wait');
+    assert.deepEqual(saved.params, [id, null]);
+    const vm = new Vm({ renderer: null, audio: null });
+    vm.load(rebuilt as never);
+    vm.start();
+    vm.tick();
+    assert.equal(vm.errors[0]?.code, 'missing_signal');
+  }
+});
+
+test('expanding a power evaluates a value-slot signal once', () => {
+  const project = compile(`var result = 0
+var received = 0
+object "o":
+  when start do
+    result = entry_value("message_cast_wait", "go") ** 3
+  end
+  when signal "go" do
+    received += 1
+  end
+end`);
+  assert.equal(Number(run(project).received), 1);
+});
+
 test('character reads of arbitrary expressions evaluate a changing index once after roundtrip', () => {
   for (const text of ['"abc"', 'join("a", "bc")', 'words[1]']) {
     const project = compile(`var calls = 0\nvar result = 0\nlist words = ["abc"]

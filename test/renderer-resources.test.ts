@@ -27,8 +27,21 @@ function setup() {
     },
   };
   class Container { children: unknown[] = []; destroy() {} }
-  const context = vm.createContext({ URL, AbortController, document: { baseURI: 'https://example.test/' },
-    Application: class { renderer = { resolution: 1 }; destroy() {} }, Container, TextStyle: class {}, Texture: { EMPTY: {} }, Assets: assets,
+  const context = vm.createContext({ URL, AbortController, document: {
+    baseURI: 'https://example.test/',
+    createElement: () => ({ getContext: () => ({ measureText: () => ({ width: 20, alphabeticBaseline: -5 }) }) }),
+  },
+    fontStringFromTextStyle: (style: { fontSize: number; fontFamily: string }) => `${style.fontSize}px ${style.fontFamily}`,
+    CanvasTextMetrics: {
+      measureFont: () => ({ ascent: 18, fontSize: 22 }),
+      measureText: (text: string) => ({ lines: text.split('\n') }),
+    },
+    Application: class {
+      renderer = { resolution: 1 };
+      stage = { renderGroup: null };
+      canvas = { addEventListener() {}, removeEventListener() {} };
+      destroy() {}
+    }, Container, TextStyle: class {}, Texture: { EMPTY: {} }, Assets: assets,
     Color: class { alpha = 1; toNumber() { return 0; } }, svgSharpness: () => 2,
     loadYield: () => () => undefined,
     stage: { scale: 1, worldWidth: 640, worldHeight: 360 }, MAX_SHARPNESS: 6,
@@ -58,7 +71,7 @@ test('text boxes share their style and keep the previous color on invalid input'
   };
   const renderer = create();
   renderer.textResolution = () => 1;
-  const entity = { text: 'Sample', colour: 'red', fontFamily: 'sans-serif', fontSize: 16, width: 100, lineBreak: true };
+  const entity = { text: 'Sample', colour: 'red', fontFamily: 'sans-serif', fontSize: 16, width: 100, height: 30, lineBreak: true };
   const view = () => ({
     text: { style: null as any, anchor: { set() {} }, position: { set() {} } },
     background: { clear() {} }, decoration: { clear() {} }, colour: null,
@@ -75,6 +88,72 @@ test('text boxes share their style and keep the previous color on invalid input'
   renderer.syncTextBox({ ...entity, colour: 'blue' }, second);
   assert.equal(second.text.style.fill.color, 0x0000ff);
   assert.equal(first.text.style.fill.color, 0xff0000);
+});
+
+test('text baselines follow the two Entry render modes and keep the wrap threshold', () => {
+  const { create, context } = setup();
+  context.TextStyle = class { constructor(options: object) { Object.assign(this, options); } };
+  const renderer = create();
+  renderer.textResolution = () => 1;
+  const entity = { text: 'A\nB', colour: '#000000', fontFamily: 'sans-serif', fontSize: 20, width: 100, height: 60, lineBreak: false };
+  let top = 0;
+  const view = {
+    text: { text: '', anchor: { set() {} }, position: { set(_x: number, y: number) { top = y; } } },
+    background: { clear() {} }, decoration: { clear() {} }, colour: null,
+  };
+  const draw = () => renderer.syncTextBox(entity, view);
+  draw();
+  assert.equal(top, -24);
+  renderer.options.boost = false;
+  draw();
+  assert.equal(top, -13);
+  entity.lineBreak = true;
+  draw();
+  assert.equal(top, -26);
+  entity.height = 64;
+  draw();
+  assert.equal(top, -26);
+  entity.height = 84;
+  draw();
+  assert.equal(top, -38);
+  renderer.options.boost = true;
+  draw();
+  assert.ok(Math.abs(top - (-39.9)) < 0.001);
+  entity.height = 35;
+  draw();
+  assert.equal(view.text.text, 'A');
+  renderer.options.boost = false;
+  draw();
+  assert.equal(view.text.text, 'A\nB');
+});
+
+test('text hit testing reads glyph alpha and reuses the mask for identical text', () => {
+  const { create, context } = setup();
+  const renderer = create();
+  let readbacks = 0;
+  context.CanvasTextGenerator = {
+    getCanvasAndContext() {
+      return { canvasAndContext: { context: { getImageData() {
+        readbacks++;
+        return { data: [0, 0, 0, 0, 0, 0, 0, 255] };
+      } } } };
+    },
+    returnCanvasAndContext() {},
+  };
+  const actor = { dirty: false };
+  const clone = { dirty: false };
+  const style = { styleKey: 'normal' };
+  const view = () => ({ colour: { alpha: 1 }, text: {
+    text: 'A', style, x: 0, y: 0,
+    bounds: { minX: -1, maxX: 1, minY: 0, maxY: 1 },
+  } });
+  renderer.views.set(actor, view());
+  renderer.views.set(clone, view());
+  assert.equal(renderer.textHitAt(actor, -0.5, 0.5), false);
+  assert.equal(renderer.textHitAt(actor, 0.5, 0.5), true);
+  assert.equal(renderer.textHitAt(clone, 0.5, 0.5), true);
+  assert.equal(renderer.textHitAt(clone, 1, 0.5), false);
+  assert.equal(readbacks, 1);
 });
 
 test('preload warms each texture source once and keeps later costumes within the upload budget', async () => {

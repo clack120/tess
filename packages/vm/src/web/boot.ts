@@ -522,6 +522,12 @@ const ESCAPE = 27;
 
 const CONTROL_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A']);
 
+function controlKey(event: KeyboardEvent): boolean {
+  const target = event.target as HTMLElement | null;
+  if (target?.isContentEditable || CONTROL_TAGS.has(target?.tagName ?? '')) return true;
+  return !!target?.closest?.('input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"])');
+}
+
 // Capture work keys only while running and focused; leave text controls to their own key handlers.
 function worksKey(vm: Vm, event: KeyboardEvent, code: number, grabEscape: boolean): boolean {
   // Stopped or paused works keep browser actions; Escape reaches the browser too unless it is grabbed.
@@ -533,8 +539,7 @@ function worksKey(vm: Vm, event: KeyboardEvent, code: number, grabEscape: boolea
     vm.usedKeys !== null && !vm.usedKeys.has(code)) {
     return false;
   }
-  const target = event.target as HTMLElement | null;
-  return !target?.isContentEditable && !CONTROL_TAGS.has(target?.tagName ?? '');
+  return !controlKey(event);
 }
 
 // Refresh focus and cursor each frame because the stage can move under a stationary pointer.
@@ -570,7 +575,9 @@ function bindInput(
   on(keyTarget, 'keydown', (raw) => {
     const event = raw as KeyboardEvent;
     const code = keyCodeOf(event);
-    if (!code) return;
+    // Text controls own both their DOM input and keyboard state. Filtering
+    // only claim() still started key hats and polluted is_key_pressed reads.
+    if (!code || controlKey(event)) return;
     vm.pressedKeys.add(code);
     // Forward repeated keydowns too because Entry runs key scripts at the browser's repeat rate.
     vm.fireEvent('keyPress', String(code));

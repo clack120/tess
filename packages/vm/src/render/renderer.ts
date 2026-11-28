@@ -2,6 +2,7 @@
 import {
   Application,
   Assets,
+  CanvasTextGenerator,
   CanvasTextMetrics,
   Color,
   TextStyle,
@@ -12,7 +13,9 @@ import {
   Sprite,
   Text,
   Texture,
+  fontStringFromTextStyle,
   type TextureSource,
+  type RenderGroup,
 } from 'pixi.js';
 import { stage, type Entity, type Picture, type Stroke, type Target } from '../runtime/model.ts';
 import type { Renderer } from '../runtime/engine.ts';
@@ -108,11 +111,22 @@ function usableColor(value: unknown): Ink | null {
 
 const LOAD_CONCURRENCY = 12;
 const TEXT_STYLE_LIMIT = 512;
+const TEXT_HIT_MAX_SIDE = 4096;
+const TEXT_HIT_MASK_LIMIT = 1024 * 1024;
+const TEXT_HIT_CACHE_LIMIT = 4 * TEXT_HIT_MASK_LIMIT;
 // Budget for eager uploads: 128 MiB of RGBA pixels before mipmaps.
 const WARMUP_PIXELS = 32 * 1024 * 1024;
 const BLACK: Ink = { color: 0, alpha: 1 };
 // Match Entry's difference between text-box reposition and WebGL offsets.
 const TEXT_BOX_TOP_OFFSET = 10 - 5.9;
+const TEXT_BOX_REPOSITION_THRESHOLD = 10;
+const TEXT_BOX_PADDED_FONTS = new Set(['Nanum Gothic Coding', 'SDMapssi']);
+
+interface TextHitMask {
+  width: number;
+  height: number;
+  alpha: Uint8Array;
+}
 
 interface EntityView {
   entity: Entity;
@@ -125,6 +139,8 @@ interface EntityView {
   pictureId: string | null;
   // Invalid input keeps the last readable text color.
   colour: Ink | null;
+  textVersion?: number;
+  canvasTextY?: number;
   // Keep strokes and fills just below their source entity.
   brush: PenView | null;
   paint: PenView | null;
@@ -191,7 +207,13 @@ export function sizedVector(text: string, width: number, height: number): string
   const head = open[0]
     .replace(/\s(width|height)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\/?>$/, '');
-  const sized = `${head} width="${Math.round(width)}" height="${Math.round(height)}">`;
+  // Without a viewBox, increasing the viewport leaves path coordinates small.
+  // Preserve that coordinate system before choosing a sharper raster size.
+  const original = /\sviewBox\s*=/.test(open[0]) ? null : svgSize(open[0]);
+  const box = original && Number.isFinite(original.width) && Number.isFinite(original.height) &&
+    original.width > 0 && original.height > 0 ? ` viewBox="0 0 ${original.width} ${original.height}"` : '';
+  const close = /\/>$/.test(open[0]) ? '/>' : '>';
+  const sized = `${head}${box} width="${Math.round(width)}" height="${Math.round(height)}"${close}`;
   const body = text.slice(open.index + open[0].length);
   const whole = `${text.slice(0, open.index)}${sized}${body}`;
   // Use an SVG data URL because PIXI cannot choose the SVG loader from a blob URL.
@@ -264,6 +286,11 @@ export class PixiRenderer implements Renderer {
   private overlay: Overlay | null = null;
   private quality: number;
   private ready = false;
+  private redraw = true;
+  // Render groups are pooled by Pixi; key by their actual root so a returned
+  // group cannot retain a destroyed entity tree through this cache.
+  private readonly drawnRoots = new WeakMap<Container, { transform: number; view: number }>();
+  private readonly contextRestored = () => { this.redraw = true; this.flush(); };
   private destroyed = false;
   private readonly controller = new AbortController();
   private lastResolution = 0;
@@ -278,6 +305,10 @@ export class PixiRenderer implements Renderer {
   private svgScaleGrew = false;
   private readonly measureStyle = new TextStyle();
   private readonly textStyles = new Map<string, TextStyle>();
+  private readonly textBaselines = new Map<string, { shift: number; canvasLineHeight: number }>();
+  private readonly textHitMasks = new Map<string, TextHitMask>();
+  private textHitBytes = 0;
+  private readonly textHitPoint = { x: 0, y: 0 };
   // Cache finished strokes because they never change; measure only the active stroke again.
   private fillCache = new WeakMap<Stroke, { boost: boolean; parts: number[][] | null }>();
 
@@ -310,12 +341,12 @@ export class PixiRenderer implements Renderer {
     this.overlay = new Overlay(this.app.stage);
     // Clear to the stage color before loading so an opaque WebGL canvas does not show black.
     this.app.canvas.style.background = options.background ?? '#ffffff';
-    this.app.renderer.render(this.app.stage);
-    this.renderCount++;
+    this.draw();
     if (options.parent && !options.canvas) {
       options.parent.appendChild(this.app.canvas);
     }
     this.ready = true;
+    this.app.canvas.addEventListener('webglcontextrestored', this.contextRestored);
   }
 
   private pixelRatio(): number {
@@ -394,6 +425,7 @@ export class PixiRenderer implements Renderer {
     if (this.ready) {
       this.lastResolution = 0;
       this.app.renderer.resize(stage.worldWidth, stage.worldHeight);
+      this.redraw = true;
     }
   }
 
@@ -420,8 +452,7 @@ export class PixiRenderer implements Renderer {
       void this.rebakeVectors();
       this.overlay?.setTextResolution(overlayTextResolution(stage.scale * resolution));
       // Draw immediately after resize so paused or idle stages do not stay black.
-      this.app.renderer.render(this.app.stage);
-      this.renderCount++;
+      this.draw();
     }
     const canvas = this.app.canvas;
     canvas.style.width = `${cssWidth}px`;
@@ -737,6 +768,7 @@ export class PixiRenderer implements Renderer {
   }
 
   reset(): void {
+    this.redraw = true;
     this.penDirty.clear();
     this.setInspection(null);
     for (const view of this.views.values()) {
@@ -749,6 +781,7 @@ export class PixiRenderer implements Renderer {
     }
     this.views.clear();
     this.textStyles.clear();
+    this.clearTextHitMasks();
     for (const layer of this.sceneLayers.values()) {
       layer.destroy({ children: true, context: true });
     }
@@ -764,6 +797,7 @@ export class PixiRenderer implements Renderer {
       return;
     }
     this.ready = false;
+    this.app.canvas.removeEventListener('webglcontextrestored', this.contextRestored);
     this.reset();
     this.textures.clear();
     this.images.clear();
@@ -802,6 +836,7 @@ export class PixiRenderer implements Renderer {
         this.penDirty.add(entity);
       }
       if (entity.type === "textBox") {
+        view.canvasTextY = 0;
         entity.measure(false);
         entity.dirty = true;
       }
@@ -1166,6 +1201,8 @@ export class PixiRenderer implements Renderer {
     }
     for (const [entity, view] of this.views) {
       if (entity.dirty) {
+        // Filter uniforms can change without a Pixi geometry/transform queue.
+        this.redraw = true;
         // Keep an object's last good frame if drawing it fails, and let the rest of the work continue.
         try {
           this.sync(entity, view);
@@ -1176,6 +1213,7 @@ export class PixiRenderer implements Renderer {
       }
     }
     if (this.penDirty.size) {
+      this.redraw = true;
       for (const entity of this.penDirty) {
         this.redrawPen(entity);
       }
@@ -1188,8 +1226,45 @@ export class PixiRenderer implements Renderer {
     }
     this.overlay?.flush();
     this.drawInspection();
+    if (this.redraw || this.groupChanged(this.app.stage.renderGroup)) this.draw();
+  }
+
+  // Pixi queues changes made by entities, overlays, textures and nested cached
+  // pen groups. Read those queues after syncing; do not replace them with an
+  // entity-only dirty flag or a frame-rate limit.
+  private groupChanged(group: RenderGroup | null): boolean {
+    if (!group) return true;
+    // Render callbacks can animate without touching VM entities. This private
+    // Pixi list is checked conservatively: an unknown layout keeps rendering.
+    const callbacks = (group as unknown as { _onRenderContainers?: unknown[] })._onRenderContainers;
+    if (!callbacks || callbacks.length > 0) return true;
+    const root = group.root, previous = this.drawnRoots.get(root);
+    if (!previous ||
+      previous.transform !== root._didContainerChangeTick || previous.view !== root._didViewChangeTick ||
+      group.structureDidChange || group.childrenRenderablesToUpdate.index > 0 ||
+      (group.isCachedAsTexture && group.textureNeedsUpdate)) return true;
+    for (const depth in group.childrenToUpdate) if (group.childrenToUpdate[depth]!.index > 0) return true;
+    for (const child of group.renderGroupChildren) if (this.groupChanged(child)) return true;
+    return false;
+  }
+
+  private noteDrawn(group: RenderGroup | null): void {
+    if (!group) return;
+    const root = group.root;
+    const previous = this.drawnRoots.get(root);
+    if (previous) {
+      previous.transform = root._didContainerChangeTick; previous.view = root._didViewChangeTick;
+    } else this.drawnRoots.set(root, { transform: root._didContainerChangeTick, view: root._didViewChangeTick });
+    for (const child of group.renderGroupChildren) this.noteDrawn(child);
+  }
+
+  private draw(): void {
+    // A failed submission must remain pending even if Pixi consumed its queues.
+    this.redraw = true;
     this.app.renderer.render(this.app.stage);
     this.renderCount++;
+    this.noteDrawn(this.app.stage.renderGroup);
+    this.redraw = false;
   }
 
   // Report drawing failures once per object to avoid flooding the console.
@@ -1266,36 +1341,30 @@ export class PixiRenderer implements Renderer {
     const style = this.textStyle(entity, view.colour);
     if (text.style !== style) text.style = style;
     const align = style.align;
-    if (text.text !== entity.text) {
-      text.text = entity.text;
+    let content = entity.text;
+    if (this.options.boost !== false && entity.lineBreak && entity.height >= 0 && style.lineHeight > 0) {
+      // Entry's WebGL path draws only whole lines that fit in the saved height.
+      const lines = CanvasTextMetrics.measureText(content, style).lines;
+      const visible = Math.floor(entity.height / style.lineHeight);
+      if (visible < lines.length) content = lines.slice(0, visible).join('\n');
     }
+    if (text.text !== content) text.text = content;
     const resolution = this.textResolution(entity, text);
     if (text.resolution !== resolution) {
       text.resolution = resolution;
     }
 
-    // Move the anchor for text alignment rather than moving the text itself.
     const anchorX = align === 'left' ? 0 : align === 'right' ? 1 : 0.5;
-    if (entity.lineBreak) {
-      // Pin wrapped text to the top of its saved box.
-      text.anchor.set(anchorX, 0);
-      text.position.set(
-        align === 'left' ? -entity.width / 2 : align === 'right' ? entity.width / 2 : 0,
-        -entity.height / 2 + TEXT_BOX_TOP_OFFSET,
-      );
-    } else if (this.options.boost === false) {
-      // Canvas Entry centers the first line, then draws later lines below it.
-      text.anchor.set(anchorX, 0);
-      text.position.set(0, -(entity.fontSize + 2) / 2);
-    } else {
-      // Boost Entry centers the whole text block instead.
-      text.anchor.set(anchorX, 0.5);
-      text.position.set(0, 0);
-    }
+    const baseline = this.textBaseline(style);
+    text.anchor.set(anchorX, 0);
+    text.position.set(
+      entity.lineBreak ? (anchorX - 0.5) * entity.width : 0,
+      this.firstLineMiddle(entity, view, style, baseline.canvasLineHeight) + baseline.shift,
+    );
 
     background.clear();
     const bg = entity.bgColor?.startsWith('#') ? usableColor(entity.bgColor) : null;
-    if (bg !== null) {
+    if (bg && bg.alpha >= 0.001) {
       const offset = entity.lineBreak
         ? 0
         : align === 'left'
@@ -1309,7 +1378,7 @@ export class PixiRenderer implements Renderer {
     }
 
     decoration.clear();
-    if ((entity.underLine || entity.strike) && ink !== null) {
+    if (content && (entity.underLine || entity.strike) && ink && ink.alpha >= 0.001) {
       const width = text.width;
       const left = text.x - width * text.anchor.x;
       const top = text.y - text.height * text.anchor.y;
@@ -1325,6 +1394,110 @@ export class PixiRenderer implements Renderer {
           .fill({ color: ink.color, alpha: ink.alpha });
       }
     }
+    view.textVersion = entity.version;
+  }
+
+  private firstLineMiddle(entity: Entity, view: EntityView, style: TextStyle, canvasLineHeight: number): number {
+    if (this.options.boost === false) {
+      if (!entity.lineBreak) {
+        view.canvasTextY = 0;
+        return 0;
+      }
+      const desired = canvasLineHeight / 2 - entity.height / 2 + 5;
+      const previous = view.canvasTextY ?? 0;
+      if (Math.abs(desired - previous) <= TEXT_BOX_REPOSITION_THRESHOLD) return previous;
+      view.canvasTextY = desired + (TEXT_BOX_PADDED_FONTS.has(entity.fontFamily) ? 10 : 0);
+      return view.canvasTextY;
+    }
+    if (entity.lineBreak) return -entity.height / 2 + TEXT_BOX_TOP_OFFSET + style.lineHeight / 2;
+    const lines = CanvasTextMetrics.measureText(entity.text, style).lines.length;
+    return -(lines - 1) * style.lineHeight / 2;
+  }
+
+  // Position Pixi's alphabetic baseline where Entry draws the middle baseline.
+  private textBaseline(style: TextStyle): { shift: number; canvasLineHeight: number } {
+    const font = fontStringFromTextStyle(style);
+    const key = `${font}\n${style.lineHeight}`;
+    const cached = this.textBaselines.get(key);
+    if (cached) return cached;
+    const props = CanvasTextMetrics.measureFont(font);
+    const context = this.measureContext();
+    let middleToAlphabetic = style.fontSize / 4;
+    let canvasLineHeight = style.fontSize * 1.2;
+    if (context) {
+      context.font = font;
+      context.textBaseline = 'middle';
+      const metrics = context.measureText('M');
+      context.textBaseline = 'alphabetic';
+      if (Number.isFinite(metrics.alphabeticBaseline)) middleToAlphabetic = -metrics.alphabeticBaseline;
+      canvasLineHeight = metrics.width * 1.2;
+    }
+    const fromTop = props.ascent + Math.max(0, (style.lineHeight - props.fontSize) / 2);
+    const baseline = { shift: middleToAlphabetic - fromTop, canvasLineHeight };
+    this.textBaselines.set(key, baseline);
+    if (this.textBaselines.size > TEXT_STYLE_LIMIT) this.textBaselines.delete(this.textBaselines.keys().next().value!);
+    return baseline;
+  }
+
+  textHitAt(entity: Entity, x: number, y: number): boolean | null {
+    const view = this.views.get(entity);
+    if (!view?.text) return null;
+    try {
+      if (entity.dirty && view.textVersion !== entity.version) this.syncTextBox(entity, view);
+      const point = this.textHitPoint;
+      point.x = x;
+      point.y = y;
+      if (view.background?.containsPoint(point) || view.decoration?.containsPoint(point)) return true;
+      const text = view.text;
+      if (!text.text || (view.colour?.alpha ?? 0) < 0.001) return false;
+      const bounds = text.bounds;
+      const px = Math.floor(x - text.x - bounds.minX);
+      const py = Math.floor(y - text.y - bounds.minY);
+      const width = Math.ceil(bounds.maxX - bounds.minX);
+      const height = Math.ceil(bounds.maxY - bounds.minY);
+      if (px < 0 || py < 0 || px >= width || py >= height) return false;
+      if (!Number.isFinite(width * height) || width > TEXT_HIT_MAX_SIDE || height > TEXT_HIT_MAX_SIDE ||
+          width * height > TEXT_HIT_MASK_LIMIT) return null;
+      const mask = this.textHitMask(text, width, height);
+      return px < mask.width && py < mask.height && mask.alpha[py * mask.width + px]! > 1;
+    } catch (error) {
+      this.reportSyncFailure(entity, error);
+      return null;
+    }
+  }
+
+  // Share the 1× hit mask between clones with the same text and style.
+  private textHitMask(text: Text, width: number, height: number): TextHitMask {
+    const key = `${text.style.styleKey}\n${text.text}`;
+    const cached = this.textHitMasks.get(key);
+    if (cached) {
+      this.textHitMasks.delete(key);
+      this.textHitMasks.set(key, cached);
+      return cached;
+    }
+    const { canvasAndContext } = CanvasTextGenerator.getCanvasAndContext({ text: text.text, style: text.style });
+    let alpha: Uint8Array;
+    try {
+      const pixels = canvasAndContext.context.getImageData(0, 0, width, height).data;
+      alpha = new Uint8Array(width * height);
+      for (let i = 0; i < alpha.length; i++) alpha[i] = pixels[i * 4 + 3]!;
+    } finally {
+      CanvasTextGenerator.returnCanvasAndContext(canvasAndContext);
+    }
+    while (this.textHitBytes + alpha.length > TEXT_HIT_CACHE_LIMIT || this.textHitMasks.size >= TEXT_STYLE_LIMIT) {
+      const oldest = this.textHitMasks.entries().next().value!;
+      this.textHitMasks.delete(oldest[0]);
+      this.textHitBytes -= oldest[1].alpha.length;
+    }
+    const mask = { width, height, alpha };
+    this.textHitMasks.set(key, mask);
+    this.textHitBytes += alpha.length;
+    return mask;
+  }
+
+  private clearTextHitMasks(): void {
+    this.textHitMasks.clear();
+    this.textHitBytes = 0;
   }
 
   // Pixi shares text textures when the content, style, and resolution match.
@@ -1390,11 +1563,14 @@ export class PixiRenderer implements Renderer {
     return { width: whole ?? metrics.width, height: metrics.height };
   }
 
+  private measureContext(): CanvasRenderingContext2D | null {
+    if (this.measureCanvas === undefined) this.measureCanvas = document.createElement('canvas').getContext('2d');
+    return this.measureCanvas;
+  }
+
   // Fall back to PIXI measurement when no canvas context is available.
   private measureWhole(entity: Entity): number | null {
-    const context = (this.measureCanvas ??= document
-      .createElement('canvas')
-      .getContext('2d'));
+    const context = this.measureContext();
     if (!context) {
       return null;
     }
@@ -1422,6 +1598,8 @@ export class PixiRenderer implements Renderer {
     }
     if (this.destroyed) return;
     CanvasTextMetrics.clearMetrics();
+    this.textBaselines.clear();
+    this.clearTextHitMasks();
     // Fresh styles invalidate textures drawn with fallback fonts.
     this.textStyles.clear();
     for (const [entity, view] of this.views) {

@@ -153,8 +153,10 @@ export function kernelOps(cells: Float64Array, marks: KernelMarks): KernelOps {
         case 'root': return Math.sqrt(value);
         case 'log': return Math.log(value) / Math.LN10;
         case 'ln': return Math.log(value);
-        case 'asin': return (Math.asin(value) * 180) / Math.PI;
-        case 'acos': return (Math.acos(value) * 180) / Math.PI;
+        case 'asin':
+        case 'acos':
+          if (value > 1 || value < -1) { cells[BAIL_SLOT] = 1; return NaN; }
+          return (Math[MATH_OPS[op] as 'asin' | 'acos'](value) * 180) / Math.PI;
         case 'atan': return (Math.atan(value) * 180) / Math.PI;
         case 'sin': return preciseTrig(value, 'sin');
         case 'cos': return preciseTrig(value, 'cos');

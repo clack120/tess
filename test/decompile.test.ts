@@ -2146,10 +2146,9 @@ test('소수점 부분은 원래 Entry 연산으로 되돌아온다', () => {
   assert.equal(value.params[3], 'unnatural');
 });
 
-// Entry ignores calc_operation suffixes after the first underscore.
-test('역삼각함수의 도 단위 이름도 자리표시자 없이 되돌아온다', () => {
-  for (const [entryName, entropyName] of [['asin', 'asin'], ['acos', 'acos'], ['atan', 'atan']]) {
-    const { source, warnings } = recompiledThread(valueProject([
+test('잘못 저장된 역삼각함수 메뉴 값은 원래 값으로 되돌아온다', () => {
+  for (const entryName of ['asin', 'acos', 'atan']) {
+    const { source, warnings, blocks } = recompiledThread(valueProject([
       {
         type: 'move_x',
         params: [{ type: 'calc_operation', params: [null, { type: 'number', params: ['0.5'] }, null, entryName] }, null],
@@ -2157,7 +2156,8 @@ test('역삼각함수의 도 단위 이름도 자리표시자 없이 되돌아�
       },
     ]));
     assert.deepEqual(warnings, [], entryName);
-    assert.match(source, new RegExp(`^ {2}x \\+= ${entropyName}\\(0\\.5\\)$`, 'm'));
+    assert.ok(source.includes(`entry_value("calc_operation", 0.5, "${entryName}")`));
+    assert.equal(blocks.find(b => b.type === 'move_x').params[0].params[3], entryName);
   }
 });
 
@@ -2386,11 +2386,10 @@ test('calc_operation 은 어떤 연산자로도 옮길 수 있다 — 모르는 
   }
 });
 
-test('엔트리가 모르는 연산자는 엔트리와 같이 round 로 읽는다', () => {
-  // Entry treats unrecognized calc_operation names as round.
+test('엔트리가 모르는 연산자의 원래 메뉴 값을 보존한다', () => {
   const result = decompileProject(calcOperationProject('없는연산'), []);
   const fragment = utf8(result.files.find((a) => a.path === 'objects/주인공.etp')!.data);
-  assert.match(fragment, /round\(5\)/);
+  assert.match(fragment, /entry_value\("calc_operation", 5, "없는연산"\)/);
   assert.deepEqual(result.warnings, []);
 });
 

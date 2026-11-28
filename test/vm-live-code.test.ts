@@ -10,7 +10,7 @@ const stack = (id: string, value: number) => [block(id, 'when_run_button_click')
 function setup() {
   const project = { scenes: [{ id: 's', name: 'scene' }], variables: [{ id: 'out', name: 'out', value: 0 }],
     objects: [{ id: 'actor', name: 'actor', scene: 's', script: JSON.stringify([stack('first', 1), stack('second', 3)]), entity: { x: 10, y: 20 } }],
-    functions: [], messages: [], tables: [{ id: 't', name: 't', fields: ['A'], data: [[1]] }] };
+    functions: [], messages: [{ id: 'message', name: 'message' }], tables: [{ id: 't', name: 't', fields: ['A'], data: [[1]] }] };
   const vm = new Vm({ renderer: null, audio: null });
   vm.load(project); vm.start(); vm.tick();
   return { vm, project, target: vm.targets[0]! };

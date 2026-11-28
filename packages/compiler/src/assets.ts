@@ -177,6 +177,21 @@ export function makeAsset(
     asset.imageType = IMAGE_TYPES[ext] ?? 'png';
     asset.dimension = { width: size!.width, height: size!.height };
     delete asset.ext;
+    // Entry can reuse the first decoded bitmap when saved sizes differ.
+    if (filename) {
+      const previous = ctx.assetImageDimensions.get(filename);
+      const key = `${size!.width}x${size!.height}`;
+      if (!previous) {
+        ctx.assetImageDimensions.set(filename, { ...size!, node, warned: new Set() });
+      } else if ((previous.width !== size!.width || previous.height !== size!.height) && !previous.warned.has(key)) {
+        previous.warned.add(key);
+        ctx.warn(node, `같은 그림 '${file}' 에 서로 다른 저장 크기 ${previous.width}×${previous.height} 와 ${size!.width}×${size!.height} 가 지정되었습니다.`, {
+          code: 'conflicting-image-dimensions',
+          help: 'EntryJS에서 같은 이미지를 다른 크기로 표시하려면 그림의 저장 크기는 같게 두고 각 오브젝트의 size 또는 scale_x/scale_y 를 조절하세요. 저장된 작품을 복원하는 경우 원본 의도도 확인하세요.',
+          related: [ctx.diagnostic(previous.node, '같은 그림의 첫 번째 저장 크기입니다.')],
+        });
+      }
+    }
   } else {
     asset.duration = seconds ?? 1;
   }

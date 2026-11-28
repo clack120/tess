@@ -52,6 +52,41 @@ test('shared media is inspected and bundled once per compile without caching lat
   assert.ok(second.project!.objects[0]!.sprite.pictures.every(picture => picture.dimension!.width === 9));
 });
 
+test('conflicting saved dimensions on one shared image produce a warning without rewriting the project', () => {
+  const source = `object "large":
+  costume p "same.png" size 66 66
+end
+object "small":
+  costume p "same.png" size 15 15
+end`;
+  const result = compileProject(source, { path: '/entry.etp' });
+  assert.deepEqual(result.errors, []);
+  const warning = result.warnings.find(item => item.code === 'conflicting-image-dimensions');
+  assert.ok(warning, 'same image with incompatible dimensions should be diagnosed');
+  assert.match(warning.help ?? '', /오브젝트의 size/);
+  assert.equal(warning.related?.length, 1);
+  const [large, small] = result.project!.objects;
+  assert.equal(large!.sprite.pictures[0]!.filename, small!.sprite.pictures[0]!.filename);
+  assert.deepEqual(large!.sprite.pictures[0]!.dimension, { width: 66, height: 66 });
+  assert.deepEqual(small!.sprite.pictures[0]!.dimension, { width: 15, height: 15 });
+});
+
+test('shared image dimensions with different object scales do not warn', () => {
+  const source = `object "large":
+  costume p "same.png" size 88 88
+  size = 75
+end
+object "small":
+  costume p "same.png" size 88 88
+  size = 17
+end`;
+  const result = compileProject(source, { path: '/entry.etp' });
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.warnings.some(item => item.code === 'conflicting-image-dimensions'), false);
+  assert.equal(result.project!.objects[0]!.entity.scaleX, .75);
+  assert.equal(result.project!.objects[1]!.entity.scaleX, .17);
+});
+
 test('PNG 헤더에서 원본 크기를 읽는다 (회귀)', () => {
   const bytes = fs.readFileSync(path.join(root, 'examples/cat_idle.png'));
   assert.deepEqual(imageSize(bytes), { width: 220, height: 350 });

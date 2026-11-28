@@ -530,12 +530,9 @@ function buildContext(
     const store = !entry.object && String(entry.name ?? '').startsWith(STORE_PREFIX);
     const label = store ? String(entry.name).slice(STORE_PREFIX.length) : entry.name;
     const identifier = safeIdentifier(label, usedNames, isList ? 'list' : 'var');
-    // Preserve locals from deleted objects as globals rather than dropping them.
     const owned = entry.object && ctx.objectsById.has(entry.object);
-    if (entry.object && !owned) {
-      ctx.warn(`'${entry.name}' 은(는) 작품에 없는 오브젝트의 지역 변수라 전역으로 옮겼습니다.`);
-    }
-    const info = { identifier, isList, objectId: owned ? entry.object : null, source: entry, store };
+    const savedObjectId = !owned && typeof entry.object === 'string' && entry.object ? entry.object : undefined;
+    const info = { identifier, isList, objectId: owned ? entry.object : null, savedObjectId, source: entry, store };
     ctx.varsById.set(entry.id, info);
     if (owned) {
       if (!ctx.localVarsByObject.has(entry.object)) ctx.localVarsByObject.set(entry.object, []);
@@ -786,6 +783,7 @@ function declarationLine(info: VarInfo, indentLevel = 0, positions = false): str
   // Check the stripped name because store restores the @ prefix.
   const entryName = info.store ? String(source.name).slice(STORE_PREFIX.length) : source.name;
   const named = displayNamePart(info.identifier, entryName);
+  const owner = info.savedObjectId === undefined ? '' : ` object ${entropyString(info.savedObjectId)}`;
   const shown = source.visible ? ' visible' : '';
   const order = info.order === undefined ? '' : ` order ${info.order}`;
   const at = positions && (source.x || source.y)
@@ -797,7 +795,7 @@ function declarationLine(info: VarInfo, indentLevel = 0, positions = false): str
     const width = Number(source.width ?? 100);
     const height = Number(source.height ?? 120);
     const size = width !== 100 || height !== 120 ? ` size ${entropyNumber(width)} ${entropyNumber(height)}` : '';
-    const head = `${pad}${scope}list ${info.identifier}${named} = [`;
+    const head = `${pad}${scope}list ${info.identifier}${named}${owner} = [`;
     const tail = `]${shown}${at}${size}${order}`;
     const itemWidth = items.reduce((width: number, item: string) => width + item.length, 0) + Math.max(0, items.length - 1) * 2;
     if (head.length + itemWidth + tail.length <= 100) {
@@ -821,7 +819,7 @@ function declarationLine(info: VarInfo, indentLevel = 0, positions = false): str
   const range = source.variableType === 'slide'
     ? ` from ${entropyNumber(Number(source.minValue) || 0)} to ${entropyNumber(Number(source.maxValue) || 0)}`
     : '';
-  return [`${pad}${scope}var ${info.identifier}${named} = ${entropyLiteral(source.value)}${range}${shown}${at}${order}`];
+  return [`${pad}${scope}var ${info.identifier}${named}${owner} = ${entropyLiteral(source.value)}${range}${shown}${at}${order}`];
 }
 
 function sceneLines(scene: RawEntity, project: RawEntity, ctx: DecompileContext): string[] {

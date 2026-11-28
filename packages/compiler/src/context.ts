@@ -49,6 +49,7 @@ export class Context {
   assetMetadata = new Map<string, { length: number; size?: { width: number; height: number } | null; duration?: number | null }>();
   assetFilenameSources = new Map<string, string>();
   assetTargets = new Set<string>();
+  assetImageDimensions = new Map<string, { width: number; height: number; node: Node; warned: Set<string> }>();
 
   comments: Map<string, string>;
 

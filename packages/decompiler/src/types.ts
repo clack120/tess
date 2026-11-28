@@ -25,6 +25,7 @@ export interface VarInfo {
   identifier: string;
   isList: boolean;
   objectId: string | null;
+  savedObjectId?: string;
   source: RawEntity;
   store?: boolean;
   order?: number;

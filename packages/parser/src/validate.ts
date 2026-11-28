@@ -18,6 +18,7 @@ interface WalkContext {
   loopDepth: number;
   scope: Set<string>;
   objectLocals: Set<string>;
+  warnedObjectLocals?: Set<string>;
   functions: Set<string>;
 }
 
@@ -120,6 +121,11 @@ export function validate(
       case 'Scene':
         item.body.forEach(visitTopLevel);
         break;
+      case 'VarDecl': case 'ListDecl':
+        if (item.savedObjectId === '') {
+          error(item, '저장된 오브젝트 ID는 비워 둘 수 없습니다.').code = 'invalid-variable-owner';
+        }
+        break;
       case 'Object':
         visitObject(item);
         break;
@@ -153,6 +159,9 @@ export function validate(
         case 'FunctionDecl':
           visitFunction(member, locals);
           break;
+        case 'VarDecl': case 'ListDecl':
+          checkSavedObjectScope(member);
+          break;
         case 'Event':
           walkStatements(member.body, {
             isText,
@@ -182,12 +191,19 @@ export function validate(
       loopDepth: 0,
       scope: new Set([...globals, ...fn.params]),
       objectLocals,
+      warnedObjectLocals: new Set(),
       functions: knownFunctions,
     });
   }
 
   function walkStatements(statements: Stmt[], ctx: WalkContext) {
     for (const statement of statements) walkStatement(statement, ctx);
+  }
+
+  function checkSavedObjectScope(node: Extract<Stmt, { type: 'VarDecl' | 'ListDecl' }>) {
+    if (node.savedObjectId !== undefined) {
+      error(node, '저장된 오브젝트 ID는 작품 맨 위의 변수·리스트 선언에만 쓸 수 있습니다.').code = 'invalid-variable-owner';
+    }
   }
 
   function walkStatement(statement: Stmt, ctx: WalkContext) {
@@ -224,6 +240,7 @@ export function validate(
     switch (statement.type) {
       case 'VarDecl':
       case 'ListDecl':
+        checkSavedObjectScope(statement);
         if (ctx.inFunction && statement.order !== undefined) {
           error(statement, '함수 지역 변수에는 order 를 쓸 수 없습니다.');
         }
@@ -366,10 +383,13 @@ export function validate(
     if (ctx.inFunction && localOwners.has(name)) {
       const owners = localOwners.get(name)!;
       if (owners.length === 1) {
-        warn(
+        if (ctx.warnedObjectLocals?.has(name)) return;
+        ctx.warnedObjectLocals?.add(name);
+        const item = warn(
           identifier,
           `'${name}' 은(는) ${owners[0]} 의 지역 변수입니다. 이 함수를 ${owners[0]} 안에 선언하는 편이 좋습니다.`,
         );
+        item.code = 'object-local-reference';
       } else {
         error(
           identifier,
@@ -404,7 +424,8 @@ function mayRunOrFail(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(mayRunOrFail);
   const node = value as AnyNode;
   if (node.type === 'Index') return true;
-  if (node.type === 'Call' && (!BUILTIN_FUNCTIONS.has(node.callee as string) || node.callee === 'slice')) return true;
+  if (node.type === 'Call' && (!BUILTIN_FUNCTIONS.has(node.callee as string) ||
+      node.callee === 'slice' || node.callee === 'entry_value')) return true;
   return Object.entries(node).some(([key, child]) => key !== 'loc' && mayRunOrFail(child));
 }
 

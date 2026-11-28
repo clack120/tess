@@ -28,6 +28,10 @@ export class ThreadStop extends Error {
 
 const SQRT3 = Math.sqrt(3);
 const HALF_SQRT2 = Math.SQRT2 / 2;
+const MATH_OPERATORS = new Set([
+  'square', 'root', 'sin', 'cos', 'tan', 'asin_radian', 'acos_radian', 'atan_radian',
+  'log', 'ln', 'unnatural', 'floor', 'ceil', 'round', 'factorial', 'abs',
+]);
 
 // Use exact trig values for Entry's common angles.
 const TRIG: Record<string, Record<number, number>> = {
@@ -145,21 +149,36 @@ export function createOps(vm: Vm) {
     return vm.entityOf(id);
   }
 
+  function checkMessage(id: string, blockType: string): void {
+    if (id === 'null' || !vm.messages.some(message => message.id === id)) {
+      throw new RuntimeBlockError('신호를 찾을 수 없습니다', blockType, { signal: id }, 'missing_signal');
+    }
+  }
+
   function variable(entity: Entity, index: number): Variable | null {
     return vm.variableAt(index, entity);
+  }
+
+  function requireVariable(entity: Entity, index: number, blockType: string): Variable {
+    const target = variable(entity, index);
+    if (!target || target.isList) {
+      throw new RuntimeBlockError('이 오브젝트에서 변수를 찾을 수 없습니다', blockType,
+        { variable: vm.variables[index]?.name ?? index }, 'missing_variable');
+    }
+    return target;
   }
 
   function listVariable(entity: Entity, index: number, blockType: string): Variable {
     const list = variable(entity, index);
     if (!list?.isList) {
-      throw new RuntimeBlockError('리스트를 찾을 수 없습니다', blockType, { list: list?.name ?? index });
+      throw new RuntimeBlockError('리스트를 찾을 수 없습니다', blockType, { list: list?.name ?? index }, 'missing_list');
     }
     return list;
   }
 
   function listError(blockType: string, list: Variable, inputs: Record<string, unknown>): never {
     throw new RuntimeBlockError(`리스트 항목 위치가 올바르지 않습니다 (항목 수 ${list.array.length})`,
-      blockType, { list: list.name, length: list.array.length, ...inputs });
+      blockType, { list: list.name, length: list.array.length, ...inputs }, 'list_index');
   }
 
   function tableAt(index: TableRef) {
@@ -167,7 +186,7 @@ export function createOps(vm: Vm) {
   }
 
   function tableError(index: TableRef, blockType: string, inputs: Record<string, unknown>): never {
-    throw new RuntimeBlockError('표를 찾을 수 없습니다', blockType, { table: index, ...inputs });
+    throw new RuntimeBlockError('표를 찾을 수 없습니다', blockType, { table: index, ...inputs }, 'missing_table');
   }
 
   function tableColumnPosition(index: TableRef, column: unknown, blockType: string, input = 'column') {
@@ -175,7 +194,7 @@ export function createOps(vm: Vm) {
       return columnIndex(column);
     } catch {
       throw new RuntimeBlockError('표의 열 지정값을 읽을 수 없습니다 (예: A 또는 1)', blockType,
-        { table: tableAt(index)?.id ?? index, [input]: column });
+        { table: tableAt(index)?.id ?? index, [input]: column }, 'table_column');
     }
   }
 
@@ -184,7 +203,7 @@ export function createOps(vm: Vm) {
     const upper = (address as string).toUpperCase;
     if (typeof upper !== 'function') {
       throw new RuntimeBlockError('셀 주소를 글자로 읽을 수 없습니다 (예: A2)', blockType,
-        { table: tableAt(index)?.id ?? index, cell, ...(blockType === 'set_value_from_cell' ? { value } : {}) });
+        { table: tableAt(index)?.id ?? index, cell, ...(blockType === 'set_value_from_cell' ? { value } : {}) }, 'table_cell');
     }
     return cellToRowCol(upper.call(address));
   }
@@ -658,10 +677,17 @@ export function createOps(vm: Vm) {
     },
 
     castMessage(id: string): void {
+      checkMessage(id, 'message_cast');
       vm.queueMessage(id);
     },
 
+    castMessageInput(id: string): void {
+      checkMessage(id, 'message_cast_wait');
+      vm.fireEvent('when_message_cast', id);
+    },
+
     *castMessageWait(id: string) {
+      checkMessage(id, 'message_cast_wait');
       const started = vm.fireEvent('when_message_cast', id);
       while (started.some((thread) => !thread.done)) {
         yield 0;
@@ -688,23 +714,20 @@ export function createOps(vm: Vm) {
     },
 
     getVariable(entity: Entity, index: number): string | number | boolean {
-      return variable(entity, index)?.getValue() ?? 0;
+      return requireVariable(entity, index, 'get_variable').getValue();
     },
 
     setVariable(entity: Entity, index: number, value: unknown): void {
-      variable(entity, index)?.setValue(value as string | number);
+      requireVariable(entity, index, 'set_variable').setValue(value as string | number);
     },
 
     // Add numeric values and concatenate other values, matching Entry.
     changeVariable(entity: Entity, index: number, value: unknown): void {
       if (value === false) {
         throw new RuntimeBlockError('변수 증가량으로 판단값 false를 사용할 수 없습니다 (숫자 0은 허용됩니다)',
-          'change_variable', { variable: variable(entity, index)?.name ?? index, increment: value });
+          'change_variable', { variable: variable(entity, index)?.name ?? index, increment: value }, 'invalid_increment');
       }
-      const target = variable(entity, index);
-      if (!target) {
-        return;
-      }
+      const target = requireVariable(entity, index, 'change_variable');
       const current = target.getValue();
       if (cast.isNumber(value) && target.isNumber()) {
         // Keep toFixed results as text because their decimal formatting affects later changes.
@@ -717,10 +740,16 @@ export function createOps(vm: Vm) {
     },
 
     showVariable(entity: Entity, index: number, visible: boolean): void {
-      const target = variable(entity, index);
-      if (target) {
-        target.visible = visible;
+      requireVariable(entity, index, visible ? 'show_variable' : 'hide_variable').visible = visible;
+    },
+
+    showList(index: number, visible: boolean): void {
+      const list = vm.variables[index];
+      if (!list?.isList) {
+        throw new RuntimeBlockError('리스트를 찾을 수 없습니다', visible ? 'show_list' : 'hide_list',
+          { list: list?.name ?? index }, 'missing_list');
       }
+      list.visible = visible;
     },
 
     listValue(entity: Entity, index: number, raw: unknown): string | number | boolean {
@@ -791,6 +820,9 @@ export function createOps(vm: Vm) {
     },
 
     *askAndWait(entity: Entity, message: unknown) {
+      if (message === undefined || message === '') {
+        throw new RuntimeBlockError('질문 내용이 비어 있습니다', 'ask_and_wait', { message }, 'empty_question');
+      }
       ops.dialog(entity, message, 'ask');
       const dialog = entity.dialog;
       const request = {};
@@ -1312,6 +1344,13 @@ export function createOps(vm: Vm) {
       return vm.frame;
     },
 
+    repeatCount(value: number): number {
+      if (value < 0) {
+        throw new RuntimeBlockError('반복 횟수는 0 이상이어야 합니다', 'repeat_basic', { count: value }, 'negative_repeat');
+      }
+      return Math.floor(value);
+    },
+
     random(left: string, right: string): number | string {
       const low = Math.min(Number(left), Number(right));
       const high = Math.max(Number(left), Number(right));
@@ -1323,7 +1362,11 @@ export function createOps(vm: Vm) {
     },
 
     mathOp(value: number, rawOperator: string): number {
-      let operator = rawOperator;
+      if ((rawOperator === 'asin_radian' || rawOperator === 'acos_radian') && (value > 1 || value < -1)) {
+        throw new RuntimeBlockError('역삼각함수의 입력은 -1 이상 1 이하여야 합니다', 'calc_operation',
+          { operator: rawOperator, value }, 'math_domain');
+      }
+      let operator = MATH_OPERATORS.has(rawOperator) ? rawOperator : 'round';
       if (operator.indexOf('_') > 0) {
         operator = operator.split('_')[0]!;
       }
@@ -1428,12 +1471,12 @@ export function createOps(vm: Vm) {
     },
 
     // Out-of-range text access throws and stops the whole work, matching Entry.
-    charAt(text: string, index: number): string {
+    charAt(text: string, index: number): string | undefined {
       // Keep Entry's comparisons so NaN and fractional indices pass the same checks.
       if (index - 1 < 0 || index - 1 > text.length - 1) {
-        throw new RuntimeBlockError(`글자 위치 ${index} 이(가) 범위를 벗어났습니다 (글자 수 ${text.length})`, 'char_at', { text, index });
+        throw new RuntimeBlockError(`글자 위치 ${index} 이(가) 범위를 벗어났습니다 (글자 수 ${text.length})`, 'char_at', { text, index }, 'text_index');
       }
-      return text[index - 1] ?? '';
+      return text[index - 1];
     },
 
     substring(text: string, start: number, end: number): string {
@@ -1441,7 +1484,7 @@ export function createOps(vm: Vm) {
       const to = end - 1;
       const last = text.length - 1;
       if (from < 0 || to < 0 || from > last || to > last) {
-        throw new RuntimeBlockError(`글자 범위 ${start}~${end} 이(가) 범위를 벗어났습니다 (글자 수 ${text.length})`, 'substring', { text, start, end });
+        throw new RuntimeBlockError(`글자 범위 ${start}~${end} 이(가) 범위를 벗어났습니다 (글자 수 ${text.length})`, 'substring', { text, start, end }, 'text_range');
       }
       return text.substring(Math.min(from, to), Math.max(from, to) + 1);
     },

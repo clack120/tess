@@ -188,7 +188,7 @@ export class Table {
   insertCol(index: number, name = '새로운 열'): void {
     if (index < 1 || index > this.fields.length + 1) {
       throw new RuntimeBlockError(`열 삽입 위치가 범위를 벗어났습니다 (위치 ${index}, 허용 범위 1–${this.fields.length + 1})`,
-        'insert_row_to_table', { table: this.id, tableName: this.name, position: index, columns: this.fields.length, property: 'COL' });
+        'insert_row_to_table', { table: this.id, tableName: this.name, position: index, columns: this.fields.length, property: 'COL' }, 'table_insert_column');
     }
     this.fields.splice(index - 1, 0, this.columnName(name));
     for (const row of this.rows) {

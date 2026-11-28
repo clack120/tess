@@ -15,7 +15,7 @@ const stubRenderer = () => ({
   flush() {},
 });
 
-function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 }, grabEscape = false) {
+function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 }, grabEscape = false, windowKeys = false) {
   const dom = new JSDOM(
     '<!doctype html><body><div id="root" tabindex="0" draggable="true">'
       + '<div id="view"><input id="ask" type="text"></div><button id="stop"></button>'
@@ -70,7 +70,7 @@ function mountInput(t: any, rect = { left: 0, top: 0, width: 640, height: 360 },
   const view = document_.getElementById('view')!;
   const player = document_.getElementById('root')!;
   const cleanups: Array<() => void> = [];
-  const frame = (sandbox.bind as any)(stage, { ...stubRenderer(), canvasRect: () => rect }, view, player, cleanups, () => '', grabEscape);
+  const frame = (sandbox.bind as any)(stage, { ...stubRenderer(), canvasRect: () => rect }, view, windowKeys ? dom.window : player, cleanups, () => '', grabEscape);
 
   const press = (on: string, init: Record<string, unknown>, type = 'keydown') => {
     let sawIt = false;
@@ -142,6 +142,44 @@ test('answer controls keep native focus and selection and do not press the work'
   assert.equal(stage.mouseDown, false);
   assert.equal(fired.length, 0);
   assert.equal(pointer('root', 'dragstart', 320, 180).defaultPrevented, false, 'unrelated page dragging remains native');
+});
+
+for (const windowKeys of [false, true]) {
+  test(`answer typing and submission never become work keys (${windowKeys ? 'window' : 'player'} target)`, t => {
+    const { press, stage, fired, sandbox, document, focused } = mountInput(t, undefined, false, windowKeys);
+    const player = document.getElementById('root')!;
+    const answers: string[] = [];
+    const field = (sandbox.makeQuestionField as any)(document.getElementById('view'), (value: string) => answers.push(value), () => player.focus());
+    field.show();
+    const input = document.activeElement as HTMLInputElement;
+    input.id = 'answer';input.value = 'typed answer';
+    for (const code of ['KeyA', 'Backspace', 'ControlLeft', 'ShiftLeft', 'KeyV', 'Enter']) {
+      assert.deepEqual(press('answer', { code }), { prevented: false, reachedPage: true });
+      assert.equal(stage.pressedKeys.size, 0, `${code} must not affect work key polling`);
+    }
+    assert.deepEqual(fired, [], 'no modal key may start a work script');
+    input.form!.dispatchEvent(new document.defaultView!.Event('submit', { bubbles: true, cancelable: true }));
+    assert.deepEqual(answers, ['typed answer']);field.hide();assert.equal(focused(), 'root');
+    press('root', { code: 'KeyZ' });assert.deepEqual(fired, [['keyPress', '90']]);
+    assert.deepEqual([...stage.pressedKeys], [90]);
+  });
+}
+
+test('a work modifier released in the answer field is cleared without admitting new modal keys', t => {
+  const { press, stage, fired, focus } = mountInput(t, undefined, false, true);
+  press('root', { code: 'ControlLeft' });focus('ask');
+  press('ask', { code: 'ControlLeft' }, 'keyup');
+  press('ask', { code: 'KeyV', ctrlKey: true });
+  assert.equal(stage.pressedKeys.size, 0);assert.deepEqual(fired, [['keyPress', '17']]);
+});
+
+test('editable regions and nested controls keep keyboard events out of the work', t => {
+  const { press, stage, fired, document } = mountInput(t, undefined, false, true);
+  document.getElementById('view')!.insertAdjacentHTML('beforeend', '<textarea id="area"></textarea><select id="select"></select><button><span id="button-label">OK</span></button><div contenteditable="true"><span id="editable">text</span></div>');
+  for (const id of ['area', 'select', 'button-label', 'editable']) {
+    assert.deepEqual(press(id, { code: 'Enter' }), { prevented: false, reachedPage: true });
+  }
+  assert.equal(stage.pressedKeys.size, 0);assert.deepEqual(fired, []);
 });
 
 test('clicking the stage takes keyboard focus back after another page control used it', (t) => {

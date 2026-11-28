@@ -372,12 +372,16 @@ export function planKernel(
       case 'calc_divide':
         return binary('DIVIDE', p[0], p[2]);
       case 'calc_operation': {
-        const name = text(p[3] ?? '').split('_')[0] ?? '';
+        const raw = text(p[3] ?? '');
+        const name = raw === 'asin_radian' || raw === 'acos_radian' || raw === 'atan_radian'
+          ? raw.split('_')[0]! : raw;
         const op = MATH_OPS.indexOf(name);
+        // Bare inverse names are not options in Entry's menu.
+        const valid = op !== -1 && (!['asin', 'acos', 'atan'].includes(name) || raw !== name);
         return {
-          code: `math_op(${asNum(value(p[1], 'num'))}, ${op === -1 ? MATH_OPS.length - 1 : op})`,
+          code: `math_op(${asNum(value(p[1], 'num'))}, ${valid ? op : MATH_OPS.length - 1})`,
           kind: 'num',
-          tail: WHOLE_OPS.has(name) || op === -1 ? 0 : undefined,
+          tail: WHOLE_OPS.has(name) || !valid ? 0 : undefined,
         };
       }
       case 'calc_mod':

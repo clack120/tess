@@ -16,6 +16,7 @@ export const STATE_VALUES = new Set([
 ]);
 
 export const BUILTIN_FUNCTIONS = new Set([
+  "entry_value",
   "key_down",
   "touching",
   "type",

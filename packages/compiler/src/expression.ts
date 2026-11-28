@@ -344,7 +344,7 @@ function mayChange(node: unknown, ctx: Context): boolean {
   if (node === null || typeof node !== 'object') return false;
   if (Array.isArray(node)) return node.some(child => mayChange(child, ctx));
   const call = node as { type?: string; callee?: string };
-  if (call.type === 'Call' && (ctx.functionByName.has(call.callee!)
+  if (call.type === 'Call' && (ctx.functionByName.has(call.callee!) || call.callee === 'entry_value'
       || call.callee === 'random' || call.callee === 'random_color' || expansionBlock(call.callee!))) return true;
   return Object.entries(node).some(([key, value]) => key !== 'loc' && mayChange(value, ctx));
 }
@@ -530,6 +530,45 @@ function compileExpansion(node: CallNode, ctx: Context): EntryBlock | null {
   return ctx.block(callee, params);
 }
 
+// Keep Entry blocks whose saved input form has no ordinary ETP expression.
+function compileEntryValue(node: CallNode, ctx: Context): EntryBlock | null {
+  const [type, input, field] = node.arguments;
+  const invalid = (at: Node, message: string) => ctx.error(at, message, { code: 'invalid-entry-value' });
+  if (type?.type !== 'String') return invalid(node, 'entry_value() 의 첫 번째 인자는 엔트리 블록 이름이어야 합니다.');
+  if (node.arguments.length > 3) return invalid(node, 'entry_value() 는 인자를 최대 3개 받습니다.');
+  switch (type.value) {
+    case 'message_cast':
+    case 'message_cast_wait': {
+      if (!input) return ctx.block(type.value, [null, null]);
+      if (input.type !== 'String' || (field && (field.type !== 'String' || field.value !== 'id'))) {
+        return invalid(node, '신호를 이름으로 직접 적으세요. 저장된 ID는 마지막 인자에 "id" 를 지정하세요.');
+      }
+      if (field) return ctx.block(type.value, [input.value, null]);
+      const message = ctx.messageByName.get(input.value);
+      if (!message) return ctx.error(input, `신호 '${input.value}' 의 선언을 찾지 못했습니다.`, {
+        code: 'unknown-signal',
+        help: 'signal 선언이나 신호 이벤트에 같은 이름을 쓰세요.',
+      });
+      return ctx.block(type.value, [message.id, null]);
+    }
+    case 'calc_operation': {
+      if (!input) return invalid(node, 'calc_operation 의 계산 값을 적으세요.');
+      const value = compileValue(input, ctx);
+      if (!value) return null;
+      if (!field) return ctx.block(type.value, [null, value, null, null]);
+      if (field.type === 'String' || field.type === 'Boolean' || field.type === 'Number') {
+        return ctx.block(type.value, [null, value, null, field.value]);
+      }
+      if (field.type === 'Unary' && field.operator === '-' && field.argument.type === 'Number') {
+        return ctx.block(type.value, [null, value, null, -field.argument.value]);
+      }
+      return invalid(field, 'calc_operation 에 저장된 연산자 값은 리터럴이어야 합니다.');
+    }
+    default:
+      return invalid(type, `entry_value() 는 '${type.value}' 블록을 아직 지원하지 않습니다.`);
+  }
+}
+
 function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
   const { callee, arguments: args } = node;
   const arity = (count: number) => {
@@ -561,6 +600,7 @@ function compileCall(node: CallNode, ctx: Context): EntryBlock | null {
   }
 
   switch (callee) {
+    case 'entry_value': return compileEntryValue(node, ctx);
     case 'is_number': case 'is_english': case 'is_korean': {
       if (!arity(1)) return null;
       const argument = value(0);

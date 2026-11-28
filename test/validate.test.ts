@@ -111,17 +111,37 @@ end`);
   assert.deepEqual(result.warnings, []);
 });
 
+test('saved object IDs only belong on top-level declarations', () => {
+  for (const source of [
+    'var v object "" = 1',
+    'object "o":\n var v object "removed" = 1\nend',
+    'function f():\n var v object "removed" = 1\nend',
+  ]) {
+    assert.ok(parse(source).errors.some(error => error.code === 'invalid-variable-owner'), source);
+  }
+});
+
 test('전역 함수가 오브젝트 로컬 변수를 쓰면 그 오브젝트 안으로 옮기라고 알린다', () => {
   const result = parse(`object "hero":
   var local_power = 50
 end
 
 function get_damage(base_dmg):
-  return base_dmg * local_power
+  if base_dmg > local_power:
+    return base_dmg * local_power
+  end
+  return local_power
+end
+
+function get_power():
+  return local_power
 end`);
   assert.deepEqual(result.errors, []);
-  assert.equal(result.warnings.length, 1);
-  assert.match(result.warnings[0].message, /'local_power' 은\(는\) hero 의 지역 변수입니다/);
+  assert.equal(result.warnings.length, 2);
+  for (const warning of result.warnings) {
+    assert.equal(warning.code, 'object-local-reference');
+    assert.match(warning.message, /'local_power' 은\(는\) hero 의 지역 변수입니다/);
+  }
 });
 
 test('여러 오브젝트가 같은 이름의 로컬 변수를 가지면 어느 것인지 알 수 없다', () => {

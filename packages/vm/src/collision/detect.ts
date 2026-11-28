@@ -128,12 +128,17 @@ export function rectsOverlap(r1: Rect, r2: Rect): boolean {
 
 export class CollisionSystem {
   private readonly masks: MaskStore;
+  private readonly textHit: (entity: Entity, x: number, y: number) => boolean | null;
   // Invalidate collision results every tick.
   private frame = 0;
   private readonly memo = new Map<string, boolean>();
 
-  constructor(masks: MaskStore) {
+  constructor(
+    masks: MaskStore,
+    textHit: (entity: Entity, x: number, y: number) => boolean | null = () => null,
+  ) {
     this.masks = masks;
+    this.textHit = textHit;
   }
 
   beginFrame(): void {
@@ -267,6 +272,8 @@ export class CollisionSystem {
     const localX = (m[3]! * dx - m[2]! * dy) / det;
     const localY = (m[0]! * dy - m[1]! * dx) / det;
     if (entity.type === 'textBox') {
+      const drawn = this.textHit(entity, localX, localY);
+      if (drawn !== null) return drawn;
       const halfW = entity.width / 2;
       const halfH = entity.height / 2;
       const offset = textBoxOffset(entity);

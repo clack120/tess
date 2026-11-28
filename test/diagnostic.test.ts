@@ -250,6 +250,32 @@ end`);
   assert.match(sceneWarning.help!, /when start do/);
   assert.equal(sceneWarning.related?.length, 1);
 
+  const explicitStart = compileProject(`scene "first":
+  object "o":
+    when start do
+      jump "first"
+    end
+    when scene start do
+      say 1
+    end
+  end
+end`);
+  assert.ok(explicitStart.warnings.every(item => item.code !== 'W0005'));
+
+  const conditionalStart = compileProject(`scene "first":
+  object "o":
+    when start do
+      if false:
+        jump "first"
+      end
+    end
+    when scene start do
+      say 1
+    end
+  end
+end`);
+  assert.ok(conditionalStart.warnings.some(item => item.code === 'W0005'));
+
   const values = Array.from({ length: 5001 }, (_, index) => index).join(', ');
   const list = compileProject(`list too_many = [${values}]`);
   const limit = list.errors.find(item => item.code === 'E0008')!;

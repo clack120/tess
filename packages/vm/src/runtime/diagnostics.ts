@@ -34,13 +34,21 @@ export function runtimeValue(value: unknown): RuntimeValue {
   }
 }
 
+// Stable identifiers let hosts distinguish failures without parsing display text.
+export type RuntimeErrorCode =
+  | 'missing_signal' | 'missing_variable' | 'missing_list' | 'list_index' | 'missing_table' | 'table_column'
+  | 'table_cell' | 'table_insert_column' | 'invalid_increment' | 'math_domain'
+  | 'text_index' | 'text_range' | 'negative_repeat' | 'empty_question';
+
 export class RuntimeBlockError extends Error {
   readonly inputs: Record<string, RuntimeValue>;
   readonly blockType: string;
-  constructor(message: string, blockType: string, inputs: Record<string, unknown>) {
+  readonly code: RuntimeErrorCode;
+  constructor(message: string, blockType: string, inputs: Record<string, unknown>, code: RuntimeErrorCode) {
     super(message);
     this.name = 'EntryRuntimeError';
     this.blockType = blockType;
+    this.code = code;
     this.inputs = Object.fromEntries(Object.entries(inputs).map(([name, value]) => [name, runtimeValue(value)]));
   }
 }

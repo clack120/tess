@@ -642,6 +642,7 @@ end`, { path: 'x.etp' });
 end`, { path: 'x.etp' });
   const refiner = inexact.project!.functions[0];
   assert.ok(refiner.content.includes('거듭제곱 다듬기'));
+  assert.ok(!refiner.content.includes('[Entropy]'));
   assert.equal(refiner.type, 'value');
   assert.deepEqual(verifyEntryProject(inexact.project!), []);
 });

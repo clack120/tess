@@ -1,27 +1,49 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileProject } from '@entropy/compiler';
+import { decompileProject } from '@entropy/decompiler';
 import { Vm } from '@entropy/vm';
 import { scenarios } from './fixtures/entry-function-scheduling.ts';
 
 const values = (vm: Vm) => ['calls', 'out', 'after'].map(name => vm.variables.find(v => v.name === name)!.value);
 
-function machine(name: string, kernel = false, liveEditing = false): Vm {
+function machine(name: string, kernel = false, liveEditing = false, roundtrip = false): Vm {
   const scenario = scenarios.find(item => item.name === name)!;
   const compiled = compileProject(scenario.source);
   assert.deepEqual(compiled.errors, []);
-  const project = compiled.project!;
+  let project = compiled.project!;
   if (name === 'raw_value_statement') {
     const object = project.objects[0]!;
     const blocks = JSON.parse(String(object.script));
     blocks[0][1] = blocks[0][1].params[1];
     object.script = JSON.stringify(blocks);
   }
+  if (roundtrip) {
+    const exported = decompileProject(project, [], { inline: true });
+    assert.deepEqual(exported.warnings, []);
+    const rebuilt = compileProject(exported.source);
+    assert.deepEqual(rebuilt.errors, []);
+    project = rebuilt.project!;
+  }
   const vm = new Vm({ renderer: null, audio: null, kernel, liveEditing });
   vm.load(project as never);
   vm.start();
   return vm;
 }
+
+test('an empty value function keeps the native scheduling trace through ETP', () => {
+  const original = machine('empty_value');
+  const rebuilt = machine('empty_value', false, false, true);
+  for (let tick = 0; tick < 8; tick++) {
+    original.tick(undefined, false);
+    rebuilt.tick(undefined, false);
+    assert.deepEqual(values(rebuilt), values(original));
+    original.flushFunctionCalls();
+    rebuilt.flushFunctionCalls();
+    assert.deepEqual(values(rebuilt), values(original));
+  }
+  assert.deepEqual(rebuilt.errors, []);
+});
 
 for (const scenario of scenarios) {
   test(`Entry function scheduling: ${scenario.name}`, () => {

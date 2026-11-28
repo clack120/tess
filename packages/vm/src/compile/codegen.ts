@@ -131,7 +131,8 @@ function slotTrick(param: unknown): 'continue' | 'break' | null {
 function inertValue(param: unknown): boolean {
   if (!isBlock(param)) return true;
   if ((param.statements?.length ?? 0) > 0) return false;
-  if (param.type.startsWith('func_') || param.type === 'calc_rand') return false;
+  if (param.type.startsWith('func_') || param.type === 'calc_rand' ||
+      param.type === 'message_cast' || param.type === 'message_cast_wait') return false;
   if (param.type === 'function_field_string' || param.type === 'function_field_boolean') {
     return false;
   }
@@ -655,9 +656,9 @@ export class Codegen {
           : `O.listReplace(e, ${this.varRef(p[0])}, ${this.numeral(p[1])}, ${this.raw(p[2])});`);
       }
       case 'show_list':
-        return line(`O.showVariable(e, ${this.varRef(p[0])}, true);`);
+        return line(`O.showList(${this.varRef(p[0])}, true);`);
       case 'hide_list':
-        return line(`O.showVariable(e, ${this.varRef(p[0])}, false);`);
+        return line(`O.showList(${this.varRef(p[0])}, false);`);
       case 'ask_and_wait':
         return line(`yield* O.askAndWait(e, ${this.raw(p[0])});`);
       case 'set_visible_answer':
@@ -821,7 +822,7 @@ export class Codegen {
     this.loopDepth -= 1;
     const head = spins ? `, s${depth} = 0, m${depth} = O.frame()` : '';
     return (
-      `${ind}{ let ${varName} = Math.floor(${count})${head};\n` +
+      `${ind}{ let ${varName} = O.repeatCount(${count})${head};\n` +
       `${ind}while (${varName} !== 0 && !(${varName} < 0)) { ${varName}--;\n` +
       (spins ? this.spinGuard(depth, ind) : '') +
       inner +
@@ -1001,6 +1002,11 @@ export class Codegen {
     const p = block.params;
 
     switch (block.type) {
+      case 'message_cast':
+        return { code: `O.castMessage(${this.field(p[0])})`, kind: 'any' };
+      case 'message_cast_wait':
+        // Value slots get the scope immediately after starting the receivers.
+        return { code: `(O.castMessageInput(${this.field(p[0])}), {})`, kind: 'any' };
       case 'number':
       case 'text':
         return { code: literal(p[0] ?? ''), kind: 'any', constant: (p[0] ?? '') as string };
@@ -1074,7 +1080,7 @@ export class Codegen {
       case 'combine_something':
         return { code: `(${this.str(p[1])} + ${this.str(p[3])})`, kind: 'str' };
       case 'char_at':
-        return { code: `O.charAt(${this.str(p[1])}, ${this.num(p[3])})`, kind: 'str' };
+        return { code: `O.charAt(${this.str(p[1])}, ${this.num(p[3])})`, kind: 'any' };
       case 'substring':
         return {
           code: `O.substring(${this.str(p[1])}, ${this.num(p[3])}, ${this.num(p[5])})`,

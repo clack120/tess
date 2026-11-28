@@ -1838,6 +1838,29 @@ test('렌더러가 없으면 선언한 순서로 찾는다', () => {
   );
 });
 
+test('투명 글상자의 빈 픽셀은 뒤의 오브젝트로 클릭을 넘긴다', () => {
+  const result = compileProject(COVERED.replace('      order first\n', ''));
+  assert.ok(result.project);
+  let ink = false;
+  const renderer = {
+    ...fakeStage(),
+    textHitAt(entity: { target: { name: string } }) {
+      return entity.target.name === '가림막' ? ink : null;
+    },
+  };
+  const machine = new Vm({ renderer: renderer as never, audio: null });
+  machine.load(result.project as never);
+  machine.start();
+  machine.tick();
+  const x = stage.worldWidth / 2, y = stage.worldHeight / 2;
+  assert.notEqual(machine.entityAtPoint(x, y)?.target.name, '가림막');
+  const front = machine.targets.find(target => target.name === '가림막')!.entity;
+  assert.equal(machine.collision.touchingMouse(front, x, y), false);
+  ink = true;
+  assert.equal(machine.entityAtPoint(x, y)?.target.name, '가림막');
+  assert.equal(machine.collision.touchingMouse(front, x, y), true);
+});
+
 // Check clone bubble cleanup through removeEntity because PixiRenderer needs a browser.
 test('복제본을 지우면 그 말풍선도 함께 지운다', () => {
   const renderer = fs.readFileSync(
@@ -2509,18 +2532,11 @@ test('부스트 모드는 채우기를 칠하는 방식까지 고른다', () => 
   assert.deepEqual(canvas, nonzeroParts(points));
 });
 
-// Canvas centers the first line; boost centers the whole text block.
-test('글상자의 세로 정렬과 폭도 부스트 모드를 따라간다', () => {
+test('글상자의 폭도 부스트 모드를 따라간다', () => {
   const source = fs.readFileSync(
     path.join(root, 'packages/vm/src/render/renderer.ts'),
     'utf-8',
   );
-  const block = source.slice(
-    source.indexOf('private syncTextBox'),
-    source.indexOf('private textResolution'),
-  );
-  assert.match(block, /this\.options\.boost === false/, '세로 정렬이 부스트를 봅니다');
-  assert.match(block, /text\.anchor\.set\(anchorX, 0\.5\)/, '부스트 모드는 가운데 정렬입니다');
   const measure = source.slice(
     source.indexOf('measureTextBox(entity: Entity)'),
     source.indexOf('private measureWhole'),
@@ -2594,6 +2610,13 @@ test('벡터는 목표 픽셀 크기를 박은 사본으로 굽는다', () => {
   const second = decodeURIComponent(had.slice(had.indexOf(',') + 1));
   assert.match(second, /width="100"/);
   assert.doesNotMatch(second, /width="10"(?!0)/);
+
+  const intrinsic = sizedVector('<svg width="100" height="80"><path d="M0 0H100V80H0Z"/></svg>', 800, 640);
+  const intrinsicMarkup = decodeURIComponent(intrinsic.slice(intrinsic.indexOf(',') + 1));
+  assert.match(intrinsicMarkup, /viewBox="0 0 100 80"/, 'preserve path coordinates when the original SVG has no viewBox');
+  assert.match(intrinsicMarkup, /width="800" height="640"/);
+  const empty = sizedVector('<svg width="10" height="4"/>', 100, 40);
+  assert.match(decodeURIComponent(empty.slice(empty.indexOf(',') + 1)), /viewBox="0 0 10 4" width="100" height="40"\/>$/);
 
   // Fall back to the original URL when no root SVG element exists.
   assert.equal(sizedVector('그림이 아님', 10, 10), '');

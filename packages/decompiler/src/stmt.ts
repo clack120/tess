@@ -166,7 +166,8 @@ function inertValue(param: unknown): boolean {
     if (value === null || value === undefined || typeof value !== "object") continue;
     const block = value as RawBlock;
     if ((block.statements?.length ?? 0) > 0) return false;
-    if (block.type?.startsWith("func_") || block.type === "calc_rand") return false;
+    if (block.type?.startsWith("func_") || block.type === "calc_rand" ||
+        block.type === "message_cast" || block.type === "message_cast_wait") return false;
     if (
       block.type === "function_field_string" ||
       block.type === "function_field_boolean"

@@ -162,7 +162,7 @@ export function requirePowerRefiner(ctx: Context): CompiledFunction {
   );
 
   const field = ctx.block('function_field_label', [
-    '[Entropy] 거듭제곱 다듬기',
+    '거듭제곱 다듬기',
     params.reduceRight<EntryParam>(
       (next, name) => ctx.block('function_field_string', [ctx.block(paramTypes.get(name)!, []), next]),
       null,
@@ -177,7 +177,7 @@ export function requirePowerRefiner(ctx: Context): CompiledFunction {
 
   const fn = {
     id,
-    name: '[Entropy] 거듭제곱 다듬기',
+    name: '거듭제곱 다듬기',
     generated: true,
     type: 'value',
     params,

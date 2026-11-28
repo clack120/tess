@@ -205,6 +205,7 @@ export interface VarDeclNode extends Base {
   type: 'VarDecl';
   name: string;
   displayName: string | null;
+  savedObjectId?: string;
   scope: StorageScope | null;
   value: Expr;
   range: { min: Expr; max: Expr } | null;
@@ -218,6 +219,7 @@ export interface ListDeclNode extends Base {
   type: 'ListDecl';
   name: string;
   displayName: string | null;
+  savedObjectId?: string;
   scope: StorageScope | null;
   value: Expr;
   shown: boolean;

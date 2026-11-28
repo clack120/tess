@@ -122,6 +122,16 @@ function visitCalls(value: unknown, names: Set<string>, found: (call: CallNode) 
 function diagnoseInitialSceneEvents(ctx: Context): void {
   const firstScene = ctx.scenes[0];
   if (!firstScene) return;
+  // An unconditional first action that starts the same scene explicitly
+  // fires its scene-start handlers in EntryJS during startup.
+  const startsFirstScene = ctx.objects.some((object) =>
+    object.scene.id === firstScene.id && object.node.body.some((member) => {
+      if (member.type !== 'Event' || member.event !== 'start') return false;
+      const first = member.body[0];
+      return first?.type === 'Jump' && typeof first.target !== 'string'
+        && first.target.type === 'String' && first.target.value === firstScene.name;
+    }));
+  if (startsFirstScene) return;
   const handlers: Array<{ objectName: string; node: Node }> = [];
   for (const object of ctx.objects) {
     if (object.scene.id !== firstScene.id) continue;
