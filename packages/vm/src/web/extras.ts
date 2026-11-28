@@ -136,9 +136,18 @@ export const EXTRAS_DIALOG_STYLE = `
 .entropy-ask-permission .entropy-permit-keep[hidden] { display: none !important; }
 
 .entropy-ask-permission .entropy-permit-keep input {
+  -webkit-appearance: checkbox;
+  -moz-appearance: checkbox;
+  appearance: auto;
+  display: inline-block;
+  position: static;
+  flex: none;
   width: 15px;
   height: 15px;
   margin: 0;
+  padding: 0;
+  opacity: 1;
+  visibility: visible;
   accent-color: #4f80ff;
   cursor: pointer;
 }
